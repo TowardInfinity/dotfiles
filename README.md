@@ -66,10 +66,9 @@ or a box you'll destroy tomorrow. Not worth it for a machine you work on: the
 files stop being tracked, local edits are invisible to git, and updating means
 re-running the installer instead of `git pull`.
 
-```bash
+```sh
 # throwaway machine, no repo kept
-gh api repos/TowardInfinity/dotfiles/contents/bootstrap.sh \
-  -H "Accept: application/vnd.github.raw" | bash -s -- --copy
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)" -- --copy
 ```
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default

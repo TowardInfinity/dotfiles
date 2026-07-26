@@ -24,22 +24,60 @@ The shells are *not* shared. Almost nothing overlaps between them (Homebrew vs
 apt, `launchctl` vs systemd, `pbcopy` vs OSC 52), so two files beat one file
 full of `if [[ $OSTYPE ]]`.
 
-## Install
+## Quick start
 
-Same two commands on either OS:
+**This repo is private**, so there is no `curl … | bash` one-liner — an
+unauthenticated fetch of `bootstrap.sh` returns 404. Authenticate once, then a
+single command does everything.
+
+### One command, via `gh`
 
 ```bash
-git clone git@github.com:TowardInfinity/dotfiles.git ~/Codes/Projects/dotfiles
-cd ~/Codes/Projects/dotfiles
-./install.sh --dry      # see what it would do
-./install.sh            # do it
+gh auth login   # once per machine
+gh api repos/TowardInfinity/dotfiles/contents/bootstrap.sh \
+  -H "Accept: application/vnd.github.raw" | bash -s -- --deps
 ```
 
-Existing files are moved to `<path>.backup.<timestamp>` rather than
-overwritten, and re-running is safe — links already pointing at the repo are
-left alone.
+`gh` supplies the auth, so this works on a private repo. It clones the repo,
+installs the packages the configs expect, and symlinks everything.
+
+### One command, via SSH key
+
+If the machine already has an SSH key on your GitHub account
+(check with `ssh -T git@github.com`):
+
+```bash
+git clone git@github.com:TowardInfinity/dotfiles.git ~/Codes/dotfiles \
+  && ~/Codes/dotfiles/bootstrap.sh --deps
+```
+
+### Options
+
+| Flag | Effect |
+|---|---|
+| *(none)* | clone or update, then link |
+| `--deps` | also install packages — brew on macOS, apt + the Neovim tarball on Ubuntu |
+| `--dry` | print what would happen, change nothing |
+
+Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default
+(`~/Codes/Projects/dotfiles` on macOS, `~/Codes/dotfiles` on Linux).
+
+**Always safe to re-run.** Existing files are moved to
+`<path>.backup.<timestamp>` rather than overwritten, and links already pointing
+at the repo are left alone. Try `--dry` first if unsure.
+
+### Manual, if you'd rather
+
+```bash
+git clone git@github.com:TowardInfinity/dotfiles.git ~/Codes/dotfiles
+cd ~/Codes/dotfiles
+./install.sh --dry
+./install.sh
+```
 
 ### Prerequisites
+
+`--deps` installs these for you; listed here for reference.
 
 macOS:
 

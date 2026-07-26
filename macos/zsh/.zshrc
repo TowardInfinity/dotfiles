@@ -81,11 +81,13 @@ test -e "${HOME}/.iterm2_shell_integration.zsh" && source "${HOME}/.iterm2_shell
 export PATH=$HOME/.opencode/bin:$PATH
 
 # fnm — Node version manager (auto-switches on cd into dirs with .nvmrc/.node-version)
-eval "$(fnm env --use-on-cd --shell zsh)"
+# Guarded: without the check, a machine that has the dotfiles but not yet the
+# tools prints "command not found: fnm" on every single shell start.
+command -v fnm >/dev/null && eval "$(fnm env --use-on-cd --shell zsh)"
 
 # ──── CLI power pack (added 2026-07-19) ──────────────────────
-eval "$(fzf --zsh)"          # Ctrl-R fuzzy history, Ctrl-T file picker
-eval "$(zoxide init zsh)"    # z <dir> — smart cd
+command -v fzf    >/dev/null && eval "$(fzf --zsh)"       # Ctrl-R history, Ctrl-T files
+command -v zoxide >/dev/null && eval "$(zoxide init zsh)" # z <dir> — smart cd
 alias ls='eza --group-directories-first'
 alias ll='eza -lAh --git --group-directories-first'
 alias la='eza -A'

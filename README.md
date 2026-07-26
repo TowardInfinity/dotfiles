@@ -92,27 +92,26 @@ all live in the public installer, so there is exactly one copy of that logic.
 
 ### Prerequisites
 
-`--deps` installs these for you; listed here for reference.
+`--deps` installs all of this; listed here for reference. The list is driven by
+what the shell configs actually call — if `.zshrc` references a tool, it is
+here, otherwise a fresh machine errors on every prompt.
 
-macOS:
+| | macOS | Linux |
+|---|---|---|
+| editor | neovim | neovim (upstream tarball — apt's is too old) |
+| terminal | tmux, ghostty, JetBrainsMono Nerd Font | tmux |
+| shell | Oh My Zsh | Oh My Zsh + zsh-autosuggestions, zsh-syntax-highlighting |
+| CLI | fzf, zoxide, eza, bat, ripgrep, fd, jq, lazygit, btop, glow | jq, ripgrep, glow |
+| languages | uv, pnpm, fnm, go | uv, pnpm, fnm, go |
+| git | git, gh | git, gh |
 
-```bash
-brew install neovim tmux fzf zoxide eza bat lazygit ripgrep
-brew install --cask ghostty
-```
+Version managers rather than languages: **fnm** for Node and **uv** for Python,
+so versions stay per-project. Java is left to SDKMAN, which `.zshrc` sources if
+present.
 
-Linux (Ubuntu):
-
-```bash
-sudo apt install -y tmux zsh git curl
-# neovim: use the tarball or a PPA — apt's is usually too old for this config
-```
-
-Both need Oh My Zsh:
-
-```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-```
+Already-installed tools are skipped. The check looks in `~/.local/bin`,
+`~/go/bin` and the pnpm directory as well as `PATH`, because a non-interactive
+shell has not sourced `.zshrc` and a bare `command -v` would miss them.
 
 The status bars assume a Nerd Font — **JetBrainsMono Nerd Font** — installed on
 whatever machine you *look* at, i.e. the Mac. Servers need nothing extra;

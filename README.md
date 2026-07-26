@@ -14,7 +14,6 @@ macos/
 linux/
   zsh/.zshrc       apt, ss, TERM fallback, glow-backed cat
   tmux/tmux.conf   prefix Ctrl-b, OSC 52 clipboard, targets tmux 3.2a
-bootstrap.sh       new machine: clone + optionally install packages + link
 install.sh         detects the OS and links the right set
 ```
 
@@ -28,30 +27,24 @@ full of `if [[ $OSTYPE ]]`.
 
 ## Quick start
 
-**This repo is private**, so there is no `curl … | bash` one-liner — an
-unauthenticated fetch of `bootstrap.sh` returns 404. Authenticate once, then a
-single command does everything.
+One command on a new machine — macOS or Ubuntu:
 
-### One command, via `gh`
-
-```bash
-gh auth login   # once per machine
-gh api repos/TowardInfinity/dotfiles/contents/bootstrap.sh \
-  -H "Accept: application/vnd.github.raw" | bash -s -- --deps
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)"
 ```
 
-`gh` supplies the auth, so this works on a private repo. It clones the repo,
-installs the packages the configs expect, and symlinks everything.
+With packages installed too:
 
-### One command, via SSH key
-
-If the machine already has an SSH key on your GitHub account
-(check with `ssh -T git@github.com`):
-
-```bash
-git clone git@github.com:TowardInfinity/dotfiles.git ~/Codes/dotfiles \
-  && ~/Codes/dotfiles/bootstrap.sh --deps
+```sh
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)" -- --deps
 ```
+
+That installer lives in a small **public** repo,
+[`dotfiles-install`](https://github.com/TowardInfinity/dotfiles-install), so it
+can be `curl`'d without credentials. **This** repo stays private, so the machine
+still needs GitHub access before the configs can be fetched — `gh auth login`
+or an SSH key on the account. The installer checks up front and prints the fix
+rather than failing halfway through.
 
 ### Options
 
@@ -71,7 +64,7 @@ and the tracked file are the same file. Edit either path, commit from the repo,
 `--copy` skips it — real files, nothing left behind. Worth it for a container
 or a box you'll destroy tomorrow. Not worth it for a machine you work on: the
 files stop being tracked, local edits are invisible to git, and updating means
-re-running bootstrap instead of `git pull`.
+re-running the installer instead of `git pull`.
 
 ```bash
 # throwaway machine, no repo kept
@@ -94,6 +87,9 @@ cd ~/Codes/dotfiles
 ./install.sh --dry
 ./install.sh
 ```
+
+`install.sh` only does the linking. Cloning, package installation and `--copy`
+all live in the public installer, so there is exactly one copy of that logic.
 
 ### Prerequisites
 

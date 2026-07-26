@@ -1,8 +1,9 @@
 # dotfiles
 
-Terminal setup for macOS and Linux — Ghostty, zsh, tmux, Neovim. One
-`git clone` plus `./install.sh` gets a new Mac, or a fresh server, to the same
-place. Currently on: this MacBook, and the `a1` / `v1` / `v2` Ubuntu boxes.
+Terminal setup for macOS and Linux — Ghostty, zsh, tmux, Neovim. One command
+gets a new Mac, or a fresh Ubuntu server, to the same place — see
+[Quick start](#quick-start). Currently on: this MacBook and the `a1` / `v1` /
+`v2` Ubuntu boxes.
 
 ```
 common/nvim/       NvChad-based Neovim config — shared by macOS and Linux
@@ -13,6 +14,7 @@ macos/
 linux/
   zsh/.zshrc       apt, ss, TERM fallback, glow-backed cat
   tmux/tmux.conf   prefix Ctrl-b, OSC 52 clipboard, targets tmux 3.2a
+bootstrap.sh       new machine: clone + optionally install packages + link
 install.sh         detects the OS and links the right set
 ```
 

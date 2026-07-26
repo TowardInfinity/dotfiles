@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Backups created by install.sh
+*.backup.*
+
+# tmux runtime state — plugins are fetched by TPM, resurrect snapshots are
+# machine-local. Only the .conf files belong in here.
+tmux/plugins/
+tmux/resurrect/
+
+# nvim runtime state. lazy-lock.json IS tracked on purpose (it pins every
+# plugin to a known-good commit); everything below is generated.
+nvim/.git/
+nvim/lazy/
+nvim/mason/
+nvim/base46/
+nvim/spell/
+
+# Ghostty writes nothing here, but it does keep old configs around
+ghostty/*.pre-*

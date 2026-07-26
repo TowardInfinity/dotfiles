@@ -21,6 +21,14 @@ return {
 
   {
     "nvim-treesitter/nvim-treesitter",
+    -- Pin the branch. Upstream has made `main` (the rewrite) the default, but
+    -- NvChad v2.5 drives the old API — `require("nvim-treesitter.configs")`
+    -- exists only on `master`. Without this, a fresh clone on a new machine
+    -- silently gets `main` and every parser fails with:
+    --   module 'nvim-treesitter.configs' not found
+    -- lazy-lock.json records the branch too, but only `:Lazy restore` honours
+    -- it; `:Lazy sync` follows the remote default. This makes it deterministic.
+    branch = "master",
     -- opts MUST be a function here. NvChad declares
     --   opts = function() return require "nvchad.configs.treesitter" end
     -- which ignores its arguments and returns a fresh table — so a plain

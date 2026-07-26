@@ -30,13 +30,13 @@ full of `if [[ $OSTYPE ]]`.
 One command on a new machine — macOS or Ubuntu:
 
 ```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)"
+sh -c "$(curl -fsSL https://toin.in/install.sh)"
 ```
 
 With packages installed too:
 
 ```sh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)" -- --deps
+sh -c "$(curl -fsSL https://toin.in/install.sh)" -- --deps
 ```
 
 That installer lives in a small **public** repo,
@@ -68,7 +68,7 @@ re-running the installer instead of `git pull`.
 
 ```sh
 # throwaway machine, no repo kept
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/TowardInfinity/dotfiles-install/main/install.sh)" -- --copy
+sh -c "$(curl -fsSL https://toin.in/install.sh)" -- --copy
 ```
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default

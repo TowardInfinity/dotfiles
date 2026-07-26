@@ -121,6 +121,22 @@ the local terminal starts turning mouse movement into fake keystrokes
 (`zsh: command not found: 35`). `.zshrc` clears mouse mode before every prompt
 to make that unreachable; `fixterm` is the manual rescue.
 
+**nvim-treesitter must stay on `master`.** Upstream made `main` (the rewrite)
+the default branch, but NvChad v2.5 drives the old API and
+`require("nvim-treesitter.configs")` exists only on `master`. The spec pins
+`branch = "master"` for this reason. Without it a fresh clone installs `main`,
+every parser fails with *module 'nvim-treesitter.configs' not found*, and you
+get zero parsers. `lazy-lock.json` records the branch too, but only
+`:Lazy restore` honours it — `:Lazy sync` follows the remote default.
+
+**Switching a machine off another nvim distro? Clear `~/.local/share/nvim/site/`.**
+nvim-treesitter's `main` branch installs parsers and queries there, and `site/`
+sits *earlier* on the runtimepath than the plugin directory — so leftovers
+shadow the new ones. On a1 this surfaced as
+`Query error … Invalid node type "except*"` for Python: a four-day-old parser
+being used against a current query. Deleting `site/parser`, `site/parser-info`
+and `site/queries` fixed it.
+
 **`nvim/lua/configs/tscompat.lua` is load-bearing.** nvim-treesitter's master
 branch registers query directives with `all = false`, which Neovim 0.12 removed
 — directives now receive a *list* of nodes, and the plugin still treats them as

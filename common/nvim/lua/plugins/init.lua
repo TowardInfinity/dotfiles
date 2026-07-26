@@ -39,19 +39,75 @@ return {
       opts = opts or {}
       opts.ensure_installed = {
         -- editor / config
-        "lua", "luadoc", "vim", "vimdoc", "query", "regex",
-        "bash", "json", "jsonc", "yaml", "toml", "dockerfile",
-        "gitignore", "gitcommit", "git_rebase", "diff",
+        "lua",
+        "luadoc",
+        "vim",
+        "vimdoc",
+        "query",
+        "regex",
+        "bash",
+        "json",
+        "jsonc",
+        "yaml",
+        "toml",
+        "dockerfile",
+        "gitignore",
+        "gitcommit",
+        "git_rebase",
+        "diff",
         -- work stack
-        "java", "kotlin", "groovy", -- Spring Boot + Gradle Kotlin DSL
-        "typescript", "tsx", "javascript", "jsdoc",
-        "html", "css", "scss",
-        "python", "go", "gomod", "gosum", "sql",
+        "java",
+        "kotlin",
+        "groovy", -- Spring Boot + Gradle Kotlin DSL
+        "typescript",
+        "tsx",
+        "javascript",
+        "jsdoc",
+        "html",
+        "css",
+        "scss",
+        "python",
+        "go",
+        "gomod",
+        "gosum",
+        "sql",
         -- writing
-        "markdown", "markdown_inline",
+        "markdown",
+        "markdown_inline",
       }
       opts.highlight = { enable = true }
       opts.indent = { enable = true }
+      -- Syntax-node text objects, provided by nvim-treesitter-textobjects.
+      opts.textobjects = {
+        select = {
+          enable = true,
+          lookahead = true, -- jump forward to the next one if not inside it
+          keymaps = {
+            ["af"] = "@function.outer",
+            ["if"] = "@function.inner",
+            ["ac"] = "@class.outer",
+            ["ic"] = "@class.inner",
+            ["aa"] = "@parameter.outer",
+            ["ia"] = "@parameter.inner",
+            ["ai"] = "@conditional.outer",
+            ["ii"] = "@conditional.inner",
+            ["al"] = "@loop.outer",
+            ["il"] = "@loop.inner",
+          },
+        },
+        move = {
+          enable = true,
+          set_jumps = true, -- so <C-o> comes back
+          goto_next_start = { ["]f"] = "@function.outer", ["]c"] = "@class.outer", ["]a"] = "@parameter.inner" },
+          goto_previous_start = { ["[f"] = "@function.outer", ["[c"] = "@class.outer", ["[a"] = "@parameter.inner" },
+        },
+        swap = {
+          enable = true,
+          -- Reorder function arguments without touching the commas.
+          swap_next = { ["<leader>na"] = "@parameter.inner" },
+          swap_previous = { ["<leader>pa"] = "@parameter.inner" },
+        },
+      }
       return opts
     end,
     config = function(_, opts)
@@ -86,6 +142,8 @@ return {
         "pyright",
         "ruff",
         "jdtls",
+        "java-debug-adapter", -- nvim-jdtls: debugging
+        "java-test", -- nvim-jdtls: run/debug JUnit from the buffer
         -- formatters
         "stylua",
         "prettierd",
@@ -117,8 +175,22 @@ return {
     event = "VeryLazy",
     opts = { modes = { char = { enabled = false } } }, -- leave f/t/F/T alone
     keys = {
-      { "s", function() require("flash").jump() end, mode = { "n", "x", "o" }, desc = "Flash jump" },
-      { "S", function() require("flash").treesitter() end, mode = { "n", "x", "o" }, desc = "Flash treesitter" },
+      {
+        "s",
+        function()
+          require("flash").jump()
+        end,
+        mode = { "n", "x", "o" },
+        desc = "Flash jump",
+      },
+      {
+        "S",
+        function()
+          require("flash").treesitter()
+        end,
+        mode = { "n", "x", "o" },
+        desc = "Flash treesitter",
+      },
     },
   },
 
@@ -147,6 +219,99 @@ return {
     opts = { signs = false },
     keys = {
       { "<leader>ft", "<cmd>TodoTelescope<cr>", desc = "Find TODOs" },
+    },
+  },
+
+  -- ══════════════════════════════════════════════════════════
+  -- Syntax-aware editing
+  -- ══════════════════════════════════════════════════════════
+
+  -- Select and move by syntax node instead of by line:
+  --   vif / vaf  inner / around function      ]f [f  next / prev function
+  --   vic / vac  inner / around class         ]c [c  next / prev class
+  --   via / vaa  inner / around argument      ]a [a  next / prev argument
+  -- `daf` deletes a whole function regardless of how many lines it spans —
+  -- the single biggest editing win available in a treesitter config.
+  {
+    "nvim-treesitter/nvim-treesitter-textobjects",
+    branch = "master", -- must match nvim-treesitter's pinned branch
+    dependencies = { "nvim-treesitter/nvim-treesitter" },
+    event = { "BufReadPost", "BufNewFile" },
+  },
+
+  -- Auto-close and auto-rename JSX/HTML tags. Typing <div> gives you </div>,
+  -- and renaming one end renames the other. Earns its place on the Workers /
+  -- React side of things.
+  {
+    "windwp/nvim-ts-autotag",
+    ft = { "html", "xml", "javascriptreact", "typescriptreact", "svelte", "vue", "markdown" },
+    opts = {},
+  },
+
+  -- ══════════════════════════════════════════════════════════
+  -- Writing & history
+  -- ══════════════════════════════════════════════════════════
+
+  -- Renders Markdown in the buffer — headings, tables, code blocks, callouts.
+  -- Worth it because a lot of Markdown editing here is the Obsidian vault.
+  -- <leader>um toggles back to raw text.
+  {
+    "MeanderingProgrammer/render-markdown.nvim",
+    ft = { "markdown" },
+    dependencies = { "nvim-treesitter/nvim-treesitter", "nvim-tree/nvim-web-devicons" },
+    opts = {
+      heading = { sign = false },
+      code = { sign = false, width = "block", left_pad = 1, right_pad = 1 },
+      checkbox = { enabled = true },
+    },
+  },
+
+  -- Browse the undo tree. options.lua enables persistent undo, which means
+  -- history survives closing the file — this is what makes that reachable.
+  {
+    "mbbill/undotree",
+    cmd = { "UndotreeToggle", "UndotreeShow" },
+    keys = {
+      { "<leader>uu", "<cmd>UndotreeToggle<cr>", desc = "Toggle undo tree" },
+    },
+  },
+
+  -- ══════════════════════════════════════════════════════════
+  -- Java / Spring Boot
+  -- ══════════════════════════════════════════════════════════
+
+  -- jdtls is not a normal language server: it wants a workspace per project
+  -- and exposes refactorings (extract method, organize imports) and a test
+  -- runner that the plain LSP protocol has no way to express. nvim-jdtls is
+  -- the client for those. All the actual setup lives in ftplugin/java.lua,
+  -- which Neovim runs per Java buffer.
+  {
+    "mfussenegger/nvim-jdtls",
+    ft = "java",
+    dependencies = { "mfussenegger/nvim-dap" },
+  },
+
+  -- Required by nvim-jdtls for `test_nearest_method` / `test_class` — those
+  -- run through the debug adapter even when you are not debugging. No UI
+  -- configured; add nvim-dap-ui later if you want breakpoint inspection.
+  {
+    "mfussenegger/nvim-dap",
+    lazy = true,
+    keys = {
+      {
+        "<leader>Jb",
+        function()
+          require("dap").toggle_breakpoint()
+        end,
+        desc = "Java toggle breakpoint",
+      },
+      {
+        "<leader>Jd",
+        function()
+          require("dap").continue()
+        end,
+        desc = "Java debug continue",
+      },
     },
   },
 }

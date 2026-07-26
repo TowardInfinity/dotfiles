@@ -95,6 +95,82 @@ vim.api.nvim_create_autocmd({ "FocusGained", "TermClose", "TermLeave" }, {
   end,
 })
 
+-- ──── LSP niceties, per attached server ───────────────────────
+-- NvChad's own LspAttach handles its keymaps; this adds two things it doesn't.
+vim.api.nvim_create_autocmd("LspAttach", {
+  group = augroup "lsp_extras",
+  callback = function(args)
+    local client = vim.lsp.get_client_by_id(args.data.client_id)
+    if not client then
+      return
+    end
+
+    -- Inlay hints: parameter names and inferred types shown inline. Genuinely
+    -- useful in TypeScript, Go and Java where types are often implicit.
+    -- Off by default because it widens lines; <leader>uh toggles per buffer.
+    if client:supports_method "textDocument/inlayHint" then
+      vim.b[args.buf].inlay_hints_supported = true
+    end
+
+    -- Highlight other occurrences of the symbol under the cursor. Uses the
+    -- LSP's understanding, so it tracks scope rather than matching text.
+    if client:supports_method "textDocument/documentHighlight" then
+      local hl_group = augroup("lsp_doc_hl_" .. args.buf)
+      vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
+        group = hl_group,
+        buffer = args.buf,
+        callback = vim.lsp.buf.document_highlight,
+      })
+      vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+        group = hl_group,
+        buffer = args.buf,
+        callback = vim.lsp.buf.clear_references,
+      })
+      vim.api.nvim_create_autocmd("LspDetach", {
+        group = hl_group,
+        buffer = args.buf,
+        callback = function()
+          vim.lsp.buf.clear_references()
+          pcall(vim.api.nvim_del_augroup_by_name, "my_lsp_doc_hl_" .. args.buf)
+        end,
+      })
+    end
+  end,
+})
+
+-- ──── JSX comment syntax ──────────────────────────────────────
+-- Neovim comments natively (gcc/gc), but its commentstring is per-filetype, so
+-- in a .tsx file it always inserts // — wrong inside JSX, which needs {/* */}.
+--
+-- nvim-ts-context-commentstring is the usual fix; it did not resolve JSX
+-- context on this Neovim, returning "// %s" even with the cursor inside a
+-- jsx_element, in both its hook and autocmd modes. Rather than carry a plugin
+-- that silently does nothing, this walks the syntax tree directly.
+vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI", "BufEnter" }, {
+  group = augroup "jsx_commentstring",
+  pattern = { "*.tsx", "*.jsx" },
+  callback = function(args)
+    local ok, node = pcall(vim.treesitter.get_node)
+    if not ok or not node then
+      return
+    end
+    local in_jsx = false
+    while node do
+      local t = node:type()
+      if t == "jsx_element" or t == "jsx_fragment" or t == "jsx_self_closing_element" then
+        in_jsx = true
+        break
+      end
+      -- Stop climbing at a statement boundary: `return <div/>` is JS, not JSX.
+      if t == "return_statement" or t == "statement_block" or t == "program" then
+        break
+      end
+      node = node:parent()
+    end
+    vim.bo[args.buf].commentstring = in_jsx and "{/* %s */}" or "// %s"
+  end,
+})
+
 -- ══════════════════════════════════════════════════════════════
 -- User commands
 -- ══════════════════════════════════════════════════════════════

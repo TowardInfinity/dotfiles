@@ -29,14 +29,38 @@ local servers = {
 -- actually have a Tailwind config.
 vim.lsp.config("tailwindcss", {
   filetypes = {
-    "html", "css", "scss", "javascript", "javascriptreact",
-    "typescript", "typescriptreact", "svelte", "vue", "astro",
+    "html",
+    "css",
+    "scss",
+    "javascript",
+    "javascriptreact",
+    "typescript",
+    "typescriptreact",
+    "svelte",
+    "vue",
+    "astro",
   },
-  root_markers = {
-    "tailwind.config.js", "tailwind.config.cjs",
-    "tailwind.config.mjs", "tailwind.config.ts",
-    "postcss.config.js",
-  },
+  -- root_markers alone is not enough: with no marker found, the server still
+  -- starts in single-file mode and attaches to every .ts buffer. Resolving the
+  -- root ourselves and simply not calling on_dir means it never attaches
+  -- outside a real Tailwind project.
+  root_dir = function(bufnr, on_dir)
+    local markers = {
+      "tailwind.config.js",
+      "tailwind.config.cjs",
+      "tailwind.config.mjs",
+      "tailwind.config.ts",
+      "postcss.config.js",
+      "postcss.config.mjs",
+    }
+    local found = vim.fs.find(markers, {
+      upward = true,
+      path = vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr)),
+    })[1]
+    if found then
+      on_dir(vim.fs.dirname(found))
+    end
+  end,
 })
 
 -- JSON / YAML validated against SchemaStore, so package.json, tsconfig,
@@ -94,31 +118,11 @@ vim.lsp.config("gopls", {
   },
 })
 
--- Java. jdtls builds a compiled index per project; point it at a shared cache
--- dir keyed by project name so it never litters the repo.
-vim.lsp.config("jdtls", {
-  cmd = {
-    vim.fn.stdpath "data" .. "/mason/bin/jdtls",
-    "-data",
-    vim.fn.stdpath "cache" .. "/jdtls/" .. vim.fn.fnamemodify(vim.fn.getcwd(), ":p:h:t"),
-  },
-  settings = {
-    java = {
-      configuration = { updateBuildConfiguration = "interactive" },
-      format = { enabled = true },
-      signatureHelp = { enabled = true },
-      contentProvider = { preferred = "fernflower" }, -- readable decompiled .class
-      inlayHints = { parameterNames = { enabled = "literals" } },
-      completion = {
-        favoriteStaticMembers = {
-          "org.junit.jupiter.api.Assertions.*",
-          "org.mockito.Mockito.*",
-          "org.assertj.core.api.Assertions.*",
-        },
-      },
-    },
-  },
-})
+-- Java is deliberately NOT configured here. jdtls is driven by nvim-jdtls
+-- instead, from ftplugin/java.lua — it needs per-project workspaces, extension
+-- bundles for tests and debugging, and refactorings the plain LSP client
+-- cannot express. Enabling it in both places starts two clients on the same
+-- buffer, which manifests as duplicated completions and diagnostics.
 
 vim.lsp.enable(servers)
-vim.lsp.enable { "tailwindcss", "jsonls", "yamlls", "pyright", "ruff", "gopls", "jdtls" }
+vim.lsp.enable { "tailwindcss", "jsonls", "yamlls", "pyright", "ruff", "gopls" }

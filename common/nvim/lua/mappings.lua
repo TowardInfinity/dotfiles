@@ -79,6 +79,24 @@ map("n", "<leader>uv", function()
   vim.notify("diagnostic virtual text: " .. (not shown and "ON" or "OFF"))
 end, { desc = "Toggle diagnostic virtual text" })
 
+-- Inlay hints: inline parameter names and inferred types. Off by default
+-- because they widen lines; invaluable when reading unfamiliar TS/Go/Java.
+map("n", "<leader>uh", function()
+  if not vim.b.inlay_hints_supported then
+    vim.notify("no attached LSP supports inlay hints here", vim.log.levels.WARN)
+    return
+  end
+  local on = vim.lsp.inlay_hint.is_enabled { bufnr = 0 }
+  vim.lsp.inlay_hint.enable(not on, { bufnr = 0 })
+  vim.notify("inlay hints: " .. (not on and "ON" or "OFF"))
+end, { desc = "Toggle inlay hints" })
+
+map("n", "<leader>um", "<cmd>RenderMarkdown toggle<cr>", { desc = "Toggle markdown rendering" })
+
+-- ──── Folds (treesitter-driven, see options.lua) ──────────────
+map("n", "<leader>zr", "zR", { desc = "Open all folds" })
+map("n", "<leader>zm", "zM", { desc = "Close all folds" })
+
 -- ──── Search ──────────────────────────────────────────────────
 map("n", "<Esc>", "<cmd>noh<cr>", { desc = "Clear search highlight" })
 -- Replace the word under the cursor across the file
@@ -87,3 +105,29 @@ map("n", "<leader>rw", [[:%s/\<<C-r><C-w>\>//gI<Left><Left><Left>]], { desc = "R
 -- ──── Quickfix ────────────────────────────────────────────────
 map("n", "[q", "<cmd>cprev<cr>zz", { desc = "Prev quickfix item" })
 map("n", "]q", "<cmd>cnext<cr>zz", { desc = "Next quickfix item" })
+
+-- ──── which-key group labels ──────────────────────────────────
+-- Without these, pressing <leader> shows bare letters with no hint of what
+-- lives under them. Registered lazily so which-key's own setup wins if it
+-- loads later.
+vim.api.nvim_create_autocmd("User", {
+  pattern = "VeryLazy",
+  callback = function()
+    local ok, wk = pcall(require, "which-key")
+    if not ok then
+      return
+    end
+    pcall(wk.add, {
+      { "<leader>d", group = "diagnostics" },
+      { "<leader>f", group = "find (telescope)" },
+      { "<leader>s", group = "split / signature" },
+      { "<leader>u", group = "toggles" },
+      { "<leader>x", group = "trouble" },
+      { "<leader>z", group = "folds" },
+      { "<leader>J", group = "java (jdtls)" },
+      { "<leader>q", group = "quit" },
+      { "]", group = "next" },
+      { "[", group = "prev" },
+    })
+  end,
+})

@@ -57,9 +57,27 @@ git clone git@github.com:TowardInfinity/dotfiles.git ~/Codes/dotfiles \
 
 | Flag | Effect |
 |---|---|
-| *(none)* | clone or update, then link |
+| *(none)* | clone or update, then symlink |
 | `--deps` | also install packages — brew on macOS, apt + the Neovim tarball on Ubuntu |
 | `--dry` | print what would happen, change nothing |
+| `--copy` | keep no repo: fetch a tarball, copy files into place, discard it |
+
+### Why there's a clone at all
+
+The configs are **symlinks into the repo**, so `~/.config/nvim/lua/options.lua`
+and the tracked file are the same file. Edit either path, commit from the repo,
+`git pull` to update. The whole `.git` costs 352 KB.
+
+`--copy` skips it — real files, nothing left behind. Worth it for a container
+or a box you'll destroy tomorrow. Not worth it for a machine you work on: the
+files stop being tracked, local edits are invisible to git, and updating means
+re-running bootstrap instead of `git pull`.
+
+```bash
+# throwaway machine, no repo kept
+gh api repos/TowardInfinity/dotfiles/contents/bootstrap.sh \
+  -H "Accept: application/vnd.github.raw" | bash -s -- --copy
+```
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default
 (`~/Codes/Projects/dotfiles` on macOS, `~/Codes/dotfiles` on Linux).

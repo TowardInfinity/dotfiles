@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Symlink this repo's configs into place.
+# Symlink this repo's configs into place, picking the right set for the OS.
 #
 #   ./install.sh          link everything
 #   ./install.sh --dry    show what would happen, change nothing
 #
-# Existing files are moved aside to <path>.backup.<timestamp> — nothing is
-# ever overwritten silently. Re-running is safe: correct links are left alone.
+#   common/   linked everywhere      (nvim — it has no OS-specific anything)
+#   macos/    linked on Darwin only  (zsh, tmux, ghostty)
+#   linux/    linked on Linux only   (zsh, tmux — no ghostty, servers are headless)
+#
+# Existing files are moved aside to <path>.backup.<timestamp> — nothing is ever
+# overwritten silently. Re-running is safe: correct links are left alone.
 
 set -euo pipefail
 
@@ -14,6 +18,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 DRY=false
 [[ "${1:-}" == "--dry" ]] && DRY=true
+
+case "$(uname -s)" in
+  Darwin) OS=macos ;;
+  Linux)  OS=linux ;;
+  *) echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
+esac
 
 link() {
   local src="$REPO/$1" dst="$2"
@@ -23,17 +33,16 @@ link() {
     return 1
   fi
 
-  # Already pointing where we want it
   if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
-    printf '  \033[90mok\033[0m       %s\n' "$dst"
+    printf '  \033[90mok\033[0m       %s\n' "${dst/#$HOME/\~}"
     return 0
   fi
 
   if $DRY; then
     if [[ -e "$dst" || -L "$dst" ]]; then
-      printf '  \033[33mwould backup + link\033[0m  %s\n' "$dst"
+      printf '  \033[33mwould back up + link\033[0m  %s\n' "${dst/#$HOME/\~}"
     else
-      printf '  \033[36mwould link\033[0m  %s\n' "$dst"
+      printf '  \033[36mwould link\033[0m  %s\n' "${dst/#$HOME/\~}"
     fi
     return 0
   fi
@@ -42,27 +51,46 @@ link() {
 
   if [[ -e "$dst" || -L "$dst" ]]; then
     mv "$dst" "$dst.backup.$STAMP"
-    printf '  \033[33mbacked up\033[0m  %s -> %s\n' "$dst" "$dst.backup.$STAMP"
+    printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/\~}" "$(basename "$dst").backup.$STAMP"
   fi
 
   ln -s "$src" "$dst"
-  printf '  \033[32mlinked\033[0m   %s\n' "$dst"
+  printf '  \033[32mlinked\033[0m   %s\n' "${dst/#$HOME/\~}"
 }
 
 echo "dotfiles: $REPO"
+echo "os:       $OS"
 $DRY && echo "(dry run — nothing will change)"
 echo
 
-link nvim        "$HOME/.config/nvim"
-link ghostty     "$HOME/.config/ghostty"
-link zsh/.zshrc  "$HOME/.zshrc"
+# ── Shared ────────────────────────────────────────────────────
+link common/nvim "$HOME/.config/nvim"
 
-# tmux: link the two config files individually rather than the whole directory,
-# so TPM plugins and resurrect snapshots keep living in ~/.config/tmux
-# untracked, instead of landing inside the repo.
+# ── tmux ──────────────────────────────────────────────────────
+# Linked as individual files, not the whole directory, so TPM plugins and
+# resurrect snapshots keep living in ~/.config/tmux untracked.
 mkdir -p "$HOME/.config/tmux"
-link tmux/tmux.conf     "$HOME/.config/tmux/tmux.conf"
-link tmux/vm-tmux.conf  "$HOME/.config/tmux/vm-tmux.conf"
+link "$OS/tmux/tmux.conf" "$HOME/.config/tmux/tmux.conf"
+
+# ── Shell ─────────────────────────────────────────────────────
+link "$OS/zsh/.zshrc" "$HOME/.zshrc"
+
+# ── macOS only ────────────────────────────────────────────────
+if [[ $OS == macos ]]; then
+  link macos/ghostty "$HOME/.config/ghostty"
+fi
+
+# A legacy ~/.tmux.conf does not shadow the XDG path (tmux 3.1+ prefers
+# ~/.config/tmux/tmux.conf), but leaving one around is confusing — you edit it
+# and nothing changes. Move it aside.
+if [[ -f "$HOME/.tmux.conf" && ! -L "$HOME/.tmux.conf" ]]; then
+  if $DRY; then
+    printf '  \033[33mwould retire\033[0m  ~/.tmux.conf (superseded by the XDG path)\n'
+  else
+    mv "$HOME/.tmux.conf" "$HOME/.tmux.conf.backup.$STAMP"
+    printf '  \033[33mretired\033[0m  ~/.tmux.conf (superseded by the XDG path)\n'
+  fi
+fi
 
 echo
 if $DRY; then
@@ -70,21 +98,30 @@ if $DRY; then
   exit 0
 fi
 
-# TPM — tmux's plugin manager isn't vendored here, so fetch it if absent.
+# TPM — not vendored here, fetch if absent.
 TPM="$HOME/.config/tmux/plugins/tpm"
 if [[ ! -d "$TPM" ]]; then
   echo "Installing TPM..."
   git clone --depth 1 -q https://github.com/tmux-plugins/tpm "$TPM"
   echo "  done — press prefix + I inside tmux to install plugins"
+  echo
 fi
 
-cat <<'EOF'
-
+cat <<EOF
 Done. To finish:
-  1. exec zsh                       reload the shell
-  2. tmux source-file ~/.config/tmux/tmux.conf
-  3. nvim                           lazy.nvim installs plugins on first launch
-  4. :MasonToolsInstall             inside nvim, installs LSPs + formatters
-
-Ghostty picks up its config on restart (or Cmd+R to reload).
+  1. exec zsh
+  2. tmux source-file ~/.config/tmux/tmux.conf     (never kill-server on a
+                                                    box with live sessions)
+  3. nvim                     lazy.nvim installs plugins on first launch
+  4. :MasonToolsInstall       inside nvim, installs LSPs + formatters
 EOF
+
+if [[ $OS == macos ]]; then
+  echo "  Ghostty reloads its config on restart, or Cmd+R."
+else
+  cat <<'EOF'
+
+Machine-specific shell bits go in ~/.zshrc.local — it is sourced if present
+and stays untracked, so this repo's .zshrc is identical on every server.
+EOF
+fi

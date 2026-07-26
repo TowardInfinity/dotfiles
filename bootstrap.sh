@@ -3,9 +3,14 @@
 # One-shot bootstrap: clone (or update) this repo, optionally install the
 # packages the configs expect, then symlink everything.
 #
-#   ./bootstrap.sh            clone/update + link
+#   ./bootstrap.sh            clone/update + symlink   (recommended)
 #   ./bootstrap.sh --deps     ...and install packages first (brew / apt)
 #   ./bootstrap.sh --dry      show what would happen, change nothing
+#   ./bootstrap.sh --copy     no repo kept: fetch a tarball, copy files, discard
+#
+# Prefer the default. The symlinks are what make ~/.config/nvim and the repo
+# the same files, so edits are tracked and updating is `git pull`. --copy
+# breaks that on purpose, for machines you will throw away.
 #
 # The repo is PRIVATE, so this needs working GitHub auth before it can clone:
 # either an SSH key on the machine, or `gh auth login`. See README.
@@ -26,11 +31,13 @@ DEST="${DOTFILES_DIR:-$DEFAULT_DIR}"
 
 DEPS=false
 DRY=false
+COPY=false
 for arg in "$@"; do
   case "$arg" in
     --deps) DEPS=true ;;
     --dry)  DRY=true ;;
-    -h|--help) sed -n '2,14p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    --copy) COPY=true ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -97,6 +104,36 @@ if $DEPS; then
         "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
     fi
   fi
+fi
+
+# ── No-clone mode ─────────────────────────────────────────────
+# Fetch a tarball, copy the configs into place, delete the tarball. Nothing is
+# left behind. Good for containers and boxes you will throw away; bad for one
+# you actually work on, because the configs stop being tracked and updating
+# means re-running this instead of `git pull`.
+if $COPY; then
+  say "Copy mode — no repo will be kept"
+  if $DRY; then
+    echo "    would: fetch tarball via gh, copy configs into place, discard it"
+    exit 0
+  fi
+  command -v gh >/dev/null || { echo "copy mode needs the gh CLI (private repo)" >&2; exit 1; }
+  gh auth status >/dev/null 2>&1 || { echo "run: gh auth login" >&2; exit 1; }
+
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+  say "Fetching $REPO_SLUG"
+  gh api "repos/${REPO_SLUG}/tarball/main" > "$TMP/d.tar.gz"
+  tar -xzf "$TMP/d.tar.gz" -C "$TMP"
+  SRC=$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)
+  [[ -d "$SRC" ]] || { echo "tarball did not extract as expected" >&2; exit 1; }
+
+  say "Copying configs"
+  "$SRC/install.sh" --copy
+  echo
+  warn "Copied, not linked — these files are no longer tracked."
+  warn "Re-run this command to update them."
+  exit 0
 fi
 
 # ── Clone or update ───────────────────────────────────────────

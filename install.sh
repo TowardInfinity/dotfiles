@@ -17,13 +17,27 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 DRY=false
-[[ "${1:-}" == "--dry" ]] && DRY=true
+COPY=false
+for arg in "$@"; do
+  case "$arg" in
+    --dry)  DRY=true ;;
+    --copy) COPY=true ;;
+    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 case "$(uname -s)" in
   Darwin) OS=macos ;;
   Linux)  OS=linux ;;
   *) echo "Unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
+
+# --copy writes real files instead of symlinks, for machines where you don't
+# want the repo hanging around (containers, throwaway boxes). The trade is
+# real: edits are no longer tracked, and updating means re-running this — a
+# symlinked install just needs `git pull`.
+VERB=linked;   $COPY && VERB=copied
+ACTION=link;   $COPY && ACTION=copy
 
 link() {
   local src="$REPO/$1" dst="$2"
@@ -33,16 +47,16 @@ link() {
     return 1
   fi
 
-  if [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
+  if ! $COPY && [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
     printf '  \033[90mok\033[0m       %s\n' "${dst/#$HOME/\~}"
     return 0
   fi
 
   if $DRY; then
     if [[ -e "$dst" || -L "$dst" ]]; then
-      printf '  \033[33mwould back up + link\033[0m  %s\n' "${dst/#$HOME/\~}"
+      printf '  \033[33mwould back up + %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/\~}"
     else
-      printf '  \033[36mwould link\033[0m  %s\n' "${dst/#$HOME/\~}"
+      printf '  \033[36mwould %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/\~}"
     fi
     return 0
   fi
@@ -54,8 +68,12 @@ link() {
     printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/\~}" "$(basename "$dst").backup.$STAMP"
   fi
 
-  ln -s "$src" "$dst"
-  printf '  \033[32mlinked\033[0m   %s\n' "${dst/#$HOME/\~}"
+  if $COPY; then
+    cp -R "$src" "$dst"
+  else
+    ln -s "$src" "$dst"
+  fi
+  printf '  \033[32m%s\033[0m   %s\n' "$VERB" "${dst/#$HOME/\~}"
 }
 
 echo "dotfiles: $REPO"

@@ -4,6 +4,7 @@
 #
 #   ./install.sh          link everything
 #   ./install.sh --dry    show what would happen, change nothing
+#   ./install.sh --nvim   restore nvim plugins from lazy-lock.json (:Lazy restore)
 #
 #   common/   linked everywhere      (nvim, claude — no OS-specific anything)
 #   macos/    linked on Darwin only  (zsh, tmux, ghostty)
@@ -18,10 +19,12 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%dT%H%M%S)"
 DRY=false
 COPY=false
+NVIM=false
 for arg in "$@"; do
   case "$arg" in
     --dry)  DRY=true ;;
     --copy) COPY=true ;;
+    --nvim) NVIM=true ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -117,6 +120,10 @@ if [[ -f "$HOME/.tmux.conf" && ! -L "$HOME/.tmux.conf" ]]; then
   fi
 fi
 
+if $NVIM && $DRY; then
+  printf '  \033[36mwould restore\033[0m  nvim plugins from lazy-lock.json\n'
+fi
+
 echo
 if $DRY; then
   echo "Dry run complete."
@@ -132,12 +139,26 @@ if [[ ! -d "$TPM" ]]; then
   echo
 fi
 
+# nvim plugins — restore, never sync. `:Lazy sync` follows each plugin's
+# *remote default branch*, which can walk a pinned plugin off the branch
+# recorded here — this actually happened: base46 drifted from v2.5 to v3.0
+# against a v2.5 NvChad. `:Lazy restore` honours the `branch` field in
+# lazy-lock.json instead, so pins stay pins. Reach for restore, not sync.
+if $NVIM; then
+  if command -v nvim >/dev/null 2>&1; then
+    echo "Restoring nvim plugins from lazy-lock.json..."
+    nvim --headless "+Lazy! restore" +qa
+  else
+    printf '  \033[33mwarning\033[0m  nvim not on PATH — skipping plugin restore\n'
+  fi
+fi
+
 cat <<EOF
 Done. To finish:
   1. exec zsh
   2. tmux source-file ~/.config/tmux/tmux.conf     (never kill-server on a
                                                     box with live sessions)
-  3. nvim                     lazy.nvim installs plugins on first launch
+  3. nvim, :Lazy restore      installs pinned plugin versions from lazy-lock.json
   4. :MasonToolsInstall       inside nvim, installs LSPs + formatters
 EOF
 

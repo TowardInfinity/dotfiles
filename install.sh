@@ -5,7 +5,7 @@
 #   ./install.sh          link everything
 #   ./install.sh --dry    show what would happen, change nothing
 #
-#   common/   linked everywhere      (nvim — it has no OS-specific anything)
+#   common/   linked everywhere      (nvim, claude — no OS-specific anything)
 #   macos/    linked on Darwin only  (zsh, tmux, ghostty)
 #   linux/    linked on Linux only   (zsh, tmux — no ghostty, servers are headless)
 #
@@ -83,6 +83,13 @@ echo
 
 # ── Shared ────────────────────────────────────────────────────
 link common/nvim "$HOME/.config/nvim"
+
+# ── Claude Code ───────────────────────────────────────────────
+# Only the delegation policy is shared. Each box's ~/.claude/CLAUDE.md stays
+# untracked and machine-specific (different toolchains, different guardrails)
+# and pulls this in with a single `@~/.claude/delegation.md` line. settings.json
+# holds machine-local permissions and is deliberately not tracked either.
+link common/claude/delegation.md "$HOME/.claude/delegation.md"
 
 # ── tmux ──────────────────────────────────────────────────────
 # Linked as individual files, not the whole directory, so TPM plugins and

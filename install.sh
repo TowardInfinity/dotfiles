@@ -139,11 +139,23 @@ if [[ ! -d "$TPM" ]]; then
   echo
 fi
 
-# nvim plugins — restore, never sync. `:Lazy sync` follows each plugin's
-# *remote default branch*, which can walk a pinned plugin off the branch
-# recorded here — this actually happened: base46 drifted from v2.5 to v3.0
-# against a v2.5 NvChad. `:Lazy restore` honours the `branch` field in
-# lazy-lock.json instead, so pins stay pins. Reach for restore, not sync.
+# nvim plugins — best-effort commit sync, NOT a guarantee of convergence.
+#
+# Know what this does and does not do. Lazy only ever runs `git checkout
+# <sha>`, never `git checkout <branch>`, so the `branch` field in
+# lazy-lock.json is decorative — restore does not honour it. Which branch a
+# plugin tracks comes from its spec's `branch =`, or absent that, from
+# whatever the remote's default branch was *when that machine first cloned
+# it*. Two boxes cloning months apart can therefore sit on different
+# branches with nobody running a wrong command.
+#
+# Worse, lazy regenerates the whole lockfile from on-disk state after every
+# operation — including this one — so a plugin that is already off-branch
+# gets its drift written back in as truth.
+#
+# The only thing that actually pins a plugin is `branch =` in the spec.
+# Treat this step as "line up commits within the branches the specs already
+# chose", and pin anything you genuinely care about in the spec itself.
 if $NVIM; then
   if command -v nvim >/dev/null 2>&1; then
     echo "Restoring nvim plugins from lazy-lock.json..."
@@ -158,7 +170,9 @@ Done. To finish:
   1. exec zsh
   2. tmux source-file ~/.config/tmux/tmux.conf     (never kill-server on a
                                                     box with live sessions)
-  3. nvim, :Lazy restore      installs pinned plugin versions from lazy-lock.json
+  3. nvim, :Lazy restore      lines plugins up with lazy-lock.json (see the
+                              caveat above install.sh's restore step — the
+                              lockfile records branches but cannot enforce them)
   4. :MasonToolsInstall       inside nvim, installs LSPs + formatters
 EOF
 

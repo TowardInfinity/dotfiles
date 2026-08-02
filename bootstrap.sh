@@ -332,8 +332,18 @@ install_omz() {
     # even when Oh My Zsh is not actually installed. Without pinning, the
     # directory we test for and the directory it installs into can differ, and
     # the installer bails with "The $ZSH folder already exists".
+    # --keep-zshrc and --unattended are passed as ARGUMENTS, not as the
+    # KEEP_ZSHRC / RUNZSH / CHSH environment variables. Those env vars are
+    # ignored by the current installer — verified directly: with KEEP_ZSHRC=yes
+    # exported it still printed "Using the Oh My Zsh template file" and wrote
+    # its own ~/.zshrc. With the flag it prints "Found .zshrc. Keeping..." and
+    # leaves it alone.
+    #
+    # That matters because ~/.zshrc here is a symlink into the repo: the
+    # template path would replace the symlink with a stock file and the tracked
+    # config would silently stop being used. The empty "" is $0 for the script.
     run "install Oh My Zsh" sh -c \
-      'ZSH="$HOME/.oh-my-zsh" KEEP_ZSHRC=yes RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+      'ZSH="$HOME/.oh-my-zsh" sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --keep-zshrc --unattended'
   fi
   # These two are NOT bundled with Oh My Zsh, but linux/zsh/.zshrc lists them
   # in `plugins=(...)`. Without them zsh complains on every start. The macOS
@@ -373,9 +383,6 @@ if $DEPS; then
   install_uv_tools
 fi
 
-# Always — see the comment on install_omz. A linked .zshrc without Oh My Zsh
-# is a broken shell, so this is not something --deps should gate.
-install_omz
 
 # The list is what the linked configs actually CALL, taken from grepping each
 # .zshrc — not the --deps package list. That distinction is the whole point:
@@ -432,6 +439,7 @@ if $COPY; then
   echo
   warn "Copied, not linked — these files are no longer tracked."
   warn "Re-run this command to update them."
+  install_omz
   verify
   exit 0
 fi
@@ -485,5 +493,16 @@ fi
 # out later as `zsh: command not found: eza` from an alias that looks broken.
 # Checked by binary name, not formula name, because those differ (neovim/nvim,
 # ripgrep/rg) and the formula being "installed" is not the question.
+
+# Oh My Zsh last, deliberately.
+#
+# It is not optional — both .zshrc files source it, so a linked config without
+# it is a broken shell, which is why this runs on every install and not only
+# under --deps. But it has to run AFTER linking: --keep-zshrc keeps an existing
+# ~/.zshrc, and on a fresh machine there is nothing there yet, so running it
+# first meant it always wrote its own template, which linking then had to back
+# up and replace. Link first and it finds our symlink, keeps it, and no stray
+# backup is created at all.
+install_omz
 
 verify

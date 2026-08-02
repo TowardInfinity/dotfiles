@@ -22,7 +22,14 @@ plugins=(git macos pip)
 # Docker CLI completions — moved before OMZ source so compinit picks it up
 fpath=($HOME/.docker/completions $fpath)
 
-source $ZSH/oh-my-zsh.sh
+# Everything above this line configures Oh My Zsh, but a missing install should
+# degrade to a usable shell rather than erroring on every prompt — the aliases,
+# PATH and history settings below are still worth having on their own.
+if [[ -r "$ZSH/oh-my-zsh.sh" ]]; then
+  source "$ZSH/oh-my-zsh.sh"
+else
+  print -u2 "zshrc: Oh My Zsh not installed — re-run: sh -c \"\$(curl -fsSL https://toin.in/install)\""
+fi
 
 # ──── History ────────────────────────────────────────────────
 HISTSIZE=10000

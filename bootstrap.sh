@@ -224,10 +224,21 @@ install_linux_pkgs() {
   }
 }
 
+# Oh My Zsh is NOT an optional package — both .zshrc files hard-require it
+# (`source $ZSH/oh-my-zsh.sh`), so linking a .zshrc without installing it gives
+# you an error on every single shell start. That is why this runs on every
+# install and not just under --deps, exactly like TPM in install.sh: both are
+# runtime dependencies of a config being linked, not conveniences.
+#
+# KEEP_ZSHRC=yes is load-bearing. Without it Oh My Zsh's installer moves any
+# existing ~/.zshrc to ~/.zshrc.pre-oh-my-zsh and drops its own template in
+# place — which, once we have symlinked, means it silently replaces the symlink
+# with a stock file and your config vanishes. With it, ours is left alone and
+# the ordering of these two steps stops mattering.
 install_omz() {
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
     run "install Oh My Zsh" sh -c \
-      'RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+      'KEEP_ZSHRC=yes RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
   fi
   # These two are NOT bundled with Oh My Zsh, but linux/zsh/.zshrc lists them
   # in `plugins=(...)`. Without them zsh complains on every start. The macOS
@@ -245,8 +256,11 @@ install_omz() {
 if $DEPS; then
   say "Installing packages"
   if [ "$OS" = macos ]; then install_macos_pkgs; else install_linux_pkgs; fi
-  install_omz
 fi
+
+# Always — see the comment on install_omz. A linked .zshrc without Oh My Zsh
+# is a broken shell, so this is not something --deps should gate.
+install_omz
 
 # ── Copy mode: no repo kept ───────────────────────────────────
 if $COPY; then

@@ -54,10 +54,17 @@ That one-liner is `bootstrap.sh` in this repo, served through a Worker route on
 
 | Flag | Effect |
 |---|---|
-| *(none)* | clone or update, then symlink |
+| *(none)* | clone or update, symlink, and install the configs' own dependencies |
 | `--deps` | also install packages — brew on macOS, apt + the Neovim tarball on Ubuntu |
 | `--dry` | print what would happen, change nothing |
 | `--copy` | keep no repo: fetch a tarball, copy files into place, discard it |
+| `--nvim` | also restore nvim plugins from `lazy-lock.json` after linking |
+
+**Oh My Zsh and TPM install on every run, not just under `--deps`.** They are not
+optional packages: `.zshrc` does `source $ZSH/oh-my-zsh.sh` and `tmux.conf`
+loads TPM plugins, so linking those configs without them gives you a shell that
+errors on every prompt and a tmux with no plugins. `--deps` is for things the
+configs *call* (ripgrep, fzf, a Node manager); this is for things they *are*.
 
 ### Why there's a clone at all
 
@@ -108,7 +115,7 @@ here, otherwise a fresh machine errors on every prompt.
 |---|---|---|
 | editor | neovim | neovim (upstream tarball — apt's is too old) |
 | terminal | tmux, ghostty, JetBrainsMono Nerd Font | tmux |
-| shell | Oh My Zsh | Oh My Zsh + zsh-autosuggestions, zsh-syntax-highlighting |
+| shell | *(Oh My Zsh — always, see above)* | *(+ zsh-autosuggestions, zsh-syntax-highlighting)* |
 | CLI | fzf, zoxide, eza, bat, ripgrep, fd, jq, lazygit, btop, glow | jq, ripgrep, glow |
 | languages | uv, pnpm, fnm, go | uv, pnpm, fnm, go |
 | git | git, gh | git, gh |

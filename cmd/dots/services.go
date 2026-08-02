@@ -42,6 +42,7 @@ type service struct {
 	Running  bool
 	Healthy  bool   // only meaningful when Port/URL known AND probed
 	Probed   bool   // false = health unknown, do not claim healthy or not
+	Pid      int    // 0 = unknown or not running
 	Port     int    // 0 = unknown
 	Detail   string // short, e.g. "pid 4213" or "exited (0)"
 	UserUnit bool   // systemd --user, or a user LaunchAgent
@@ -115,6 +116,20 @@ func discoverServices() tea.Cmd {
 		}
 
 		wg.Wait()
+
+		// Ask the kernel which pid is listening where, once, and attach the
+		// port to any running service we have a pid for. Done after the
+		// backends so it covers all of them, and before overrides so an
+		// explicit port in services.toml still wins.
+		if ports := listeningPorts(ctx); len(ports) > 0 {
+			for i := range services {
+				if services[i].Port == 0 && services[i].Pid > 0 {
+					if p, ok := ports[services[i].Pid]; ok {
+						services[i].Port = p
+					}
+				}
+			}
+		}
 
 		applyServiceOverrides(&services)
 
@@ -230,6 +245,9 @@ func discoverLaunchd(ctx context.Context) ([]service, bool) {
 			case e.pid != "-":
 				s.Running = true
 				s.Detail = "pid " + e.pid
+				if n, err := strconv.Atoi(e.pid); err == nil {
+					s.Pid = n
+				}
 			case e.status != "" && e.status != "0":
 				s.Detail = "exited (" + e.status + ")"
 			default:
@@ -616,4 +634,95 @@ func launchdName(label string) string {
 		}
 	}
 	return label
+}
+
+// listeningPorts maps pid -> first listening port.
+//
+// Only docker reported a port before, because it hands one over directly.
+// launchd and systemd do not, so every service from those backends had Port 0
+// — which meant the health probe never ran for them and "running" could never
+// be distinguished from "running but not answering", the one state worth
+// noticing. The kernel knows; we just were not asking.
+func listeningPorts(ctx context.Context) map[int]int {
+	out := map[int]int{}
+
+	switch runtime.GOOS {
+	case "darwin":
+		if _, ok := have("lsof"); !ok {
+			return out
+		}
+		// One call for every listening socket, rather than one per service.
+		b, err := exec.CommandContext(ctx,
+			"lsof", "-nP", "-iTCP", "-sTCP:LISTEN").Output()
+		if err != nil {
+			return out
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) < 9 || f[1] == "PID" {
+				continue
+			}
+			pid, err := strconv.Atoi(f[1])
+			if err != nil {
+				continue
+			}
+			// NAME is like 127.0.0.1:11435 or *:8080
+			if port := portFromAddr(f[8]); port != 0 {
+				if _, seen := out[pid]; !seen {
+					out[pid] = port
+				}
+			}
+		}
+
+	case "linux":
+		if _, ok := have("ss"); !ok {
+			return out
+		}
+		b, err := exec.CommandContext(ctx, "ss", "-tlnpH").Output()
+		if err != nil {
+			return out
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Fields(line)
+			if len(f) < 4 {
+				continue
+			}
+			port := portFromAddr(f[3])
+			if port == 0 {
+				continue
+			}
+			// users:(("nginx",pid=123,fd=6))
+			i := strings.Index(line, "pid=")
+			if i < 0 {
+				continue
+			}
+			rest := line[i+4:]
+			j := strings.IndexAny(rest, ",)")
+			if j < 0 {
+				continue
+			}
+			pid, err := strconv.Atoi(rest[:j])
+			if err != nil {
+				continue
+			}
+			if _, seen := out[pid]; !seen {
+				out[pid] = port
+			}
+		}
+	}
+	return out
+}
+
+// portFromAddr pulls the port off host:port, allowing for IPv6 brackets and
+// the *:port and [::]:port forms.
+func portFromAddr(addr string) int {
+	i := strings.LastIndex(addr, ":")
+	if i < 0 || i == len(addr)-1 {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(addr[i+1:]))
+	if err != nil || n <= 0 || n > 65535 {
+		return 0
+	}
+	return n
 }

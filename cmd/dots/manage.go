@@ -876,16 +876,21 @@ func (m manageModel) viewServices(spin string) string {
 				state = "not answering"
 			}
 		}
+		port := ""
+		if s.Port != 0 {
+			port = ":" + strconv.Itoa(s.Port)
+		}
 		data = append(data, []string{
 			dot + " " + s.Name,
 			svcSourceName(s.Source),
 			state,
+			port,
 			s.Detail,
 		})
 	}
 
 	body := head + dataTable(
-		[]string{"SERVICE", "VIA", "STATE", "DETAIL"},
+		[]string{"SERVICE", "VIA", "STATE", "PORT", "DETAIL"},
 		data, m.svcCursor-start, measure)
 
 	if len(vis) > rows {

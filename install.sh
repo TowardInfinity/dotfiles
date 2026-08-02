@@ -5,6 +5,7 @@
 #   ./install.sh          link everything
 #   ./install.sh --dry    show what would happen, change nothing
 #   ./install.sh --nvim   restore nvim plugins from lazy-lock.json (:Lazy restore)
+#   ./install.sh --build  force `dots` to be built from source, not fetched
 #
 #   common/   linked everywhere      (nvim, claude — no OS-specific anything)
 #   macos/    linked on Darwin only  (zsh, tmux, ghostty)
@@ -24,11 +25,17 @@ TILDE="~"
 DRY=false
 COPY=false
 NVIM=false
+BUILD=false
 for arg in "$@"; do
   case "$arg" in
-    --dry)  DRY=true ;;
-    --copy) COPY=true ;;
-    --nvim) NVIM=true ;;
+    --dry)   DRY=true ;;
+    --copy)  COPY=true ;;
+    --nvim)  NVIM=true ;;
+    --build) BUILD=true ;;
+    # Prints the header block above by *following* it — from line 2 until the
+    # first line that is not a comment — rather than a hardcoded line range,
+    # same trick bootstrap.sh uses so the two don't drift apart.
+    -h|--help) awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 1 ;;
   esac
 done
@@ -81,7 +88,14 @@ backup_dst() {
 }
 
 link() {
-  local src="$REPO/$1" dst="$2"
+  # $1 is usually a path relative to $REPO, but callers that already have an
+  # absolute path (e.g. a resolved `dots` binary living under ~/.cache) pass
+  # it straight through instead.
+  local src="$1" dst="$2"
+  case "$src" in
+    /*) : ;;
+    *) src="$REPO/$src" ;;
+  esac
 
   # A missing source used to `return 1`, and under `set -e` a bare call to this
   # function then killed the script on the spot. One absent file left the home
@@ -143,24 +157,50 @@ link common/nvim "$HOME/.config/nvim"
 # The reference/maintenance CLI. Linked into ~/.local/bin, which both .zshrc
 # files already put on PATH. It resolves back through this symlink to find the
 # repo, so `dots update` works from anywhere.
-# The Go build is the real tool; bin/dots is the bash fallback for machines
-# without a Go toolchain. Building here rather than shipping a binary keeps the
-# repo free of platform artifacts, and the build is a couple of seconds.
-if command -v go >/dev/null 2>&1 || [[ -x /usr/local/go/bin/go ]]; then
-  GO=go; command -v go >/dev/null 2>&1 || GO=/usr/local/go/bin/go
-  if $DRY; then
-    printf '  \033[36mwould build\033[0m  dots (go)\n'
+#
+# `dots` is a Go program (./cmd/dots), and building it cold costs ~10s and
+# ~120MB of module downloads — too much to pay on every machine. bin/dots-resolve.sh
+# picks the best available copy instead: a prebuilt release binary from GitHub
+# Releases (verified against its checksum), falling back to a local `go build`,
+# falling back to bin/dots, the bash implementation that always works. See
+# bin/dots-resolve.sh for the full tier order.
+#
+# --build forces the source-build tier, for when the Go code itself changed
+# and a stale release binary would hide it.
+DOTS_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
+
+describe_dots_tier() {
+  case "$1" in
+    "$DOTS_CACHE_DIR"/dots-*)
+      printf 'release binary %s\n' "${1##*/dots-}"
+      ;;
+    "$REPO/bin/dots-bin")
+      echo "built from source"
+      ;;
+    *)
+      echo "shell fallback"
+      ;;
+  esac
+}
+
+if $DRY; then
+  if $BUILD; then
+    printf '  \033[36mwould build\033[0m  dots (forced --build)\n'
   else
-    echo "Building dots..."
-    if (cd "$REPO" && "$GO" build -o "$REPO/bin/dots-bin" ./cmd/dots/ 2>&1 | sed 's/^/    /'); then
-      link bin/dots-bin "$HOME/.local/bin/dots"
-    else
-      printf '  \033[33mwarning\033[0m  go build failed — linking the shell fallback\n'
-      link bin/dots "$HOME/.local/bin/dots"
-    fi
+    printf '  \033[36mwould resolve\033[0m  dots (release binary, else build, else shell fallback)\n'
   fi
 else
-  link bin/dots "$HOME/.local/bin/dots"
+  echo "Resolving dots..."
+  if $BUILD; then
+    export DOTS_FORCE_BUILD=1
+  fi
+  DOTS_TARGET="$(sh "$REPO/bin/dots-resolve.sh")" || DOTS_TARGET=""
+  if [[ -z "$DOTS_TARGET" || ! -e "$DOTS_TARGET" ]]; then
+    printf '  \033[33mwarning\033[0m  dots-resolve.sh produced nothing usable — linking the shell fallback\n'
+    DOTS_TARGET="$REPO/bin/dots"
+  fi
+  printf '  \033[36mdots:\033[0m %s\n' "$(describe_dots_tier "$DOTS_TARGET")"
+  link "$DOTS_TARGET" "$HOME/.local/bin/dots"
 fi
 
 # --copy keeps no repo, so `dots` has nothing to read its docs out of — its

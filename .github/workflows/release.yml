@@ -1,0 +1,82 @@
+---
+name: Release
+
+# Cuts a GitHub Release with prebuilt `dots` binaries whenever a `v*` tag is
+# pushed, so machines running install.sh/dots.sh can fetch a binary instead of
+# paying the ~10s / ~120MB cold Go build on every box (see bin/dots-resolve.sh,
+# tier 2). workflow_dispatch exists so the build+test can be checked by hand
+# without cutting a tag — it does NOT publish a release (no tag to attach one
+# to), it only validates that every target still builds and tests pass.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # Read from go.mod rather than hardcoding a version here, so bumping
+          # the toolchain in one place is enough.
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_dispatch on a branch — no tag to stamp in, but the
+            # build must still succeed so this path is worth exercising.
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Cross-compile
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p dist
+          for target in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+            echo "==> building $goos/$goarch"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -ldflags "-s -w -X main.version=$VERSION" \
+              -o "dist/dots_${goos}_${goarch}" ./cmd/dots
+          done
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum dots_* > checksums.txt
+
+      - name: Show what will ship
+        working-directory: dist
+        run: ls -la && cat checksums.txt
+
+      # Only push a release for an actual tag — workflow_dispatch stops here,
+      # having proven the build and tests are green.
+      - name: Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dots_darwin_arm64
+            dist/dots_darwin_amd64
+            dist/dots_linux_arm64
+            dist/dots_linux_amd64
+            dist/checksums.txt

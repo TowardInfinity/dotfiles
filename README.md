@@ -17,6 +17,8 @@ linux/
 bootstrap.sh       the curl'd one-liner — clones, optional packages, then runs:
 install.sh         detects the OS and links the right set
 bin/dots           terminal reference + maintenance CLI (linked to ~/.local/bin)
+bin/dots-resolve.sh   picks the best available `dots` — release, build, or bin/dots
+cmd/dots/          the real `dots` — a Go TUI, cross-compiled into release binaries
 docs/              the reference itself, one markdown file per topic
 ```
 
@@ -43,6 +45,42 @@ so it lives in `common/` and never drifts between machines.
 The shells are *not* shared. Almost nothing overlaps between them (Homebrew vs
 apt, `launchctl` vs systemd, `pbcopy` vs OSC 52), so two files beat one file
 full of `if [[ $OSTYPE ]]`.
+
+### How `dots` itself gets installed
+
+`dots` is a Go program (`cmd/dots`). Building it cold costs ~10s and ~120MB of
+module downloads, which is too much to pay on every machine, so `install.sh`
+and `dots.sh` both go through `bin/dots-resolve.sh`, which picks the best copy
+available, falling through tiers on any failure:
+
+1. **a cached release binary** already downloaded and checksum-verified in a
+   previous run (`${XDG_CACHE_HOME:-$HOME/.cache}/dots/`)
+2. **download a release binary** for this OS/arch from the repo's
+   [GitHub Releases](https://github.com/TowardInfinity/dotfiles/releases),
+   verifying its `sha256` against the published `checksums.txt` before it's
+   trusted or cached
+3. **`go build` from source** into `bin/dots-bin`, if a Go toolchain is on
+   the machine
+4. **`bin/dots`** — the bash implementation, which needs nothing and always
+   works
+
+Whichever tier wins, `install.sh` prints which one it used (`dots: release
+binary v0.1.0`, `dots: built from source`, `dots: shell fallback`) — silently
+ending up with the slower shell fallback instead of the real tool is exactly
+the failure mode this is meant to surface, not hide.
+
+Pass `--build` to `install.sh` to skip straight to tier 3 and force a build
+from source — reach for it whenever you've changed the Go code and don't want
+a stale release binary masking it:
+
+```sh
+./install.sh --build
+```
+
+New release binaries are cut by `.github/workflows/release.yml` on every
+`v*` tag: it cross-compiles `darwin/{arm64,amd64}` and `linux/{arm64,amd64}`,
+publishes `checksums.txt` alongside them, and attaches everything to a GitHub
+Release for the tag.
 
 ## Quick start
 

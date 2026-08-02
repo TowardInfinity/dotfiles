@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -35,12 +36,15 @@ type doctorMsg struct {
 
 type doctorModel struct {
 	w, h    int
+	repo    string
 	checks  []checkResult
 	loading bool
+	note    string // one-line status for the last "i" press, e.g. "no repo found"
 }
 
-func newDoctorModel() doctorModel {
+func newDoctorModel(repo string) doctorModel {
 	return doctorModel{
+		repo:    repo,
 		checks:  pendingChecks(),
 		loading: true,
 	}
@@ -148,13 +152,127 @@ func (m doctorModel) update(msg tea.Msg) (doctorModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		if msg.String() == "r" {
+		switch msg.String() {
+		case "r":
 			m.loading = true
 			m.checks = pendingChecks()
+			m.note = ""
 			return m, runDoctorChecks
+		case "i":
+			if m.loading {
+				return m, nil
+			}
+			spec, note, ok := m.buildInstall()
+			m.note = note
+			if !ok {
+				return m, nil
+			}
+			return m, func() tea.Msg { return runActionMsg{spec: spec} }
 		}
 	}
 	return m, nil
+}
+
+// brewFormulas maps a check's binary name to the brew formula name, for the
+// handful where they differ (bootstrap.sh's install_macos_pkgs is the
+// authoritative list). Anything absent from this map uses its own name.
+var brewFormulas = map[string]string{
+	"nvim": "neovim",
+	"rg":   "ripgrep",
+}
+
+func brewFormula(check string) string {
+	if f, ok := brewFormulas[check]; ok {
+		return f
+	}
+	return check
+}
+
+// buildInstall assembles the single action behind the "i" key: install
+// everything currently missing. ok is false when there is nothing to do, or
+// nothing this pane knows how to do — note then explains why (empty when
+// there is simply nothing missing).
+func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
+	var missing []string
+	for _, c := range m.checks {
+		if c.state == checkBad {
+			missing = append(missing, c.name)
+		}
+	}
+	if len(missing) == 0 {
+		return actionSpec{}, "", false
+	}
+
+	// oh-my-zsh and tpm are directories the repo's install.sh creates, not
+	// packages a package manager knows about — keep them out of the
+	// brew/apt list entirely.
+	var dirs, pkgs []string
+	for _, n := range missing {
+		if n == "oh-my-zsh" || n == "tpm" {
+			dirs = append(dirs, n)
+		} else {
+			pkgs = append(pkgs, n)
+		}
+	}
+
+	if runtime.GOOS == "darwin" {
+		if len(pkgs) == 0 {
+			// Only the directories are missing: install.sh is what sets
+			// those up, brew has nothing to install.
+			if m.repo == "" {
+				return actionSpec{}, "no repo found — can't run install.sh for " + strings.Join(dirs, ", "), false
+			}
+			installSh := filepath.Join(m.repo, "install.sh")
+			return actionSpec{
+				Title:   "Set up " + strings.Join(dirs, ", "),
+				Argv:    []string{installSh},
+				Dir:     m.repo,
+				Confirm: "Run install.sh to set up " + strings.Join(dirs, ", ") + "?",
+				Timeout: 10 * time.Minute,
+			}, "", true
+		}
+
+		var formulas []string
+		seen := map[string]bool{}
+		for _, n := range pkgs {
+			f := brewFormula(n)
+			if !seen[f] {
+				seen[f] = true
+				formulas = append(formulas, f)
+			}
+		}
+		argv := append([]string{"brew", "install"}, formulas...)
+		confirm := fmt.Sprintf("Install %d package(s) with brew: %s?", len(formulas), strings.Join(formulas, " "))
+		if len(dirs) > 0 {
+			confirm += " (" + strings.Join(dirs, ", ") + " still need install.sh — Manage > Dotfiles)"
+		}
+		return actionSpec{
+			Title:   "Install missing tools",
+			Argv:    argv,
+			Confirm: confirm,
+			Timeout: 15 * time.Minute,
+		}, "", true
+	}
+
+	// Linux: several of these (glow, go, uv, pnpm, fnm) are not apt packages
+	// at all here — they come from tarballs/scripts inside bootstrap.sh, and
+	// that same run also links the configs (creating tpm) and always
+	// installs oh-my-zsh. Re-running it is simpler and more correct than
+	// reimplementing that split here.
+	if m.repo == "" {
+		return actionSpec{}, "no repo found — can't run bootstrap.sh --deps", false
+	}
+	installer := filepath.Join(m.repo, "bootstrap.sh")
+	if _, err := os.Stat(installer); err != nil {
+		return actionSpec{}, "bootstrap.sh not found in repo", false
+	}
+	return actionSpec{
+		Title:   "Install missing dependencies",
+		Argv:    []string{"sh", installer, "--deps"},
+		Dir:     m.repo,
+		Confirm: fmt.Sprintf("Install missing (%s) via bootstrap.sh --deps?", strings.Join(missing, ", ")),
+		Timeout: 20 * time.Minute,
+	}, "", true
 }
 
 func (m doctorModel) view() string {
@@ -206,6 +324,10 @@ func (m doctorModel) view() string {
 	}
 	b.WriteString("\n")
 
+	if m.note != "" {
+		b.WriteString(styMuted.Render(m.note) + "\n")
+	}
+
 	return pane(m.w, m.h, styPane.Render(b.String()))
 }
 
@@ -213,5 +335,5 @@ func (m doctorModel) help() string {
 	if m.loading {
 		return "checking…"
 	}
-	return "r re-run"
+	return "r re-run  ·  i install missing"
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -87,5 +88,91 @@ func TestDocsHaveFrontMatter(t *testing.T) {
 		if _, ok := groupOrder[d.Group]; !ok {
 			t.Errorf("%s: unknown group %q", d.Name, d.Group)
 		}
+	}
+}
+
+// The overlay must take the keyboard while it is up. A stray tab switching
+// panes underneath a running install would be both confusing and unsafe.
+func TestActionOverlayCapturesKeys(t *testing.T) {
+	m := newModel()
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	tm, _ = tm.Update(runActionMsg{spec: actionSpec{
+		Title:   "Probe",
+		Argv:    []string{"echo", "hello"},
+		Confirm: "Run the probe?",
+	}})
+	if tm.(model).act == nil {
+		t.Fatal("overlay did not open")
+	}
+	if !tm.(model).act.confirm {
+		t.Fatal("a spec with Confirm must wait for confirmation")
+	}
+
+	before := tm.(model).tab
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if tm.(model).tab != before {
+		t.Error("tab switched panes while the overlay was up")
+	}
+	if strings.TrimSpace(tm.View()) == "" {
+		t.Error("overlay rendered empty")
+	}
+
+	// Declining must close it without running anything.
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if tm.(model).act != nil {
+		t.Error("declining did not close the overlay")
+	}
+}
+
+// A confirmed action must actually run and capture output.
+func TestActionRuns(t *testing.T) {
+	a := newAction(actionSpec{Title: "Probe", Argv: []string{"echo", "marker-line"}}, 80, 20)
+	a, cmd := a.start()
+	if cmd == nil {
+		t.Fatal("start returned no command")
+	}
+	deadline := time.After(10 * time.Second)
+	for !a.done {
+		select {
+		case <-deadline:
+			t.Fatal("action never completed")
+		default:
+		}
+		msg := cmd()
+		var closed bool
+		a, cmd, closed = a.update(msg)
+		_ = closed
+		if cmd == nil && !a.done {
+			t.Fatal("stream ended without a done message")
+		}
+	}
+	if a.code != 0 {
+		t.Errorf("exit %d, want 0", a.code)
+	}
+	if !strings.Contains(strings.Join(a.lines, "\n"), "marker-line") {
+		t.Errorf("output not captured: %q", a.lines)
+	}
+}
+
+// A failing command must be reported, not swallowed.
+func TestActionReportsFailure(t *testing.T) {
+	a := newAction(actionSpec{Title: "Fail", Argv: []string{"sh", "-c", "exit 3"}}, 80, 20)
+	a, cmd := a.start()
+	deadline := time.After(10 * time.Second)
+	for !a.done {
+		select {
+		case <-deadline:
+			t.Fatal("action never completed")
+		default:
+		}
+		a, cmd, _ = a.update(cmd())
+		if cmd == nil && !a.done {
+			t.Fatal("stream ended without a done message")
+		}
+	}
+	if a.code == 0 {
+		t.Error("a failing command reported success")
 	}
 }

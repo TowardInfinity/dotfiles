@@ -30,6 +30,11 @@ type model struct {
 	doc  doctorModel
 	man  manageModel
 
+	// Non-nil while an action overlay is up. It takes every key, so a long
+	// install cannot be interrupted by a stray tab that switches panes
+	// underneath it.
+	act *actionModel
+
 	err string
 }
 
@@ -40,7 +45,7 @@ func newModel() model {
 		repo:   repo,
 		source: src,
 		docs:   newDocsModel(docs),
-		doc:    newDoctorModel(),
+		doc:    newDoctorModel(repo),
 		man:    newManageModel(repo),
 	}
 }
@@ -72,9 +77,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.docs = m.docs.resize(w, h)
 		m.doc = m.doc.resize(w, h)
 		m.man = m.man.resize(w, h)
+		if m.act != nil {
+			a := m.act.resize(w, h)
+			m.act = &a
+		}
 		return m, nil
 
+	case runActionMsg:
+		w, h := m.contentSize()
+		a := newAction(msg.spec, w, h)
+		if a.confirm {
+			m.act = &a
+			return m, nil
+		}
+		a2, cmd := a.start()
+		m.act = &a2
+		return m, cmd
+
 	case tea.KeyMsg:
+		// The overlay owns the keyboard while it is up.
+		if m.act != nil {
+			a, cmd, closed := m.act.update(msg)
+			if closed {
+				m.act = nil
+				// Re-check after anything that may have changed the machine,
+				// so the pane you return to is not showing a stale answer.
+				// Doctor's checks cover installs; services/machines cover
+				// the Manage actions that now run through this same overlay.
+				return m, tea.Batch(m.doc.Init(), fetchServicesInfo(), fetchMachinesInfo())
+			}
+			m.act = &a
+			return m, cmd
+		}
+
 		// Let a pane consume the key first when it is capturing text, otherwise
 		// typing "q" into the filter would quit the program.
 		if m.tab == tabDocs && m.docs.filtering {
@@ -101,6 +136,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "3":
 			m.tab = tabManage
 			return m, nil
+		}
+	}
+
+	if m.act != nil {
+		switch msg.(type) {
+		case actLineMsg, actDoneMsg:
+			a, cmd, closed := m.act.update(msg)
+			if closed {
+				m.act = nil
+			} else {
+				m.act = &a
+			}
+			return m, cmd
 		}
 	}
 
@@ -146,6 +194,10 @@ func (m model) View() string {
 	status := styStatus.Width(m.w).Render(
 		styHint.Render(help + "  ·  tab switch  ·  q quit"),
 	)
+
+	if m.act != nil {
+		body = m.act.view()
+	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, bar, body, status)
 }

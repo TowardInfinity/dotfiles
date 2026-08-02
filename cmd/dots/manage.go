@@ -77,17 +77,8 @@ type dotfilesActionDoneMsg struct {
 	msg string
 }
 type servicesInfoMsg struct{ info servicesInfo }
-type serviceActionDoneMsg struct {
-	ok  bool
-	msg string
-}
 type projectsInfoMsg struct{ projects []projectInfo }
 type machinesInfoMsg struct{ machines []machineInfo }
-type machineDoctorMsg struct {
-	alias  string
-	output string
-	err    error
-}
 
 // ── model ─────────────────────────────────────────────────────
 
@@ -103,20 +94,21 @@ type manageModel struct {
 
 	svcInfo    servicesInfo
 	svcLoading bool
-	svcBusy    bool
 	svcMsg     string
 
 	projects     []projectInfo
 	projLoading  bool
 	projCursor   int
 	projSelected int
+	// projTmuxHint is the last outcome of "enter" on a project: either
+	// confirmation that switch-client moved the current tmux client, or —
+	// when we are not inside tmux and so cannot attach one ourselves — the
+	// command the user should run in their own terminal.
+	projTmuxHint string
 
-	machines       []machineInfo
-	machLoading    bool
-	machCursor     int
-	machDoctorHost string
-	machDoctorOut  string
-	machDoctorBusy bool
+	machines    []machineInfo
+	machLoading bool
+	machCursor  int
 }
 
 func newManageModel(repo string) manageModel {
@@ -167,11 +159,6 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		m.svcLoading = false
 		return m, nil
 
-	case serviceActionDoneMsg:
-		m.svcBusy = false
-		m.svcMsg = msg.msg
-		return m, fetchServicesInfo()
-
 	case projectsInfoMsg:
 		m.projects = msg.projects
 		m.projLoading = false
@@ -191,20 +178,6 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		}
 		if m.machCursor < 0 {
 			m.machCursor = 0
-		}
-		return m, nil
-
-	case machineDoctorMsg:
-		m.machDoctorBusy = false
-		m.machDoctorHost = msg.alias
-		if msg.err != nil {
-			out := msg.output
-			if out != "" {
-				out += "\n"
-			}
-			m.machDoctorOut = out + "ssh failed: " + msg.err.Error()
-		} else {
-			m.machDoctorOut = msg.output
 		}
 		return m, nil
 
@@ -238,32 +211,88 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "u":
-		m.dfBusy = true
-		m.dfMsg = "pulling and relinking…"
-		return m, runDotfilesUpdate(m.repo)
+		if m.repo == "" {
+			m.dfMsg = "no checkout to update"
+			return m, nil
+		}
+		// Both steps in one action, so the overlay shows the whole update
+		// rather than half of it. This is the only place a shell string is
+		// used, and deliberately: the pull has to gate the relink, and there
+		// is nothing to relink if the pull failed. The path is a resolved
+		// local directory, not input, and it is quoted regardless.
+		spec := actionSpec{
+			Title:   "Update dotfiles",
+			Argv:    []string{"sh", "-c", "cd " + shellQuote(m.repo) + " && git pull --ff-only && ./install.sh"},
+			Confirm: "Pull the latest dotfiles and relink configs?",
+			Timeout: 10 * time.Minute,
+		}
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
 	case "L":
-		m.dfBusy = true
-		m.dfMsg = "relinking…"
-		return m, runRelinkOnly(m.repo)
+		if m.repo == "" {
+			m.dfMsg = "no checkout to relink"
+			return m, nil
+		}
+		spec := actionSpec{
+			Title:   "Relink configs",
+			Argv:    []string{filepath.Join(m.repo, "install.sh")},
+			Confirm: "Re-run install.sh and relink every config?",
+		}
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+	case "p":
+		spec := actionSpec{
+			Title:   "Restore nvim plugins",
+			Argv:    []string{"nvim", "--headless", "+Lazy! restore", "+qa"},
+			Confirm: "Restore nvim plugins to match lazy-lock.json?",
+			Timeout: 20 * time.Minute,
+		}
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+	case "t":
+		if m.repo == "" {
+			m.dfMsg = "no repo found"
+			return m, nil
+		}
+		spec := actionSpec{
+			Title:   "Install/repair TPM",
+			Argv:    []string{filepath.Join(m.repo, "install.sh")},
+			Dir:     m.repo,
+			Confirm: "Run install.sh to install/repair TPM (clones it when absent)?",
+			Timeout: 10 * time.Minute,
+		}
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+	case "D":
+		if m.repo == "" {
+			m.dfMsg = "no repo found"
+			return m, nil
+		}
+		spec := actionSpec{
+			Title:   "Install missing deps",
+			Argv:    []string{"sh", filepath.Join(m.repo, "bootstrap.sh"), "--deps"},
+			Dir:     m.repo,
+			Confirm: "Install missing dependencies via bootstrap.sh --deps?",
+			Timeout: 20 * time.Minute,
+		}
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
 	}
 	return m, nil
 }
 
 func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
-	if m.svcBusy {
-		return m, nil
-	}
+	var action string
 	switch msg.String() {
 	case "s":
-		m.svcBusy = true
-		m.svcMsg = "starting…"
-		return m, runServiceAction("load")
+		action = "load"
 	case "x":
-		m.svcBusy = true
-		m.svcMsg = "stopping…"
-		return m, runServiceAction("unload")
+		action = "unload"
+	default:
+		return m, nil
 	}
-	return m, nil
+	spec, note, ok := serviceActionSpec(action)
+	if !ok {
+		m.svcMsg = note
+		return m, nil
+	}
+	m.svcMsg = ""
+	return m, func() tea.Msg { return runActionMsg{spec: spec} }
 }
 
 func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
@@ -279,9 +308,33 @@ func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	case "enter":
 		if m.projCursor < len(m.projects) {
 			m.projSelected = m.projCursor
+			m = m.openProjectTmux(m.projects[m.projCursor])
 		}
 	}
 	return m, nil
+}
+
+// openProjectTmux is deliberately NOT run through the action runner: attaching
+// to a tmux session needs to own the terminal, and exec.CommandContext there
+// gives a command no controlling tty. It also never suspends this program to
+// hand the terminal over — that's a bigger change than this pane owns.
+//
+// When we are already inside tmux, switch-client can retarget the attached
+// client without any of that, so it runs for real. Otherwise there is
+// nothing this process can safely do: record what the user would run and
+// show it as a hint line.
+func (m manageModel) openProjectTmux(p projectInfo) manageModel {
+	cmdLine := fmt.Sprintf("tmux new-session -A -s %s -c %s", p.name, p.path)
+	if os.Getenv("TMUX") == "" {
+		m.projTmuxHint = "run in a terminal: " + cmdLine
+		return m
+	}
+	if err := exec.Command("tmux", "switch-client", "-t", p.name).Run(); err != nil {
+		m.projTmuxHint = "no session named " + p.name + " yet — run: " + cmdLine
+	} else {
+		m.projTmuxHint = "switched to " + p.name
+	}
+	return m
 }
 
 func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
@@ -295,12 +348,16 @@ func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			m.machCursor--
 		}
 	case "d":
-		if !m.machDoctorBusy && m.machCursor < len(m.machines) {
+		if m.machCursor < len(m.machines) {
 			alias := m.machines[m.machCursor].alias
-			m.machDoctorBusy = true
-			m.machDoctorHost = alias
-			m.machDoctorOut = ""
-			return m, runRemoteDoctor(alias)
+			spec := actionSpec{
+				Title: "Remote doctor: " + alias,
+				Argv: []string{"ssh",
+					"-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
+					alias, "dots", "doctor"},
+				Timeout: 20 * time.Second,
+			}
+			return m, func() tea.Msg { return runActionMsg{spec: spec} }
 		}
 	}
 	return m, nil
@@ -338,32 +395,6 @@ func fetchDotfilesInfo(repo string) tea.Cmd {
 			}
 		}
 		return dotfilesInfoMsg{info: info}
-	}
-}
-
-// runDotfilesUpdate ports bin/dots' update(): git pull --ff-only, then
-// install.sh to relink. --ff-only is the only state-changing git call this
-// program ever makes, and only on this explicit keypress.
-func runDotfilesUpdate(repo string) tea.Cmd {
-	return func() tea.Msg {
-		if repo == "" {
-			return dotfilesActionDoneMsg{ok: false, msg: "no repo found"}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if out, err := runGit(ctx, repo, "pull", "--ff-only"); err != nil {
-			return dotfilesActionDoneMsg{ok: false, msg: "pull failed: " + firstLine(out, err)}
-		}
-		return relink(repo, "updated and relinked")
-	}
-}
-
-func runRelinkOnly(repo string) tea.Cmd {
-	return func() tea.Msg {
-		if repo == "" {
-			return dotfilesActionDoneMsg{ok: false, msg: "no repo found"}
-		}
-		return relink(repo, "relinked")
 	}
 }
 
@@ -444,29 +475,28 @@ func fetchServicesInfo() tea.Cmd {
 	}
 }
 
-// runServiceAction starts or stops open-webui via launchctl. macOS only —
-// Linux reports "not managed here" rather than pretending to control it.
-func runServiceAction(action string) tea.Cmd {
-	return func() tea.Msg {
-		if runtime.GOOS != "darwin" {
-			return serviceActionDoneMsg{ok: false, msg: "not managed here"}
-		}
-		plist := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.towardinfinity.open-webui.plist")
-		if _, err := os.Stat(plist); err != nil {
-			return serviceActionDoneMsg{ok: false, msg: "plist not found: " + plist}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, "launchctl", action, plist).CombinedOutput()
-		if err != nil {
-			return serviceActionDoneMsg{ok: false, msg: firstLine(string(out), err)}
-		}
-		verb := "started"
-		if action == "unload" {
-			verb = "stopped"
-		}
-		return serviceActionDoneMsg{ok: true, msg: "open-webui " + verb}
+// serviceActionSpec builds the launchctl load/unload action for open-webui,
+// run through the action runner so its output and any error are visible.
+// macOS only — Linux (or a missing plist) reports why instead of running
+// anything.
+func serviceActionSpec(action string) (spec actionSpec, note string, ok bool) {
+	if runtime.GOOS != "darwin" {
+		return actionSpec{}, "not managed here", false
 	}
+	plist := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.towardinfinity.open-webui.plist")
+	if _, err := os.Stat(plist); err != nil {
+		return actionSpec{}, "plist not found: " + plist, false
+	}
+	verb := "Start"
+	if action == "unload" {
+		verb = "Stop"
+	}
+	return actionSpec{
+		Title:   "launchctl " + action + " open-webui",
+		Argv:    []string{"launchctl", action, plist},
+		Confirm: verb + " open-webui via launchctl?",
+		Timeout: 30 * time.Second,
+	}, "", true
 }
 
 // ── commands: projects ────────────────────────────────────────
@@ -626,25 +656,6 @@ func fetchMachinesInfo() tea.Cmd {
 	}
 }
 
-func runRemoteDoctor(alias string) tea.Cmd {
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		out, err := exec.CommandContext(ctx, "ssh",
-			"-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
-			alias, "dots doctor").CombinedOutput()
-		return machineDoctorMsg{alias: alias, output: tailLines(string(out), 12), err: err}
-	}
-}
-
-func tailLines(s string, n int) string {
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
-	}
-	return strings.Join(lines, "\n")
-}
-
 // ── view ──────────────────────────────────────────────────────
 
 func (m manageModel) view() string {
@@ -746,9 +757,7 @@ func (m manageModel) viewServices() string {
 	if runtime.GOOS != "darwin" {
 		b.WriteString(styMuted.Render("start/stop: not managed here") + "\n")
 	}
-	if m.svcBusy {
-		b.WriteString(styPending.Render(m.svcMsg))
-	} else if m.svcMsg != "" {
+	if m.svcMsg != "" {
 		b.WriteString(styMuted.Render(m.svcMsg))
 	}
 	return b.String()
@@ -800,6 +809,9 @@ func (m manageModel) viewProjects() string {
 		}
 		b.WriteString(line + "\n")
 	}
+	if m.projTmuxHint != "" {
+		b.WriteString("\n" + styMuted.Render(truncate(m.projTmuxHint, m.w-4)) + "\n")
+	}
 	return b.String()
 }
 
@@ -834,15 +846,6 @@ func (m manageModel) viewMachines() string {
 		line := cursor + dot + " " + name + " " + label
 		b.WriteString(truncate(line, m.w-4) + "\n")
 	}
-
-	if m.machDoctorBusy {
-		b.WriteString("\n" + styPending.Render("running dots doctor on "+m.machDoctorHost+"…") + "\n")
-	} else if m.machDoctorHost != "" {
-		b.WriteString("\n" + styMuted.Render(m.machDoctorHost+":") + "\n")
-		for _, line := range strings.Split(m.machDoctorOut, "\n") {
-			b.WriteString("  " + truncate(line, m.w-6) + "\n")
-		}
-	}
 	return b.String()
 }
 
@@ -850,13 +853,20 @@ func (m manageModel) help() string {
 	const nav = "h/l section"
 	switch m.section {
 	case secDotfiles:
-		return nav + "  ·  u update  ·  L relink"
+		return nav + "  ·  u update  ·  L relink  ·  p plugins  ·  t tpm  ·  D deps"
 	case secServices:
 		return nav + "  ·  s start  ·  x stop"
 	case secProjects:
-		return nav + "  ·  j/k move  ·  enter select"
+		return nav + "  ·  j/k move  ·  enter tmux"
 	case secMachines:
 		return nav + "  ·  j/k move  ·  d remote doctor"
 	}
 	return nav
+}
+
+// shellQuote wraps a value in single quotes for `sh -c`, escaping any single
+// quote inside it. Used for exactly one command; everything else passes argv
+// directly and never goes near a shell.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

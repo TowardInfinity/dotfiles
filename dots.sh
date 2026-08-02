@@ -11,8 +11,14 @@
 # the outer `sh -c`, which sets it as $0 and passes the rest through.
 #
 # This is a launcher, not the tool. It keeps a shallow clone in the cache
-# directory and runs bin/dots out of it, so there is exactly one copy of the
+# directory and runs `dots` out of it, so there is exactly one copy of the
 # docs and it is whatever is on main — no published artifact to fall behind.
+#
+# The clone's bin/dots-resolve.sh picks the best available `dots` the same way
+# install.sh does: a prebuilt release binary if one can be fetched and
+# verified, else a local `go build`, else bin/dots — the bash fallback that
+# always works. That means the curl'd one-liner gets the same tool an install
+# does, not permanently the slow bash version.
 #
 # POSIX sh, because it runs on machines where nothing has been set up yet.
 
@@ -52,6 +58,16 @@ else
     || { echo "dots: could not fetch the docs" >&2; exit 1; }
 fi
 
-[ -x "$CACHE/bin/dots" ] || { echo "dots: cache is broken — rm -rf $CACHE and retry" >&2; exit 1; }
+# Resolve the best available `dots` out of the cached clone, same tiers as
+# install.sh. Older cached clones (from before this existed) won't have the
+# resolver yet — fall straight back to the bash tool in that case rather than
+# erroring, since re-cloning just to get one script is not worth failing over.
+TARGET=""
+if [ -f "$CACHE/bin/dots-resolve.sh" ]; then
+  TARGET="$(sh "$CACHE/bin/dots-resolve.sh")" || TARGET=""
+fi
+[ -n "$TARGET" ] && [ -x "$TARGET" ] || TARGET="$CACHE/bin/dots"
 
-exec "$CACHE/bin/dots" "$@"
+[ -x "$TARGET" ] || { echo "dots: cache is broken — rm -rf $CACHE and retry" >&2; exit 1; }
+
+exec "$TARGET" "$@"

@@ -70,6 +70,18 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(m.doc.Init(), m.man.Init(), m.sp.Tick)
 }
 
+// capturingInput reports whether the visible pane is taking free text, in
+// which case no key may be treated as a shortcut.
+func (m model) capturingInput() bool {
+	switch m.tab {
+	case tabDocs:
+		return m.docs.filtering
+	case tabManage:
+		return m.man.svcFiltering
+	}
+	return false
+}
+
 // contentSize is the area inside the tab bar and status line. Every pane is
 // handed the same numbers so nothing has to guess at the chrome.
 func (m model) contentSize() (int, int) {
@@ -143,11 +155,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		// Let a pane consume the key first when it is capturing text, otherwise
-		// typing "q" into the filter would quit the program.
-		if m.tab == tabDocs && m.docs.filtering {
+		// A pane capturing text owns every key, including the global ones.
+		//
+		// This was special-cased for the Docs filter only, so typing "q" into
+		// the Services filter quit the program and "1"/"2"/"3" switched tabs
+		// mid-word. Asking the pane whether it is capturing covers both, and
+		// covers the next input field without anyone remembering to.
+		if m.capturingInput() {
 			var cmd tea.Cmd
-			m.docs, cmd = m.docs.update(msg)
+			switch m.tab {
+			case tabDocs:
+				m.docs, cmd = m.docs.update(msg)
+			case tabDoctor:
+				m.doc, cmd = m.doc.update(msg)
+			case tabManage:
+				m.man, cmd = m.man.update(msg)
+			}
 			return m, cmd
 		}
 

@@ -89,10 +89,20 @@ func (m manageModel) keys() []key.Binding {
 			bind("s", "start"), bind("x", "stop"), bind("R", "restart"),
 			bind("r", "rescan"),
 		}
+	// Only advertise a key that can act. A listed key that does nothing is
+	// worse than an absent one — the same rule Doctor's `i` already follows.
 	case secProjects:
-		return []key.Binding{nav, bind("j/k", "move"), bind("enter", "tmux")}
+		ks := []key.Binding{nav}
+		if len(m.projects) > 0 {
+			ks = append(ks, bind("j/k", "move"), bind("enter", "tmux"))
+		}
+		return ks
 	case secMachines:
-		return []key.Binding{nav, bind("j/k", "move"), bind("d", "remote doctor")}
+		ks := []key.Binding{nav}
+		if len(m.machines) > 0 {
+			ks = append(ks, bind("j/k", "move"), bind("d", "remote doctor"))
+		}
+		return ks
 	}
 	return []key.Binding{nav}
 }

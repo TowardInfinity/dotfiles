@@ -469,9 +469,17 @@ func applyServiceOverrides(services *[]service) {
 		return
 	}
 
+	// Key by source AND id. Two backends can produce the same id — a launchd
+	// label and a docker container both called "redis" — and a plain id map
+	// keeps only whichever the concurrent discovery appended last, so an
+	// override could silently land on the wrong unit, differently between runs.
+	// A bare id is still accepted so simple files keep working.
 	byID := map[string]int{}
 	for i, s := range *services {
-		byID[s.ID] = i
+		byID[svcSourceName(s.Source)+":"+s.ID] = i
+		if _, clash := byID[s.ID]; !clash {
+			byID[s.ID] = i
+		}
 	}
 
 	// Deterministic order for anything appended below, independent of map

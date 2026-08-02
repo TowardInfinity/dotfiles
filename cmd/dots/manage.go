@@ -65,10 +65,6 @@ type machineInfo struct {
 // ── messages ──────────────────────────────────────────────────
 
 type dotfilesInfoMsg struct{ info dotfilesInfo }
-type dotfilesActionDoneMsg struct {
-	ok  bool
-	msg string
-}
 type projectsInfoMsg struct{ projects []projectInfo }
 type machinesInfoMsg struct{ machines []machineInfo }
 
@@ -81,7 +77,6 @@ type manageModel struct {
 
 	dfInfo    dotfilesInfo
 	dfLoading bool
-	dfBusy    bool
 	dfMsg     string
 
 	services     []service
@@ -152,14 +147,6 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		m.dfLoading = false
 		return m, nil
 
-	case dotfilesActionDoneMsg:
-		m.dfBusy = false
-		m.dfMsg = msg.msg
-		if msg.ok {
-			return m, fetchDotfilesInfo(m.repo)
-		}
-		return m, nil
-
 	case servicesFoundMsg:
 		m.services = msg.services
 		m.svcSources = msg.sources
@@ -167,8 +154,12 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		if msg.err != "" {
 			m.svcMsg = msg.err
 		}
-		if m.svcCursor >= len(m.services) {
-			m.svcCursor = len(m.services) - 1
+		// Clamp against the VISIBLE list, not the total. With a filter active,
+		// a rescan could leave the cursor past the end of what is shown — the
+		// highlight vanished and s/x/R became silent no-ops on rows plainly on
+		// screen, because the key handler guards on the visible length.
+		if n := len(m.visibleServices()); m.svcCursor >= n {
+			m.svcCursor = n - 1
 		}
 		if m.svcCursor < 0 {
 			m.svcCursor = 0
@@ -237,9 +228,6 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 }
 
 func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
-	if m.dfBusy {
-		return m, nil
-	}
 	switch msg.String() {
 	case "u":
 		if m.repo == "" {
@@ -525,22 +513,6 @@ func fetchDotfilesInfo(repo string) tea.Cmd {
 		}
 		return dotfilesInfoMsg{info: info}
 	}
-}
-
-func relink(repo, okMsg string) tea.Msg {
-	installSh := filepath.Join(repo, "install.sh")
-	if _, err := os.Stat(installSh); err != nil {
-		return dotfilesActionDoneMsg{ok: false, msg: "install.sh not found"}
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, installSh)
-	cmd.Dir = repo
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return dotfilesActionDoneMsg{ok: false, msg: "install.sh failed: " + firstLine(string(out), err)}
-	}
-	return dotfilesActionDoneMsg{ok: true, msg: okMsg}
 }
 
 func firstLine(out string, err error) string {
@@ -841,9 +813,7 @@ func (m manageModel) viewDotfiles() string {
 	}
 
 	b.WriteString("\n")
-	if m.dfBusy {
-		b.WriteString(styPending.Render(m.dfMsg))
-	} else if m.dfMsg != "" {
+	if m.dfMsg != "" {
 		b.WriteString(styMuted.Render(m.dfMsg))
 	}
 	return b.String()

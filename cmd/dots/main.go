@@ -197,9 +197,24 @@ func editDoc(args []string) {
 		}
 		target = p
 	}
-	cmd := exec.Command(editor, target)
+	// $EDITOR routinely carries arguments — "code --wait", "subl -w",
+	// "vim -u NONE". Passing the whole string as one executable path meant
+	// looking for a binary literally named "code --wait", which fails, and the
+	// error was swallowed: bare exit 1, nothing on stderr, so `dots edit`
+	// simply appeared to do nothing.
+	parts := strings.Fields(editor)
+	if len(parts) == 0 {
+		fmt.Fprintln(os.Stderr, "dots: $EDITOR is empty")
+		os.Exit(1)
+	}
+	// Copy rather than append onto parts[1:] directly: append can write into
+	// the backing array and clobber a later element.
+	argv := append(append([]string{}, parts[1:]...), target)
+
+	cmd := exec.Command(parts[0], argv...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "dots: %s: %v\n", editor, err)
 		os.Exit(1)
 	}
 }

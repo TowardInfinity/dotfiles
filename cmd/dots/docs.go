@@ -141,7 +141,11 @@ func (m docsModel) resize(w, h int) docsModel {
 		m.outlineW = outlineWidth
 	}
 
-	m.vp = newViewport(m.contentWidth(), h-2)
+	// head is 2 lines (breadcrumb + summary) and the rule is 1, so the
+	// viewport gets the rest. Giving it h-2 made the column h+1 tall, and a
+	// pane one line too tall pushes the tab bar off the top of the screen —
+	// which is why the Docs tab appeared to have no header at all.
+	m.vp = newViewport(m.contentWidth(), h-3)
 	m.lastDoc = "" // force a re-render at the new width
 	return m
 }
@@ -325,13 +329,16 @@ func (m docsModel) viewContent() string {
 
 	// Breadcrumb rather than a bare title: on a 22-page reference, which group
 	// a page belongs to is as useful as its name.
-	var head string
+	// Always two lines, so the column height is the same on every page. A
+	// header that changes height by one shifts everything below it and, at the
+	// bottom of the stack, silently costs you the tab bar.
+	head := "\n"
 	if d := m.current(); d != nil {
 		head = styGroup.Render(strings.ToUpper(d.Group)) +
 			styMuted.Render(" › ") +
-			styTitle.Render(d.Title)
+			styTitle.Render(d.Title) + "\n"
 		if d.Summary != "" {
-			head += "\n" + styMuted.Render(truncate(d.Summary, measure))
+			head += styMuted.Render(truncate(d.Summary, measure))
 		}
 	}
 

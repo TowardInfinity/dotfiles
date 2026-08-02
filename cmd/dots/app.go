@@ -218,8 +218,19 @@ func (m model) View() string {
 		body, help = m.man.view(), m.man.help()
 	}
 
+	// Hard clamp. Every pane is handed the same height, but an arithmetic slip
+	// inside one of them silently steals a line from the tab bar rather than
+	// erroring — so enforce it here as well as computing it correctly there.
+	_, ch := m.contentSize()
+	body = lipgloss.NewStyle().MaxHeight(ch).Render(body)
+
+	// Truncate rather than let it wrap. Manage's help is the longest, and at 80
+	// columns it wrapped to a second line — which made the status bar three
+	// lines instead of two and pushed the tab bar off the top. A hint that is
+	// cut short is a much smaller problem than losing the header.
+	hint := help + "  ·  tab switch  ·  q quit"
 	status := styStatus.Width(m.w).Render(
-		styHint.Render(help + "  ·  tab switch  ·  q quit"),
+		styHint.Render(truncate(hint, m.w-2)),
 	)
 
 	if m.act != nil {

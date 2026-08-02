@@ -240,3 +240,22 @@ func TestOneActionAtATime(t *testing.T) {
 		t.Error("a second action replaced the running one")
 	}
 }
+
+// Every tab must fit the terminal height. A pane one line too tall pushes the
+// tab bar off the top of the screen, which is exactly what the Docs tab did.
+func TestTabsFitHeight(t *testing.T) {
+	for _, sz := range [][2]int{{120, 40}, {200, 50}, {100, 30}, {80, 24}, {60, 18}, {70, 20}} {
+		w, h := sz[0], sz[1]
+		m := newModel()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
+		for tab := 0; tab < int(numTabs); tab++ {
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune('1' + tab)}})
+			got := len(strings.Split(tm.View(), "\n"))
+			if got > h {
+				t.Errorf("tab %d at %dx%d renders %d lines, %d too many",
+					tab, w, h, got, got-h)
+			}
+		}
+	}
+}

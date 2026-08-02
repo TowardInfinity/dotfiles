@@ -21,5 +21,7 @@ summary: Create, rename and switch windows and sessions
 | `Ctrl c` | New session | mac |
 | `(` / `)` | Switch to the previous / next session | mac |
 | `s` | Session picker — fzf popup on macOS, `choose-tree` on Linux | both |
-| `w` | Window picker (`choose-tree`) | linux |
+| `w` | Window picker (`choose-tree`) | both |
 | `P` | Pick a project under `~/Codes` and switch to or create its session | mac |
+| `.` | Move this window to another index | mac |
+| `:` | tmux's own command prompt | both |

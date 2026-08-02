@@ -25,4 +25,10 @@ summary: Popups, copy mode and clipboard behavior
 | Double-click | Select the word and copy it | mac |
 | Right-click | Paste | mac |
 | `r` | Reload `tmux.conf` | both |
+| `Escape` or `q` | Leave copy mode without copying anything | both |
+| `[` | Also enters copy mode — tmux's default, still bound | both |
+| `Alt e` | Open `tmux.conf` in `$EDITOR` in a new window | mac |
 | `F12` | Escape hatch — turn all outer bindings off, then on again | mac |
+
+The scratch shell on `t` replaces tmux's default binding for that key, which
+was the clock. `prefix ?` still lists every binding, defaults included.

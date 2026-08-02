@@ -18,7 +18,7 @@ summary: Split, resize, zoom and move between panes
 | `H J K L` | Resize the pane by 5, repeatable | both |
 | `=` | Even-horizontal layout | both |
 | `+` | Even-vertical layout | both |
-| `z` | Zoom the pane in or out | mac |
+| `z` | Zoom the pane in or out | both |
 | `S` | Toggle synchronised panes — type once, into all of them | both |
 | `x` | Kill the pane, no confirmation | both |
 | `e` | Break the pane out into its own window | both |
@@ -26,3 +26,5 @@ summary: Split, resize, zoom and move between panes
 | `Space` | Cycle to the next layout | mac |
 | `Ctrl o` | Rotate panes within the window | mac |
 | `B` | Toggle the pane border labels | both |
+| `o` | Cycle to the next pane | both |
+| `;` | Jump back to the last pane | both |

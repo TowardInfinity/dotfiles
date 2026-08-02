@@ -154,8 +154,9 @@ fi
 # gets its drift written back in as truth.
 #
 # The only thing that actually pins a plugin is `branch =` in the spec.
-# Treat this step as "line up commits within the branches the specs already
-# chose", and pin anything you genuinely care about in the spec itself.
+# nvim-treesitter, base46 and ui are pinned there for exactly this reason;
+# anything else you care about should be too. Treat this step as "line up
+# commits within the branches the specs already chose".
 if $NVIM; then
   if command -v nvim >/dev/null 2>&1; then
     echo "Restoring nvim plugins from lazy-lock.json..."
@@ -170,9 +171,9 @@ Done. To finish:
   1. exec zsh
   2. tmux source-file ~/.config/tmux/tmux.conf     (never kill-server on a
                                                     box with live sessions)
-  3. nvim, :Lazy restore      lines plugins up with lazy-lock.json (see the
-                              caveat above install.sh's restore step — the
-                              lockfile records branches but cannot enforce them)
+  3. nvim, :Lazy restore      lines plugins up with lazy-lock.json (commits
+                              only — branches come from the specs; see the
+                              caveat above install.sh's restore step)
   4. :MasonToolsInstall       inside nvim, installs LSPs + formatters
 EOF
 

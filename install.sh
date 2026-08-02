@@ -48,6 +48,38 @@ ACTION=link;   $COPY && ACTION=copy
 
 MISSING=0
 
+# How many timestamped backups to keep per destination. Symlink mode makes at
+# most one (the pre-dotfiles original), so this is really about --copy, which
+# had no "already correct" shortcut and so backed up a full recursive copy of
+# every config on every run — on exactly the throwaway machines that are told
+# to re-run in order to update.
+BACKUPS_KEPT=2
+
+prune_backups() {
+  local dst="$1" old
+  # Newest first, drop everything past the keep count. stderr is discarded
+  # because "no backups yet" is the normal case, not an error.
+  while IFS= read -r old; do
+    [[ -n "$old" ]] || continue
+    rm -rf "$old"
+    printf '  \033[90mpruned\033[0m   %s\n' "$(basename "$old")"
+  done < <(ls -1dt "$dst".backup.* 2>/dev/null | tail -n +$((BACKUPS_KEPT + 1)))
+}
+
+# Move $dst aside, never overwriting an existing backup. $STAMP has one-second
+# resolution, so two runs within the same second would otherwise collide and
+# the second `mv` would clobber the first run's backup.
+backup_dst() {
+  local dst="$1" bk="$1.backup.$STAMP" n=1
+  while [[ -e "$bk" ]]; do
+    bk="$dst.backup.$STAMP-$n"
+    n=$((n + 1))
+  done
+  mv "$dst" "$bk"
+  printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/$TILDE}" "$(basename "$bk")"
+  prune_backups "$dst"
+}
+
 link() {
   local src="$REPO/$1" dst="$2"
 
@@ -68,6 +100,14 @@ link() {
     return 0
   fi
 
+  # Copy mode's equivalent of the shortcut above. If what is already there is
+  # byte-for-byte what we would write, it is our own previous copy: there is
+  # nothing to preserve and nothing to do. This is what stops the backup pile.
+  if $COPY && [[ -e "$dst" ]] && diff -rq "$src" "$dst" >/dev/null 2>&1; then
+    printf '  \033[90mok\033[0m       %s\n' "${dst/#$HOME/$TILDE}"
+    return 0
+  fi
+
   if $DRY; then
     if [[ -e "$dst" || -L "$dst" ]]; then
       printf '  \033[33mwould back up + %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/$TILDE}"
@@ -80,8 +120,7 @@ link() {
   mkdir -p "$(dirname "$dst")"
 
   if [[ -e "$dst" || -L "$dst" ]]; then
-    mv "$dst" "$dst.backup.$STAMP"
-    printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/$TILDE}" "$(basename "$dst").backup.$STAMP"
+    backup_dst "$dst"
   fi
 
   if $COPY; then

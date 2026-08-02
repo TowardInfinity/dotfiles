@@ -37,6 +37,13 @@ setopt HIST_IGNORE_SPACE
 setopt HIST_VERIFY
 
 # ──── Environment ─────────────────────────────────────────────
+# Ties the `path` array to PATH and makes it unique, so zsh drops duplicates as
+# they are added. `reload` here is `exec zsh`, which replaces the process and so
+# never doubled entries the way the macOS file's `source ~/.zshrc` did — this is
+# for parity and to keep the pnpm block below from being the only thing standing
+# between this file and duplicate entries.
+typeset -U path PATH
+
 export LANG=en_US.UTF-8
 export EDITOR='nvim'
 

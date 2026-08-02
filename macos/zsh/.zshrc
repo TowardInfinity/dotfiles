@@ -44,6 +44,13 @@ export LANG=en_US.UTF-8
 export EDITOR='vim'
 
 # ──── PATH (consolidated) ────────────────────────────────────
+# Ties the `path` array to PATH and makes it unique, so zsh drops duplicates as
+# they are added — including from any line added below in future. Without this,
+# `reload` (which is `source ~/.zshrc`, re-running every export in the same
+# process) grew each entry once per invocation. Fixing the mechanism rather
+# than guarding five individual lines.
+typeset -U path PATH
+
 export PATH="$HOME/.antigravity/antigravity/bin:$PATH"
 export PATH="$PATH:$HOME/.lmstudio/bin"
 export PATH="$HOME/.local/bin:$PATH"
@@ -66,19 +73,34 @@ alias la='ls -A'
 alias reload='source ~/.zshrc'
 alias zshconfig='open ~/.zshrc'
 
-# ──── conda initialize ───────────────────────────────────────
-# !! Contents managed by 'conda init' — do not edit manually !!
-__conda_setup="$('/opt/homebrew/Caskroom/miniconda/base/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-if [ $? -eq 0 ]; then
+# ──── conda ──────────────────────────────────────────────────
+# Legacy and Jupyter only — uv is the default for Python work here.
+#
+# Rewritten from the block `conda init` generates. That version hardcoded one
+# Homebrew path and, when conda was not found there, fell through to
+# unconditionally prepending that non-existent directory to PATH — the only
+# unguarded optional tool in this file, silently adding a dead entry on every
+# shell start on any machine without miniconda at exactly that location.
+#
+# Now: look in the usual places, do nothing at all if conda is not installed.
+# Set CONDA_HOME in the environment to point somewhere else. Deliberately no
+# prompting and no mkdir: this file runs on every shell start, so it must stay
+# non-interactive and free of side effects — and an empty directory would not
+# make conda work anyway. If you want conda installed, that belongs in
+# bootstrap.sh --deps.
+for _conda_home in "${CONDA_HOME:-}" \
+                   /opt/homebrew/Caskroom/miniconda/base \
+                   "$HOME/miniconda3" "$HOME/miniforge3"; do
+  [[ -n "$_conda_home" && -x "$_conda_home/bin/conda" ]] || continue
+  if __conda_setup="$("$_conda_home/bin/conda" shell.zsh hook 2>/dev/null)"; then
     eval "$__conda_setup"
-else
-    if [ -f "/opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh" ]; then
-        . "/opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh"
-    else
-        export PATH="/opt/homebrew/Caskroom/miniconda/base/bin:$PATH"
-    fi
-fi
-unset __conda_setup
+  elif [[ -f "$_conda_home/etc/profile.d/conda.sh" ]]; then
+    . "$_conda_home/etc/profile.d/conda.sh"
+  fi
+  unset __conda_setup
+  break
+done
+unset _conda_home
 
 # ──── Tool integrations ──────────────────────────────────────
 # iTerm2 shell integration
@@ -174,6 +196,12 @@ fixterm() {
 # if [[ -z "$TMUX" && "$TERM_PROGRAM" == "ghostty" && -z "$SSH_CONNECTION" ]]; then
 #   tmux attach 2>/dev/null || tmux new-session -s main
 # fi
+
+# Anything machine-specific and untracked goes in ~/.zshrc.local — that keeps
+# this file byte-identical across every Mac. The Linux .zshrc has always had
+# this hook; the macOS one did not, so per-machine tweaks had nowhere to go but
+# the tracked file. Sourced last, so it can override anything above it.
+[[ -f "$HOME/.zshrc.local" ]] && source "$HOME/.zshrc.local"
 
 #THIS MUST BE AT THE END OF THE FILE FOR SDKMAN TO WORK!!!
 export SDKMAN_DIR="$HOME/.sdkman"

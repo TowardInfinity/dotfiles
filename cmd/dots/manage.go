@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -90,6 +91,7 @@ type manageModel struct {
 	svcCursor    int
 	svcFilter    string
 	svcFiltering bool
+	svcTI        textinput.Model
 
 	projects     []projectInfo
 	projLoading  bool
@@ -107,7 +109,16 @@ type manageModel struct {
 }
 
 func newManageModel(repo string) manageModel {
+	ti := textinput.New()
+	ti.Prompt = "/"
+	ti.Placeholder = "filter services"
+	ti.PromptStyle = styFilter
+	ti.TextStyle = styValue
+	ti.PlaceholderStyle = styMuted
+	ti.CharLimit = 40
+
 	return manageModel{
+		svcTI:        ti,
 		repo:         repo,
 		dfInfo:       dotfilesInfo{behind: -1},
 		dfLoading:    true,
@@ -301,23 +312,23 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		switch msg.String() {
 		case "esc":
 			m.svcFiltering = false
+			m.svcTI.Blur()
+			m.svcTI.SetValue("")
 			m.svcFilter = ""
 			m.svcCursor = 0
+			return m, nil
 		case "enter":
 			m.svcFiltering = false
-		case "backspace":
-			if m.svcFilter != "" {
-				r := []rune(m.svcFilter)
-				m.svcFilter = string(r[:len(r)-1])
-				m.svcCursor = 0
-			}
-		default:
-			if len(msg.Runes) > 0 {
-				m.svcFilter += string(msg.Runes)
-				m.svcCursor = 0
-			}
+			m.svcTI.Blur()
+			return m, nil
 		}
-		return m, nil
+		var cmd tea.Cmd
+		m.svcTI, cmd = m.svcTI.Update(msg)
+		if v := m.svcTI.Value(); v != m.svcFilter {
+			m.svcFilter = v
+			m.svcCursor = 0
+		}
+		return m, cmd
 	}
 
 	vis := m.visibleServices()
@@ -335,7 +346,8 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		return m, nil
 	case "/":
 		m.svcFiltering = true
-		return m, nil
+		m.svcTI.Focus()
+		return m, textinput.Blink
 	case "r":
 		m.svcLoading = true
 		m.svcMsg = ""
@@ -828,11 +840,8 @@ func (m manageModel) viewServices(spin string) string {
 
 	var head string
 	if m.svcFilter != "" || m.svcFiltering {
-		cue := styFilter.Render("/" + m.svcFilter)
-		if m.svcFiltering {
-			cue += styFilter.Render("▏")
-		}
-		head = "  " + cue + "\n"
+		m.svcTI.Width = measure - 4
+		head = "  " + truncate(m.svcTI.View(), measure) + "\n"
 	}
 
 	vis := m.visibleServices()
@@ -1010,24 +1019,6 @@ func (m manageModel) viewMachines() string {
 		b.WriteString(truncate(line, m.w-4) + "\n")
 	}
 	return b.String()
-}
-
-func (m manageModel) help() string {
-	const nav = "h/l section"
-	switch m.section {
-	case secDotfiles:
-		return nav + "  ·  u update  ·  L relink  ·  p plugins  ·  t tpm  ·  D deps"
-	case secServices:
-		if m.svcFiltering {
-			return "type to filter  ·  enter keep  ·  esc clear"
-		}
-		return nav + "  ·  j/k  ·  / filter  ·  s start  ·  x stop  ·  R restart  ·  r rescan"
-	case secProjects:
-		return nav + "  ·  j/k move  ·  enter tmux"
-	case secMachines:
-		return nav + "  ·  j/k move  ·  d remote doctor"
-	}
-	return nav
 }
 
 // shellQuote wraps a value in single quotes for `sh -c`, escaping any single

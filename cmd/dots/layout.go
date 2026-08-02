@@ -55,11 +55,24 @@ func contentColumn(w, h int, header, body string) string {
 	if measure < 10 {
 		measure = 10
 	}
+	// Clip every body line to the measure rather than trusting callers to.
+	//
+	// A line longer than the column does not just look wrong — it WRAPS, which
+	// adds a row, and one extra row is enough to push the tab bar off the top.
+	// So an over-long service name in one section could remove the header from
+	// the whole app. Truncating here makes that structurally impossible.
+	lines := strings.Split(body, "\n")
+	for i, ln := range lines {
+		lines[i] = truncate(ln, measure)
+	}
+	body = strings.Join(lines, "\n")
+
 	inner := lipgloss.JoinVertical(lipgloss.Left, header, hrule(measure), body)
 	return lipgloss.NewStyle().
 		Width(w).
 		Height(h).
 		MaxHeight(h).
+		MaxWidth(w).
 		Padding(0, 2).
 		Render(inner)
 }

@@ -346,10 +346,3 @@ func (m doctorModel) view(spin string) string {
 		paneHeader("Doctor", osName, countSummary(ok, len(m.checks), "present"), measure),
 		body)
 }
-
-func (m doctorModel) help() string {
-	if m.loading {
-		return "checking…"
-	}
-	return "r re-run  ·  i install missing"
-}

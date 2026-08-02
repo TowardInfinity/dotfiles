@@ -1,0 +1,139 @@
+package main
+
+import (
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// sizes worth caring about: a wide monitor, a normal split, a narrow SSH
+// window, and the smallest thing anyone would plausibly use.
+var testSizes = [][2]int{{200, 50}, {140, 40}, {118, 30}, {96, 28}, {80, 24}, {64, 20}}
+
+func checkFrame(t *testing.T, label string, v string, w, h int) {
+	t.Helper()
+	if strings.TrimSpace(v) == "" {
+		t.Errorf("%s: rendered empty", label)
+		return
+	}
+	lines := strings.Split(v, "\n")
+	if len(lines) > h {
+		t.Errorf("%s: %d lines at height %d", label, len(lines), h)
+	}
+	for i, ln := range lines {
+		if got := lipgloss.Width(ln); got > w {
+			t.Errorf("%s: line %d width %d > %d", label, i, got, w)
+			return
+		}
+	}
+	// The tab bar must survive on every page; losing it was a real bug.
+	if !strings.Contains(v, "Docs") || !strings.Contains(v, "Manage") {
+		t.Errorf("%s: tab bar missing", label)
+	}
+}
+
+// Every one of the 22 doc pages, at every size.
+func TestEveryDocPageRenders(t *testing.T) {
+	docs, _ := loadDocs(findRepo())
+	if len(docs) < 20 {
+		t.Fatalf("expected the full doc set, got %d", len(docs))
+	}
+	for _, sz := range testSizes {
+		w, h := sz[0], sz[1]
+		m := newModel()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
+
+		for i := 0; i < len(docs); i++ {
+			cur := tm.(model).docs.current()
+			if cur == nil {
+				t.Fatalf("%dx%d: no current page at index %d", w, h, i)
+			}
+			checkFrame(t, cur.Name+" @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		}
+	}
+}
+
+// Doctor in both states, and Manage's four sections, at every size.
+func TestEveryPaneRenders(t *testing.T) {
+	for _, sz := range testSizes {
+		w, h := sz[0], sz[1]
+		m := newModel()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
+
+		// Doctor: loading, then loaded.
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+		checkFrame(t, "doctor-loading @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(runDoctorChecks())
+		checkFrame(t, "doctor-loaded @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+
+		// Manage: loading, then every section with real discovered data.
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+		checkFrame(t, "manage-loading @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(discoverServices()())
+		tm, _ = tm.Update(fetchProjectsInfo()())
+		tm, _ = tm.Update(fetchMachinesInfo()())
+		tm, _ = tm.Update(fetchDotfilesInfo(findRepo())())
+
+		for _, name := range sectionNames {
+			checkFrame(t, "manage-"+name+" @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+		}
+	}
+}
+
+// Filters, the action overlay, and the empty-result states.
+func TestInteractiveStatesRender(t *testing.T) {
+	for _, sz := range testSizes {
+		w, h := sz[0], sz[1]
+		m := newModel()
+		var tm tea.Model = m
+		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
+		tm, _ = tm.Update(discoverServices()())
+
+		// Docs filter: matching, then matching nothing.
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		for _, r := range "tmux" {
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		checkFrame(t, "docs-filter-hit @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		for _, r := range "zzzzz" {
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		checkFrame(t, "docs-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Services filter.
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		for _, r := range "zzz" {
+			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		}
+		checkFrame(t, "svc-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+		// Action overlay, awaiting confirmation.
+		tm, _ = tm.Update(runActionMsg{spec: actionSpec{
+			Title: "Probe", Argv: []string{"echo", "x"}, Confirm: "Run the probe?",
+		}})
+		checkFrame(t, "overlay-confirm @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	}
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b []byte
+	for n > 0 {
+		b = append([]byte{byte('0' + n%10)}, b...)
+		n /= 10
+	}
+	return string(b)
+}

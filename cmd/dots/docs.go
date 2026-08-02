@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -31,13 +32,22 @@ type docsModel struct {
 
 	filtering bool
 	filter    string
+	ti        textinput.Model
 
 	rendered string
 	lastDoc  string
 }
 
 func newDocsModel(all []doc) docsModel {
-	m := docsModel{all: all, sidebar: navWidth, showNav: true}
+	ti := textinput.New()
+	ti.Prompt = "/"
+	ti.Placeholder = "filter"
+	ti.PromptStyle = styFilter
+	ti.TextStyle = styValue
+	ti.PlaceholderStyle = styMuted
+	ti.CharLimit = 40
+
+	m := docsModel{all: all, sidebar: navWidth, showNav: true, ti: ti}
 	m.rebuild()
 	return m
 }
@@ -172,26 +182,25 @@ func (m docsModel) update(msg tea.Msg) (docsModel, tea.Cmd) {
 			switch msg.String() {
 			case "esc":
 				m.filtering = false
+				m.ti.Blur()
+				m.ti.SetValue("")
 				m.filter = ""
 				m.rebuild()
 				return m, nil
 			case "enter":
 				m.filtering = false
-				return m, nil
-			case "backspace":
-				if m.filter != "" {
-					r := []rune(m.filter)
-					m.filter = string(r[:len(r)-1])
-					m.rebuild()
-				}
-				return m, nil
-			default:
-				if len(msg.Runes) > 0 {
-					m.filter += string(msg.Runes)
-					m.rebuild()
-				}
+				m.ti.Blur()
 				return m, nil
 			}
+			// textinput handles word-delete, home/end and cursor movement,
+			// none of which the hand-rolled rune append did.
+			var cmd tea.Cmd
+			m.ti, cmd = m.ti.Update(msg)
+			if v := m.ti.Value(); v != m.filter {
+				m.filter = v
+				m.rebuild()
+			}
+			return m, cmd
 		}
 
 		switch msg.String() {
@@ -211,10 +220,12 @@ func (m docsModel) update(msg tea.Msg) (docsModel, tea.Cmd) {
 			return m, nil
 		case "/":
 			m.filtering = true
-			return m, nil
+			m.ti.Focus()
+			return m, textinput.Blink
 		case "esc":
 			if m.filter != "" {
 				m.filter = ""
+				m.ti.SetValue("")
 				m.rebuild()
 			}
 			return m, nil
@@ -276,11 +287,8 @@ func (m docsModel) viewNav() string {
 	// The filter lives at the top of the nav so it reads as "narrowing this
 	// list", which is what it does.
 	if m.filtering || m.filter != "" {
-		cue := styFilter.Render("/" + m.filter)
-		if m.filtering {
-			cue += styFilter.Render("▏")
-		}
-		b.WriteString(" " + padRight(truncate(cue, inner), inner) + "\n")
+		m.ti.Width = inner - 2
+		b.WriteString(" " + truncate(m.ti.View(), inner) + "\n")
 	} else {
 		b.WriteString(" " + styMuted.Render(padRight(
 			truncate(fmt.Sprintf("%d pages", len(m.all)), inner), inner)) + "\n")
@@ -401,11 +409,4 @@ func (m docsModel) viewOutline() string {
 		Height(m.h).
 		PaddingLeft(1).
 		Render(b.String())
-}
-
-func (m docsModel) help() string {
-	if m.filtering {
-		return "type to filter  ·  enter keep  ·  esc clear"
-	}
-	return "j/k page  ·  / filter  ·  d/u scroll"
 }

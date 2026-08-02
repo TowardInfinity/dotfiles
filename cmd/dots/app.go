@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -41,6 +43,7 @@ type model struct {
 	// broadcast to every pane that means several overlapping animations
 	// driving redraws. The root ticks once and hands the current frame down.
 	sp spinner.Model
+	hp help.Model
 
 	err string
 }
@@ -54,6 +57,7 @@ func newModel() model {
 	)
 	return model{
 		sp:     sp,
+		hp:     newHelp(),
 		repo:   repo,
 		source: src,
 		docs:   newDocsModel(docs),
@@ -85,6 +89,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
+		m.hp.Width = m.w - 2
 		w, h := m.contentSize()
 		m.docs = m.docs.resize(w, h)
 		m.doc = m.doc.resize(w, h)
@@ -226,14 +231,15 @@ func (m model) View() string {
 	bar := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 	bar = styTabBar.Width(m.w).Render(bar)
 
-	var body, help string
+	var body string
+	var ks []key.Binding
 	switch m.tab {
 	case tabDocs:
-		body, help = m.docs.view(), m.docs.help()
+		body, ks = m.docs.view(), m.docs.keys()
 	case tabDoctor:
-		body, help = m.doc.view(m.sp.View()), m.doc.help()
+		body, ks = m.doc.view(m.sp.View()), m.doc.keys()
 	case tabManage:
-		body, help = m.man.view(m.sp.View()), m.man.help()
+		body, ks = m.man.view(m.sp.View()), m.man.keys()
 	}
 
 	// Hard clamp. Every pane is handed the same height, but an arithmetic slip
@@ -242,14 +248,24 @@ func (m model) View() string {
 	_, ch := m.contentSize()
 	body = lipgloss.NewStyle().MaxHeight(ch).Render(body)
 
-	// Truncate rather than let it wrap. Manage's help is the longest, and at 80
-	// columns it wrapped to a second line — which made the status bar three
-	// lines instead of two and pushed the tab bar off the top. A hint that is
-	// cut short is a much smaller problem than losing the header.
-	hint := help + "  ·  tab switch  ·  q quit"
-	status := styStatus.Width(m.w).Render(
-		styHint.Render(truncate(hint, m.w-2)),
-	)
+	// help renders to its assigned width and elides what does not fit, so the
+	// status bar is always exactly one line. No truncation hack, and no way for
+	// a long key list to steal the tab bar's row.
+	//
+	// Width is set here rather than on resize: View is the only place the width
+	// is certainly current, and a stale zero here means no eliding at all —
+	// which put Manage's key list on two lines and cost the tab bar its row
+	// again, the very thing help was brought in to prevent.
+	hp := m.hp
+	hp.Width = m.w - 2
+	hint := hp.ShortHelpView(append(append([]key.Binding{}, ks...), globalKeys...))
+
+	// Backstop, and not a redundant one. bubbles' shouldAddItem only stops
+	// early if the ellipsis itself still fits: when it does not, the branch
+	// falls through and the item is appended anyway. So at narrow widths the
+	// "eliding" help can still overrun, wrap to two lines, and take the tab
+	// bar's row with it. Clip it.
+	status := styStatus.Width(m.w).Render(truncate(hint, m.w-2))
 
 	if m.act != nil {
 		body = m.act.view(m.sp.View())

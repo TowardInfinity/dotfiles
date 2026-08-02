@@ -1,0 +1,425 @@
+#!/usr/bin/env bash
+#
+# dots — the terminal reference and maintenance tool for this dotfiles setup.
+#
+#   dots                 browse the docs interactively
+#   dots <topic>         print one topic
+#   dots search <term>   search every topic at once
+#   dots update          pull the repo, relink, report what changed
+#   dots doctor          check the tools these configs actually call
+#   dots edit [topic]    open a doc, or the repo, in $EDITOR
+#   dots path            print the repo path (useful in scripts)
+#
+# Named `dots` rather than `dot` on purpose: graphviz owns `dot`, and a name
+# collision that only appears after someone installs graphviz is exactly the
+# kind of latent breakage this repo keeps getting bitten by.
+#
+# Renders markdown itself rather than requiring `glow`. glow is in the --deps
+# list but was missing on both machines when this was written, and a docs tool
+# that cannot open on a fresh box is worthless. If glow IS present it is used,
+# because it is better. Same story for fzf: nice when there, never required —
+# the Linux boxes deliberately do not have it.
+
+set -uo pipefail
+
+# ── Locate the repo ───────────────────────────────────────────
+# Resolve through symlinks: this script is linked into ~/.local/bin, so
+# $0's directory is the link's directory, not the repo.
+self="${BASH_SOURCE[0]}"
+while [[ -L "$self" ]]; do
+  target="$(readlink "$self")"
+  [[ $target == /* ]] && self="$target" || self="$(cd "$(dirname "$self")" && pwd)/$target"
+done
+REPO="$(cd "$(dirname "$self")/.." && pwd)"
+DOCS="$REPO/docs"
+
+# ── Palette ───────────────────────────────────────────────────
+# Tokyo Night, the same one Ghostty, tmux and NvChad use. Suppressed when
+# not writing to a terminal, so `dots tmux | grep` stays clean.
+if [[ -t 1 ]]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; IT=$'\033[3m'; R=$'\033[0m'
+  BLUE=$'\033[38;5;111m'; GREEN=$'\033[38;5;150m'; AMBER=$'\033[38;5;180m'
+  RED=$'\033[38;5;210m'; CYAN=$'\033[38;5;117m'; VIOLET=$'\033[38;5;141m'
+  GREY=$'\033[38;5;103m'
+else
+  B=""; DIM=""; IT=""; R=""
+  BLUE=""; GREEN=""; AMBER=""; RED=""; CYAN=""; VIOLET=""; GREY=""
+fi
+
+die()  { printf '%sError:%s %s\n' "$RED" "$R" "$1" >&2; exit 1; }
+info() { printf '%s==>%s %s\n' "$BLUE" "$R" "$1"; }
+warn() { printf '%s!!%s  %s\n' "$AMBER" "$R" "$1"; }
+
+topics() {
+  [[ -d "$DOCS" ]] || return 0
+  for f in "$DOCS"/*.md; do
+    [[ -e "$f" ]] || continue
+    basename "$f" .md
+  done
+}
+
+# ── Markdown rendering ────────────────────────────────────────
+# A deliberately small renderer: headings, bold, inline code, list bullets,
+# fenced code blocks, block quotes and tables. Not a full CommonMark
+# implementation and does not try to be — it only has to read well for the
+# docs in this repo, with zero dependencies.
+render() {
+  local cols="${COLUMNS:-0}"
+  [[ $cols -gt 0 ]] || cols="$(tput cols 2>/dev/null || echo 80)"
+
+  awk -v B="$B" -v DIM="$DIM" -v IT="$IT" -v R="$R" \
+      -v BLUE="$BLUE" -v GREEN="$GREEN" -v AMBER="$AMBER" -v CYAN="$CYAN" \
+      -v VIOLET="$VIOLET" -v GREY="$GREY" -v COLS="$cols" '
+    function inline(s) {
+      # Inline code first: its content must not then be processed for bold.
+      while (match(s, /`[^`]+`/)) {
+        code = substr(s, RSTART + 1, RLENGTH - 2)
+        s = substr(s, 1, RSTART - 1) CYAN code R substr(s, RSTART + RLENGTH)
+      }
+      while (match(s, /\*\*[^*]+\*\*/)) {
+        bold = substr(s, RSTART + 2, RLENGTH - 4)
+        s = substr(s, 1, RSTART - 1) B bold R substr(s, RSTART + RLENGTH)
+      }
+      while (match(s, /(^|[ (])\*[^*]+\*/)) {
+        pre = substr(s, RSTART, 1); off = (pre == "*") ? 0 : 1
+        em = substr(s, RSTART + off + 1, RLENGTH - off - 2)
+        s = substr(s, 1, RSTART - 1) (off ? pre : "") IT em R substr(s, RSTART + RLENGTH)
+      }
+      return s
+    }
+    # Buffer a table, then lay it out once the widths are known. Padding has
+    # to be measured on the PLAIN text — inline() has already inserted escape
+    # sequences, and counting those as visible characters is what made columns
+    # collide.
+    function pad(n,   s) { s = ""; while (n-- > 0) s = s " "; return s }
+
+    # Visible width: markdown markers are gone and escape sequences occupy no
+    # columns, so neither may be counted. Measuring the raw cell instead is
+    # what shifted every row containing a code span two columns left.
+    function vislen(s) { gsub(/\033\[[0-9;]*m/, "", s); return length(s) }
+
+    function flush_table(   r, c, w, total, i, out) {
+      if (nrows == 0) return
+
+      for (r = 1; r <= nrows; r++)
+        for (c = 1; c <= ncols; c++) {
+          rend[r, c] = (r == 1) ? B GREY cell[r, c] R : inline(cell[r, c])
+          vis[r, c]  = vislen(rend[r, c])
+        }
+
+      for (c = 1; c <= ncols; c++) {
+        w[c] = 0
+        for (r = 1; r <= nrows; r++) if (vis[r, c] > w[c]) w[c] = vis[r, c]
+      }
+      total = 2
+      for (c = 1; c <= ncols; c++) total += w[c] + 2
+
+      for (r = 1; r <= nrows; r++) {
+        if (total <= COLS) {
+          # Wide enough: real columns.
+          out = "  "
+          for (c = 1; c <= ncols; c++) {
+            out = out rend[r, c]
+            if (c < ncols) out = out pad(w[c] - vis[r, c] + 2)
+          }
+          print out
+        } else {
+          # Too narrow for columns — stack each row as a labelled block, which
+          # reads far better than wrapped table rows on an 80-column SSH session.
+          if (r == 1) continue
+          print "  " B inline(cell[r, 1]) R
+          for (c = 2; c <= ncols; c++) {
+            if (cell[r, c] == "" || cell[r, c] == "—") continue
+            print "      " GREY hdr[c] ":" R " " inline(cell[r, c])
+          }
+          if (r < nrows) print ""
+        }
+      }
+      nrows = 0; ncols = 0
+    }
+
+    BEGIN { fence = 0; nrows = 0; ncols = 0 }
+    {
+      line = $0
+
+      if (line ~ /^```/) { flush_table(); fence = !fence; next }
+      if (fence) { print "    " GREEN line R; next }
+
+      # Table rows accumulate; anything else ends the table first.
+      if (line ~ /^\|[ :|-]+\|$/) { next }          # separator row
+      if (line ~ /^\|/) {
+        # An escaped \| is table content, not a column break — tmux binds `|`
+        # to split a pane, so this is load-bearing, not hypothetical. Park it
+        # on a placeholder across the split, then put it back.
+        gsub(/\\\|/, "\001", line)
+        sub(/^\| */, "", line); sub(/ *\|$/, "", line)
+        n = split(line, c_, / *\| */)
+        nrows++
+        if (n > ncols) ncols = n
+        for (i = 1; i <= n; i++) {
+          gsub(/\001/, "|", c_[i])
+          cell[nrows, i] = c_[i]
+          if (nrows == 1) hdr[i] = c_[i]
+        }
+        next
+      }
+      flush_table()
+
+      if (line ~ /^# /)   { print "";  print B BLUE substr(line, 3) R;
+                            bar = ""; n = length(substr(line, 3))
+                            while (n-- > 0) bar = bar "─"
+                            print GREY bar R; next }
+      if (line ~ /^## /)  { print "";  print B AMBER substr(line, 4) R; next }
+      if (line ~ /^### /) { print "";  print B substr(line, 5) R; next }
+
+      if (line ~ /^> /) { print "  " VIOLET "│" R " " inline(substr(line, 3)); next }
+      if (line ~ /^>$/) { print "  " VIOLET "│" R; next }
+
+      if (line ~ /^[-*] /) { print "  " AMBER "•" R " " inline(substr(line, 3)); next }
+
+      if (line ~ /^ *$/) { print ""; next }
+
+      print inline(line)
+    }
+    END { flush_table() }
+  '
+}
+
+show() {
+  local topic="$1" file="$DOCS/$1.md"
+  [[ -f "$file" ]] || die "no such topic: $topic  (try: dots)"
+
+  if command -v glow >/dev/null 2>&1; then
+    glow -- "$file"
+    return
+  fi
+
+  if [[ -t 1 ]] && command -v less >/dev/null 2>&1; then
+    render < "$file" | less -R -X -F
+  else
+    render < "$file"
+  fi
+}
+
+# ── Interactive browse ────────────────────────────────────────
+browse() {
+  local list
+  list="$(topics)"
+  [[ -n $list ]] || die "no docs found in $DOCS"
+
+  if command -v fzf >/dev/null 2>&1 && [[ -t 0 ]]; then
+    local pick
+    pick="$(printf '%s\n' "$list" | fzf \
+      --prompt='dots > ' \
+      --height=40% --reverse --border \
+      --preview="sed -n '1,60p' '$DOCS/{}.md'" \
+      --preview-window=right:60%:wrap)" || return 0
+    [[ -n $pick ]] && show "$pick"
+    return
+  fi
+
+  # No fzf — a plain numbered menu. The servers land here by design.
+  local -a arr=()
+  while IFS= read -r t; do arr+=("$t"); done <<< "$list"
+
+  while true; do
+    printf '\n%s%s dots%s %s— terminal setup reference%s\n\n' "$B" "$BLUE" "$R" "$DIM" "$R"
+    local i=1
+    for t in "${arr[@]}"; do
+      printf '  %s%2d%s  %s\n' "$AMBER" "$i" "$R" "$t"
+      i=$((i + 1))
+    done
+    printf '\n  %ss%s  search      %su%s  update      %sd%s  doctor      %sq%s  quit\n\n' \
+      "$AMBER" "$R" "$AMBER" "$R" "$AMBER" "$R" "$AMBER" "$R"
+    printf '%sselect>%s ' "$BLUE" "$R"
+
+    local ans
+    read -r ans || { echo; return 0; }
+    case "$ans" in
+      q|Q|"")  return 0 ;;
+      s|S)     printf 'search> '; local term; read -r term
+               [[ -n ${term:-} ]] && search "$term" ;;
+      u|U)     update ;;
+      d|D)     doctor ;;
+      *)
+        if [[ $ans =~ ^[0-9]+$ ]] && (( ans >= 1 && ans <= ${#arr[@]} )); then
+          show "${arr[$((ans - 1))]}"
+        elif printf '%s\n' "$list" | grep -qx -- "$ans"; then
+          show "$ans"
+        else
+          warn "not a choice: $ans"
+        fi
+        ;;
+    esac
+  done
+}
+
+# ── Search ────────────────────────────────────────────────────
+search() {
+  local term="${1:-}"
+  [[ -n $term ]] || die "usage: dots search <term>"
+
+  local found=0 t file
+  while IFS= read -r t; do
+    file="$DOCS/$t.md"
+    # -i for case, -n for line numbers; grep is guaranteed everywhere, rg is not.
+    if grep -in -- "$term" "$file" >/dev/null 2>&1; then
+      found=1
+      printf '\n%s%s%s\n' "$B$BLUE" "$t" "$R"
+      grep -in -- "$term" "$file" | while IFS=: read -r ln text; do
+        # A hit inside a table arrives as a raw markdown row. Reading
+        # `| Space y | Yank to the clipboard | n v |` in results is worse than
+        # useless, so strip the pipes and join the cells with a separator.
+        text="${text#"${text%%[![:space:]]*}"}"
+        if [[ $text == \|* ]]; then
+          text="${text#|}"; text="${text%|}"
+          text="${text//   / }"
+          text="$(printf '%s' "$text" | sed 's/ *| */  ·  /g; s/^ *//; s/ *$//')"
+        fi
+        text="${text//\`/}"
+        text="${text//\\|/|}"
+        printf '  %s%4s%s  %s\n' "$GREY" "$ln" "$R" "$text"
+      done
+    fi
+  done <<< "$(topics)"
+
+  (( found )) || { warn "nothing matched: $term"; return 1; }
+}
+
+# ── Update ────────────────────────────────────────────────────
+update() {
+  [[ -d "$REPO/.git" ]] || die "$REPO is not a git checkout — nothing to pull"
+
+  info "Updating $REPO"
+  local before after
+  before="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+  if ! git -C "$REPO" pull --ff-only; then
+    warn "could not fast-forward — your checkout has diverged"
+    warn "resolve it with: git -C \"$REPO\" status"
+    return 1
+  fi
+
+  after="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+  if [[ $before == "$after" ]]; then
+    info "Already current ($after)"
+  else
+    info "$before -> $after"
+    git -C "$REPO" --no-pager log --oneline "$before..$after" 2>/dev/null | sed 's/^/    /'
+  fi
+
+  info "Relinking"
+  "$REPO/install.sh" || warn "install.sh reported a problem"
+
+  cat <<EOF
+
+${DIM}Config files are symlinks, so edits are already live. To pick up changes:${R}
+  exec zsh
+  tmux source-file ~/.config/tmux/tmux.conf   ${DIM}# never kill-server${R}
+EOF
+}
+
+# ── Doctor ────────────────────────────────────────────────────
+# Checks what the CONFIGS call, not what --deps happens to install. Those are
+# different lists, and conflating them is why a missing tool went unnoticed
+# until an alias failed at the prompt.
+doctor() {
+  local os missing=() present=0
+  case "$(uname -s)" in
+    Darwin) os=macos ;;
+    Linux)  os=linux ;;
+    *) die "unsupported OS: $(uname -s)" ;;
+  esac
+
+  local -a need=(zsh git nvim tmux)
+  if [[ $os == macos ]]; then
+    need+=(bat eza fzf zoxide lazygit fnm uv)
+  else
+    need+=(glow go uv pnpm fnm)
+  fi
+
+  printf '\n%s%s doctor%s  %s(%s)%s\n\n' "$B" "$BLUE" "$R" "$DIM" "$os" "$R"
+
+  for t in "${need[@]}"; do
+    if have "$t"; then
+      printf '  %s✓%s  %s\n' "$GREEN" "$R" "$t"
+      present=$((present + 1))
+    else
+      printf '  %s✗%s  %s\n' "$RED" "$R" "$t"
+      missing+=("$t")
+    fi
+  done
+
+  if [[ -d "$HOME/.oh-my-zsh" ]]; then
+    printf '  %s✓%s  oh-my-zsh\n' "$GREEN" "$R"
+  else
+    printf '  %s✗%s  oh-my-zsh\n' "$RED" "$R"; missing+=(oh-my-zsh)
+  fi
+  if [[ -d "$HOME/.config/tmux/plugins/tpm/.git" ]]; then
+    printf '  %s✓%s  tpm\n' "$GREEN" "$R"
+  else
+    printf '  %s✗%s  tpm\n' "$RED" "$R"; missing+=(tpm)
+  fi
+
+  echo
+  if (( ${#missing[@]} == 0 )); then
+    printf '  %sEverything the configs call is installed.%s\n\n' "$GREEN" "$R"
+    return 0
+  fi
+
+  printf '  %s%d missing:%s %s\n\n' "$AMBER" "${#missing[@]}" "$R" "${missing[*]}"
+  printf '  Install with:\n    %ssh -c "$(curl -fsSL https://toin.in/install)" -- --deps%s\n\n' "$CYAN" "$R"
+  return 1
+}
+
+# Mirrors bootstrap.sh's have(): a non-interactive shell has not sourced
+# .zshrc, so these directories are missing from PATH and a bare `command -v`
+# reports installed tools as absent.
+have() {
+  command -v "$1" >/dev/null 2>&1 && return 0
+  local d
+  for d in "$HOME/.local/bin" "$HOME/go/bin" "$HOME/.local/share/pnpm" \
+           "$HOME/.local/share/fnm" /usr/local/bin /usr/local/go/bin \
+           /opt/homebrew/bin; do
+    [[ -x "$d/$1" ]] && return 0
+  done
+  return 1
+}
+
+edit() {
+  local ed="${EDITOR:-nvim}"
+  if [[ -n ${1:-} ]]; then
+    [[ -f "$DOCS/$1.md" ]] || die "no such topic: $1"
+    "$ed" "$DOCS/$1.md"
+  else
+    "$ed" "$REPO"
+  fi
+}
+
+usage() {
+  cat <<EOF
+${B}${BLUE}dots${R} ${DIM}— terminal setup reference${R}
+
+  ${B}dots${R}                 browse interactively
+  ${B}dots${R} <topic>         print one topic
+  ${B}dots${R} search <term>   search every topic
+  ${B}dots${R} update          pull, relink, show what changed
+  ${B}dots${R} doctor          check the tools these configs call
+  ${B}dots${R} edit [topic]    open a doc, or the repo, in \$EDITOR
+  ${B}dots${R} path            print the repo path
+
+${DIM}topics:${R} $(topics | tr '\n' ' ')
+EOF
+}
+
+case "${1:-}" in
+  ""|browse)      browse ;;
+  -h|--help|help) usage ;;
+  search|-s)      shift; search "${1:-}" ;;
+  update|-u)      update ;;
+  doctor|-d)      doctor ;;
+  edit|-e)        shift; edit "${1:-}" ;;
+  path)           echo "$REPO" ;;
+  *)              show "$1" ;;
+esac

@@ -16,7 +16,25 @@ linux/
   tmux/tmux.conf   prefix Ctrl-b, OSC 52 clipboard, targets tmux 3.2a
 bootstrap.sh       the curl'd one-liner — clones, optional packages, then runs:
 install.sh         detects the OS and links the right set
+bin/dots           terminal reference + maintenance CLI (linked to ~/.local/bin)
+docs/              the reference itself, one markdown file per topic
 ```
+
+## dots
+
+The docs are readable from the terminal on any machine this is installed on:
+
+```sh
+dots                 # browse interactively
+dots tmux            # print one topic
+dots search clipboard # search every topic at once
+dots update          # pull, relink, show what changed
+dots doctor          # check the tools these configs actually call
+```
+
+No dependencies — it renders the markdown itself. It uses `glow` and `fzf`
+when they happen to be present, but never requires them, because the servers
+deliberately have neither.
 
 `install.sh` reads `uname -s` and links `common/` plus either `macos/` or
 `linux/`. Neovim is genuinely OS-agnostic — no Homebrew paths, no `pbcopy` —

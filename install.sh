@@ -139,6 +139,12 @@ echo
 # ── Shared ────────────────────────────────────────────────────
 link common/nvim "$HOME/.config/nvim"
 
+# ── dots ──────────────────────────────────────────────────────
+# The reference/maintenance CLI. Linked into ~/.local/bin, which both .zshrc
+# files already put on PATH. It resolves back through this symlink to find the
+# repo, so `dots update` works from anywhere.
+link bin/dots "$HOME/.local/bin/dots"
+
 # ── Claude Code ───────────────────────────────────────────────
 # Only the delegation policy is shared. Each box's ~/.claude/CLAUDE.md stays
 # untracked and machine-specific (different toolchains, different guardrails)

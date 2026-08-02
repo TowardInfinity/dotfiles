@@ -47,8 +47,25 @@ local options = {
     end
     -- Don't reformat files you're only passing through — e.g. node_modules,
     -- or the Obsidian vault where Prettier would rewrite other tools' output.
+    --
+    -- The vault check used to be described here but not actually implemented,
+    -- so every note save was silently reformatted by prettier. That matters
+    -- for Markdown specifically: prettier strips the trailing double-space
+    -- hard breaks that autocmds.lua's prose mode treats as meaningful, and
+    -- reflows callouts, checklists and wiki-links that Obsidian owns.
+    --
+    -- Matched by vault-directory name rather than an absolute path: this file
+    -- is shared verbatim with Linux servers, and hardcoding a macOS iCloud
+    -- path under a home directory would be both broken there and needlessly
+    -- personal in a public repo.
     local path = vim.api.nvim_buf_get_name(bufnr)
-    if path:match "/node_modules/" or path:match "/%.git/" then
+    if
+      path:match "/node_modules/"
+      or path:match "/%.git/"
+      or path:match "iCloud~md~obsidian"
+      or path:match "/Obsidian Notes/"
+      or vim.fs.root(bufnr, ".obsidian") ~= nil
+    then
       return
     end
     return { timeout_ms = 1500, lsp_format = "fallback" }

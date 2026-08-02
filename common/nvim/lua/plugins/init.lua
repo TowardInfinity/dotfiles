@@ -50,6 +50,12 @@ return {
     -- lazy-lock.json records the branch too, but only `:Lazy restore` honours
     -- it; `:Lazy sync` follows the remote default. This makes it deterministic.
     branch = "master",
+    -- NvChad's spec sets `build = ":TSUpdate | TSInstallAll"`, but TSInstallAll
+    -- is not a command on the master branch we pin — every fresh install and
+    -- every :Lazy update threw "E492: Not an editor command: TSInstallAll".
+    -- Parsers still arrived via ensure_installed below, so the error was pure
+    -- noise, but it is the first thing a new machine shows you. Override it.
+    build = ":TSUpdate",
     -- opts MUST be a function here. NvChad declares
     --   opts = function() return require "nvchad.configs.treesitter" end
     -- which ignores its arguments and returns a fresh table — so a plain
@@ -143,7 +149,11 @@ return {
   -- fresh machine converges on its own instead of failing quietly.
   {
     "WhoIsSethDaniel/mason-tool-installer.nvim",
-    dependencies = { "williamboman/mason.nvim" },
+    -- mason-org, not williamboman. The repo transferred orgs, and NvChad v2.5's
+    -- own spec already says mason-org — lazy merges specs by short name, so the
+    -- two URLs collided into one entry and the stale one happened to win here.
+    -- It works today only because GitHub still 301-redirects the old path.
+    dependencies = { "mason-org/mason.nvim" },
     event = "VeryLazy",
     opts = {
       ensure_installed = {

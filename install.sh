@@ -17,6 +17,10 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STAMP="$(date +%Y%m%dT%H%M%S)"
+# Plain `~` in a ${var/pat/repl} replacement can be tilde-expanded by some bash
+# builds; escaping it as \~ printed a literal backslash ("\~/.config/nvim").
+# A variable sidesteps both.
+TILDE="~"
 DRY=false
 COPY=false
 NVIM=false
@@ -42,24 +46,33 @@ esac
 VERB=linked;   $COPY && VERB=copied
 ACTION=link;   $COPY && ACTION=copy
 
+MISSING=0
+
 link() {
   local src="$REPO/$1" dst="$2"
 
+  # A missing source used to `return 1`, and under `set -e` a bare call to this
+  # function then killed the script on the spot. One absent file left the home
+  # directory half-linked — later entries never ran, TPM never installed, and
+  # the closing instructions never printed, so the only clue was a single red
+  # line scrolled off the top. Record it and carry on; the summary at the end
+  # reports it and the exit status still reflects the failure.
   if [[ ! -e "$src" ]]; then
     printf '  \033[31mmissing\033[0m  %s\n' "$src"
-    return 1
+    MISSING=$((MISSING + 1))
+    return 0
   fi
 
   if ! $COPY && [[ -L "$dst" && "$(readlink "$dst")" == "$src" ]]; then
-    printf '  \033[90mok\033[0m       %s\n' "${dst/#$HOME/\~}"
+    printf '  \033[90mok\033[0m       %s\n' "${dst/#$HOME/$TILDE}"
     return 0
   fi
 
   if $DRY; then
     if [[ -e "$dst" || -L "$dst" ]]; then
-      printf '  \033[33mwould back up + %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/\~}"
+      printf '  \033[33mwould back up + %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/$TILDE}"
     else
-      printf '  \033[36mwould %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/\~}"
+      printf '  \033[36mwould %s\033[0m  %s\n' "$ACTION" "${dst/#$HOME/$TILDE}"
     fi
     return 0
   fi
@@ -68,7 +81,7 @@ link() {
 
   if [[ -e "$dst" || -L "$dst" ]]; then
     mv "$dst" "$dst.backup.$STAMP"
-    printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/\~}" "$(basename "$dst").backup.$STAMP"
+    printf '  \033[33mbacked up\033[0m %s -> %s\n' "${dst/#$HOME/$TILDE}" "$(basename "$dst").backup.$STAMP"
   fi
 
   if $COPY; then
@@ -76,7 +89,7 @@ link() {
   else
     ln -s "$src" "$dst"
   fi
-  printf '  \033[32m%s\033[0m   %s\n' "$VERB" "${dst/#$HOME/\~}"
+  printf '  \033[32m%s\033[0m   %s\n' "$VERB" "${dst/#$HOME/$TILDE}"
 }
 
 echo "dotfiles: $REPO"
@@ -124,18 +137,37 @@ if $NVIM && $DRY; then
   printf '  \033[36mwould restore\033[0m  nvim plugins from lazy-lock.json\n'
 fi
 
+report_missing() {
+  (( MISSING > 0 )) || return 0
+  printf '\033[31m%d source file(s) were missing\033[0m — those configs are NOT installed.\n' "$MISSING"
+  echo "A partial checkout will do this; try: git -C \"$REPO\" status"
+}
+
 echo
 if $DRY; then
   echo "Dry run complete."
-  exit 0
+  report_missing
+  (( MISSING == 0 ))
+  exit $?
 fi
 
 # TPM — not vendored here, fetch if absent.
+#
+# The presence check is `-d "$TPM/.git"`, not `-d "$TPM"`, and a failed clone
+# cleans up after itself. A clone interrupted mid-transfer (dropped link, lid
+# closed, Ctrl-C) leaves the directory behind; with the looser check that
+# directory then counted as "installed" forever, so tmux.conf's `run '.../tpm'`
+# silently did nothing on every start and re-running this never repaired it.
 TPM="$HOME/.config/tmux/plugins/tpm"
-if [[ ! -d "$TPM" ]]; then
+if [[ ! -d "$TPM/.git" ]]; then
   echo "Installing TPM..."
-  git clone --depth 1 -q https://github.com/tmux-plugins/tpm "$TPM"
-  echo "  done — press prefix + I inside tmux to install plugins"
+  rm -rf "$TPM"
+  if git clone --depth 1 -q https://github.com/tmux-plugins/tpm "$TPM"; then
+    echo "  done — press prefix + I inside tmux to install plugins"
+  else
+    rm -rf "$TPM"
+    printf '  \033[33mwarning\033[0m  TPM clone failed — tmux plugins will not load; re-run to retry\n'
+  fi
   echo
 fi
 
@@ -185,4 +217,12 @@ else
 Machine-specific shell bits go in ~/.zshrc.local — it is sourced if present
 and stays untracked, so this repo's .zshrc is identical on every server.
 EOF
+fi
+
+# Surfaced at the end rather than only at the point of failure, where a single
+# red line scrolls away behind everything that follows.
+if (( MISSING > 0 )); then
+  echo
+  report_missing
+  exit 1
 fi

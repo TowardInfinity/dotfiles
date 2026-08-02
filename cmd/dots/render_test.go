@@ -259,3 +259,41 @@ func TestTabsFitHeight(t *testing.T) {
 		}
 	}
 }
+
+// A key pressed in one tab must not reach the others.
+func TestKeysDoNotLeakAcrossTabs(t *testing.T) {
+	m := newModel()
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
+
+	// Docs advertises d/u for scrolling. Manage binds u to "update dotfiles".
+	if tm.(model).tab != tabDocs {
+		t.Fatal("expected Docs")
+	}
+	var cmd tea.Cmd
+	tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	// Bubble Tea runs whatever a pane returns; not running it here is what
+	// made the first version of this test pass against a real leak.
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			tm, _ = tm.Update(msg)
+		}
+	}
+	if tm.(model).act != nil {
+		t.Errorf("pressing 'u' in Docs started an action: %q",
+			tm.(model).act.spec.Title)
+	}
+
+	// And 'i' in Docs must not trigger Doctor's installer.
+	tm, _ = tm.Update(runDoctorChecks())
+	tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	if cmd != nil {
+		if msg := cmd(); msg != nil {
+			tm, _ = tm.Update(msg)
+		}
+	}
+	if tm.(model).act != nil {
+		t.Errorf("pressing 'i' in Docs started an action: %q",
+			tm.(model).act.spec.Title)
+	}
+}

@@ -170,6 +170,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tab = tabManage
 			return m, nil
 		}
+
+		// Keys go to the VISIBLE pane only.
+		//
+		// The broadcast below exists so async results reach a pane that is not
+		// in front. Letting key presses take the same path meant every pane saw
+		// every key: `u` in Docs is "scroll up", but Manage binds `u` to
+		// "update dotfiles", so reading the docs started a git pull. `i`, `s`,
+		// `x` and `D` leaked the same way. Async data does not care which tab
+		// is showing; input very much does.
+		var kc tea.Cmd
+		switch m.tab {
+		case tabDocs:
+			m.docs, kc = m.docs.update(msg)
+		case tabDoctor:
+			m.doc, kc = m.doc.update(msg)
+		case tabManage:
+			m.man, kc = m.man.update(msg)
+		}
+		return m, kc
 	}
 
 	if _, ok := msg.(spinner.TickMsg); ok {
@@ -191,7 +210,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Broadcast to every pane, not just the visible one.
+	// Broadcast to every pane, not just the visible one. Data only — key
+	// presses are handled above and never reach here.
 	//
 	// Routing by active tab dropped any async result whose pane was in the
 	// background — and Init() starts the doctor check while Docs is in front,

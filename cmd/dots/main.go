@@ -10,6 +10,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// version is stamped at release time by the workflow's
+//
+//	-ldflags "-X main.version=<tag>"
+//
+// It stayed "dev" until now because the variable did not exist and the linker
+// silently no-ops a -X for an unknown symbol — so every release binary would
+// have been unable to say which release it was.
+var version = "dev"
+
 // dots — reference and maintenance for this terminal setup.
 //
 // Two front doors on purpose. No arguments gives the TUI, which is for
@@ -32,6 +41,8 @@ func main() {
 	switch args[0] {
 	case "-h", "--help", "help":
 		usage()
+	case "version", "--version", "-v":
+		fmt.Println(version)
 	case "path":
 		repo := findRepo()
 		if repo == "" {
@@ -81,6 +92,7 @@ func usage() {
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path
+  dots version         print the version of this binary
 
 In the TUI: 1/2/3 or tab switch panes, / filters, j/k moves, q quits.
 `)

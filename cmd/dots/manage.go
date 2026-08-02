@@ -3,11 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,18 +44,6 @@ type dotfilesInfo struct {
 	behind     int // -1 = unknown (no upstream, or the git call failed)
 }
 
-type serviceStatus struct {
-	name    string
-	present bool
-	running bool
-	detail  string
-}
-
-type servicesInfo struct {
-	openWebUI serviceStatus
-	ollama    serviceStatus
-}
-
 type projectInfo struct {
 	name       string
 	path       string
@@ -82,7 +68,6 @@ type dotfilesActionDoneMsg struct {
 	ok  bool
 	msg string
 }
-type servicesInfoMsg struct{ info servicesInfo }
 type projectsInfoMsg struct{ projects []projectInfo }
 type machinesInfoMsg struct{ machines []machineInfo }
 
@@ -98,9 +83,13 @@ type manageModel struct {
 	dfBusy    bool
 	dfMsg     string
 
-	svcInfo    servicesInfo
-	svcLoading bool
-	svcMsg     string
+	services     []service
+	svcSources   []string
+	svcLoading   bool
+	svcMsg       string
+	svcCursor    int
+	svcFilter    string
+	svcFiltering bool
 
 	projects     []projectInfo
 	projLoading  bool
@@ -132,7 +121,7 @@ func newManageModel(repo string) manageModel {
 func (m manageModel) Init() tea.Cmd {
 	return tea.Batch(
 		fetchDotfilesInfo(m.repo),
-		fetchServicesInfo(),
+		discoverServices(),
 		fetchProjectsInfo(),
 		fetchMachinesInfo(),
 	)
@@ -160,9 +149,30 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case servicesInfoMsg:
-		m.svcInfo = msg.info
+	case servicesFoundMsg:
+		m.services = msg.services
+		m.svcSources = msg.sources
 		m.svcLoading = false
+		if msg.err != "" {
+			m.svcMsg = msg.err
+		}
+		if m.svcCursor >= len(m.services) {
+			m.svcCursor = len(m.services) - 1
+		}
+		if m.svcCursor < 0 {
+			m.svcCursor = 0
+		}
+		// Discovery says what is loaded; probing says whether it answers.
+		return m, probeServices(m.services)
+
+	case servicesProbedMsg:
+		for i := range m.services {
+			if m.services[i].Port == 0 {
+				continue
+			}
+			m.services[i].Probed = true
+			m.services[i].Healthy = msg.ports[m.services[i].Port]
+		}
 		return m, nil
 
 	case projectsInfoMsg:
@@ -287,18 +297,71 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 }
 
 func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
-	var action string
+	if m.svcFiltering {
+		switch msg.String() {
+		case "esc":
+			m.svcFiltering = false
+			m.svcFilter = ""
+			m.svcCursor = 0
+		case "enter":
+			m.svcFiltering = false
+		case "backspace":
+			if m.svcFilter != "" {
+				r := []rune(m.svcFilter)
+				m.svcFilter = string(r[:len(r)-1])
+				m.svcCursor = 0
+			}
+		default:
+			if len(msg.Runes) > 0 {
+				m.svcFilter += string(msg.Runes)
+				m.svcCursor = 0
+			}
+		}
+		return m, nil
+	}
+
+	vis := m.visibleServices()
+
+	switch msg.String() {
+	case "j", "down":
+		if m.svcCursor < len(vis)-1 {
+			m.svcCursor++
+		}
+		return m, nil
+	case "k", "up":
+		if m.svcCursor > 0 {
+			m.svcCursor--
+		}
+		return m, nil
+	case "/":
+		m.svcFiltering = true
+		return m, nil
+	case "r":
+		m.svcLoading = true
+		m.svcMsg = ""
+		return m, discoverServices()
+	}
+
+	verb := ""
 	switch msg.String() {
 	case "s":
-		action = "load"
+		verb = "start"
 	case "x":
-		action = "unload"
+		verb = "stop"
+	case "R":
+		verb = "restart"
 	default:
 		return m, nil
 	}
-	spec, note, ok := serviceActionSpec(action)
+
+	if m.svcCursor >= len(vis) {
+		return m, nil
+	}
+	spec, ok := serviceAction(vis[m.svcCursor], verb)
 	if !ok {
-		m.svcMsg = note
+		// Saying why is better than a key that appears to do nothing.
+		m.svcMsg = verb + " is not available for " + svcSourceName(vis[m.svcCursor].Source) +
+			" units of this kind"
 		return m, nil
 	}
 	m.svcMsg = ""
@@ -458,78 +521,6 @@ func firstLine(out string, err error) string {
 }
 
 // ── commands: services ────────────────────────────────────────
-
-func fetchServicesInfo() tea.Cmd {
-	return func() tea.Msg {
-		var info servicesInfo
-
-		info.openWebUI = serviceStatus{name: "open-webui"}
-		conn, err := net.DialTimeout("tcp", "127.0.0.1:11435", 2*time.Second)
-		if err == nil {
-			conn.Close()
-			info.openWebUI.present = true
-			info.openWebUI.running = true
-			info.openWebUI.detail = "listening on :11435"
-		} else {
-			info.openWebUI.detail = "not listening on :11435"
-		}
-
-		info.ollama = serviceStatus{name: "ollama"}
-		if p, ok := have("ollama"); ok {
-			info.ollama.present = true
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			out, err := exec.CommandContext(ctx, p, "ps").CombinedOutput()
-			cancel()
-			if err != nil {
-				info.ollama.detail = "not running"
-			} else {
-				n := 0
-				for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-					if strings.TrimSpace(line) != "" {
-						n++
-					}
-				}
-				if n > 0 {
-					n-- // header row
-				}
-				if n <= 0 {
-					info.ollama.detail = "running, no models loaded"
-				} else {
-					info.ollama.running = true
-					info.ollama.detail = fmt.Sprintf("running, %d model(s) loaded", n)
-				}
-			}
-		} else {
-			info.ollama.detail = "not installed"
-		}
-
-		return servicesInfoMsg{info: info}
-	}
-}
-
-// serviceActionSpec builds the launchctl load/unload action for open-webui,
-// run through the action runner so its output and any error are visible.
-// macOS only — Linux (or a missing plist) reports why instead of running
-// anything.
-func serviceActionSpec(action string) (spec actionSpec, note string, ok bool) {
-	if runtime.GOOS != "darwin" {
-		return actionSpec{}, "not managed here", false
-	}
-	plist := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.towardinfinity.open-webui.plist")
-	if _, err := os.Stat(plist); err != nil {
-		return actionSpec{}, "plist not found: " + plist, false
-	}
-	verb := "Start"
-	if action == "unload" {
-		verb = "Stop"
-	}
-	return actionSpec{
-		Title:   "launchctl " + action + " open-webui",
-		Argv:    []string{"launchctl", action, plist},
-		Confirm: verb + " open-webui via launchctl?",
-		Timeout: 30 * time.Second,
-	}, "", true
-}
 
 // ── commands: projects ────────────────────────────────────────
 
@@ -692,30 +683,82 @@ func fetchMachinesInfo() tea.Cmd {
 // ── view ──────────────────────────────────────────────────────
 
 func (m manageModel) view() string {
-	var segs []string
-	for i := manageSection(0); i < numSections; i++ {
-		if i == m.section {
-			segs = append(segs, styTabOn.Render(sectionNames[i]))
-		} else {
-			segs = append(segs, styTab.Render(sectionNames[i]))
-		}
-	}
-	header := truncate(lipgloss.JoinHorizontal(lipgloss.Top, segs...), m.w-4)
+	// A left rail rather than horizontal segments, so all three tabs share one
+	// shape: rail, then a content column with a two-line header and a rule.
+	// The sections were a row of pills here and a sidebar in Docs, which is a
+	// large part of why the app read as three separate programs.
+	showRail := m.w >= 76
 
-	var body string
+	items := make([]railItem, 0, numSections+1)
+	items = append(items, railItem{label: "Manage", isHead: true})
+	for i := manageSection(0); i < numSections; i++ {
+		items = append(items, railItem{label: sectionNames[i]})
+	}
+
+	body, summary := m.sectionBody()
+	contentW := m.w
+	if showRail {
+		contentW = m.w - railWidth - 1 // -1: the rail border sits outside Width
+	}
+
+	content := contentColumn(contentW, m.h,
+		paneHeader("Manage", sectionNames[m.section], summary, measureFor(contentW)),
+		body)
+
+	if !showRail {
+		return content
+	}
+	rail := renderRail(items, int(m.section)+1, railWidth, m.h, "")
+	return lipgloss.JoinHorizontal(lipgloss.Top, rail, content)
+}
+
+// sectionBody returns the section's content and a one-line summary for the
+// header, so every section states its own state in the same place.
+func (m manageModel) sectionBody() (string, string) {
 	switch m.section {
 	case secDotfiles:
-		body = m.viewDotfiles()
+		return m.viewDotfiles(), m.dotfilesSummary()
 	case secServices:
-		body = m.viewServices()
+		return m.viewServices(), m.servicesSummary()
 	case secProjects:
-		body = m.viewProjects()
+		return m.viewProjects(), fmt.Sprintf("%d repositories under ~/Codes", len(m.projects))
 	case secMachines:
-		body = m.viewMachines()
+		return m.viewMachines(), fmt.Sprintf("%d hosts in ~/.ssh/config", len(m.machines))
 	}
+	return "", ""
+}
 
-	content := header + "\n\n" + body
-	return pane(m.w, m.h, styPane.Render(content))
+func (m manageModel) dotfilesSummary() string {
+	if m.dfLoading {
+		return "reading the checkout…"
+	}
+	if m.repo == "" {
+		return "no checkout found"
+	}
+	if m.dfInfo.behind > 0 {
+		return fmt.Sprintf("%d commits behind origin", m.dfInfo.behind)
+	}
+	return "up to date with origin"
+}
+
+func (m manageModel) servicesSummary() string {
+	if m.svcLoading {
+		return "discovering services…"
+	}
+	if len(m.services) == 0 {
+		return "no services discovered on this machine"
+	}
+	run := 0
+	for _, s := range m.services {
+		if s.Running {
+			run++
+		}
+	}
+	src := strings.Join(m.svcSources, ", ")
+	if src == "" {
+		src = "none"
+	}
+	return fmt.Sprintf("%d of %d running  ·  via %s", run, len(m.services), src)
 }
 
 func (m manageModel) viewDotfiles() string {
@@ -773,29 +816,115 @@ func (m manageModel) viewDotfiles() string {
 }
 
 func (m manageModel) viewServices() string {
+	measure := measureFor(m.w - railWidth - 1)
+
 	if m.svcLoading {
-		return styPending.Render("checking…")
+		return "\n  " + styPending.Render("⟳ discovering")
 	}
+	if len(m.services) == 0 {
+		return "\n  " + styMuted.Render("Nothing found. Looked for launchd agents, systemd units and docker containers.")
+	}
+
 	var b strings.Builder
-
-	writeSvc := func(s serviceStatus) {
-		dot := styMuted.Render("○")
-		if s.running {
-			dot = styOK.Render("●")
+	if m.svcFilter != "" || m.svcFiltering {
+		cue := styFilter.Render("/" + m.svcFilter)
+		if m.svcFiltering {
+			cue += styFilter.Render("▏")
 		}
-		b.WriteString(dot + "  " + padRight(s.name, 12) + styMuted.Render(truncate(s.detail, m.w-20)) + "\n")
+		b.WriteString("  " + cue + "\n\n")
 	}
-	writeSvc(m.svcInfo.openWebUI)
-	writeSvc(m.svcInfo.ollama)
 
-	b.WriteString("\n")
-	if runtime.GOOS != "darwin" {
-		b.WriteString(styMuted.Render("start/stop: not managed here") + "\n")
+	vis := m.visibleServices()
+	if len(vis) == 0 {
+		return b.String() + "  " + styMuted.Render("nothing matches that filter")
+	}
+
+	nameW := 16
+	for _, s := range vis {
+		if len(s.Name) > nameW {
+			nameW = len(s.Name)
+		}
+	}
+	if nameW > 34 {
+		nameW = 34
+	}
+
+	// Only as many rows as fit, with the cursor kept in view — a Mac can have
+	// dozens of agents and the pane must not try to draw them all.
+	rows := m.h - 8
+	if rows < 3 {
+		rows = 3
+	}
+	start := 0
+	if len(vis) > rows {
+		start = m.svcCursor - rows/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(vis)-rows {
+			start = len(vis) - rows
+		}
+	}
+	end := start + rows
+	if end > len(vis) {
+		end = len(vis)
+	}
+
+	for i := start; i < end; i++ {
+		s := vis[i]
+		cursor := "  "
+		if i == m.svcCursor {
+			cursor = styItemCursor.Render("▌ ")
+		}
+		// Probed-but-not-listening is the interesting failure and gets its own
+		// mark, rather than being folded into "running".
+		dot := stateDot(s.Running, true)
+		if s.Running && s.Probed && !s.Healthy {
+			dot = styPending.Render("●")
+		}
+		line := cursor + dot + " " + styValue.Render(padRight(truncate(s.Name, nameW), nameW))
+		line += " " + styMuted.Render(padRight(svcSourceName(s.Source), 8))
+		if s.Detail != "" {
+			line += " " + styMuted.Render(s.Detail)
+		}
+		b.WriteString(truncate(line, measure) + "\n")
+	}
+
+	if len(vis) > rows {
+		b.WriteString(styMuted.Render(fmt.Sprintf("  … %d more", len(vis)-rows)) + "\n")
 	}
 	if m.svcMsg != "" {
-		b.WriteString(styMuted.Render(m.svcMsg))
+		b.WriteString("\n  " + styMuted.Render(truncate(m.svcMsg, measure)))
 	}
 	return b.String()
+}
+
+func svcSourceName(s svcSource) string {
+	switch s {
+	case srcLaunchd:
+		return "launchd"
+	case srcSystemd:
+		return "systemd"
+	case srcDocker:
+		return "docker"
+	}
+	return "?"
+}
+
+// visibleServices applies the search box. Discovery is deliberately broad, so
+// filtering is what makes a list of dozens usable.
+func (m manageModel) visibleServices() []service {
+	if m.svcFilter == "" {
+		return m.services
+	}
+	q := strings.ToLower(m.svcFilter)
+	var out []service
+	for _, s := range m.services {
+		if strings.Contains(strings.ToLower(s.Name+" "+s.ID+" "+svcSourceName(s.Source)), q) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func (m manageModel) viewProjects() string {
@@ -892,7 +1021,10 @@ func (m manageModel) help() string {
 	case secDotfiles:
 		return nav + "  ·  u update  ·  L relink  ·  p plugins  ·  t tpm  ·  D deps"
 	case secServices:
-		return nav + "  ·  s start  ·  x stop"
+		if m.svcFiltering {
+			return "type to filter  ·  enter keep  ·  esc clear"
+		}
+		return nav + "  ·  j/k  ·  / filter  ·  s start  ·  x stop  ·  R restart  ·  r rescan"
 	case secProjects:
 		return nav + "  ·  j/k move  ·  enter tmux"
 	case secMachines:

@@ -275,60 +275,79 @@ func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 	}, "", true
 }
 
+// checkGroup labels a run of related checks, so the list reads as three short
+// sections rather than one undifferentiated column of thirteen.
+func checkGroup(name string) string {
+	switch name {
+	case "zsh", "git", "nvim", "tmux":
+		return "Core"
+	case "oh-my-zsh", "tpm":
+		return "Frameworks"
+	default:
+		return "Tools"
+	}
+}
+
 func (m doctorModel) view() string {
 	osName := "Linux"
 	if runtime.GOOS == "darwin" {
 		osName = "macOS"
 	}
-
-	var b strings.Builder
-	b.WriteString(styTitle.Render("Doctor") + styMuted.Render("  ("+osName+")") + "\n\n")
+	measure := measureFor(m.w)
 
 	if m.loading {
-		b.WriteString(styPending.Render("checking…") + "\n")
-		return pane(m.w, m.h, styPane.Render(b.String()))
+		return contentColumn(m.w, m.h,
+			paneHeader("Doctor", osName, "checking what the configs call…", measure),
+			"\n  "+styPending.Render("⟳ checking"))
 	}
 
 	ok := 0
-	nameW := 10
+	nameW := 12
 	for _, c := range m.checks {
+		if c.state == checkOK {
+			ok++
+		}
 		if len(c.name) > nameW {
 			nameW = len(c.name)
 		}
 	}
+
+	var b strings.Builder
+	lastGroup := ""
 	for _, c := range m.checks {
-		var mark string
-		switch c.state {
-		case checkOK:
-			mark = styOK.Render("✓")
-			ok++
-		case checkBad:
-			mark = styBad.Render("✗")
-		default:
-			mark = styPending.Render("…")
+		if g := checkGroup(c.name); g != lastGroup {
+			if lastGroup != "" {
+				b.WriteString("\n")
+			}
+			b.WriteString(" " + styGroup.Render(strings.ToUpper(g)) + "\n")
+			lastGroup = g
 		}
-		line := mark + "  " + padRight(c.name, nameW)
+
+		mark := stateDot(c.state == checkOK, c.state != checkPending)
+		line := "  " + mark + "  " + styValue.Render(padRight(c.name, nameW))
 		if c.path != "" {
-			room := m.w - nameW - 8
-			line += "  " + styMuted.Render(truncate(c.path, room))
+			line += "  " + styMuted.Render(truncate(c.path, measure-nameW-8))
+		} else if c.state == checkBad {
+			line += "  " + styMuted.Render("not found")
 		}
-		b.WriteString(truncate(line, m.w-4) + "\n")
+		b.WriteString(truncate(line, measure) + "\n")
 	}
 
-	b.WriteString("\n")
-	summary := fmt.Sprintf("%d / %d present", ok, len(m.checks))
+	// Missing things get an explicit call to action rather than leaving you to
+	// work out what to do with the information.
+	b.WriteString("\n" + hrule(measure) + "\n")
 	if ok == len(m.checks) {
-		b.WriteString(styOK.Render(summary))
+		b.WriteString(" " + styOK.Render("Everything the configs call is installed."))
 	} else {
-		b.WriteString(styPending.Render(summary))
+		b.WriteString(" " + styPending.Render("i") + styMuted.Render(" installs the missing ones"))
 	}
-	b.WriteString("\n")
-
 	if m.note != "" {
-		b.WriteString(styMuted.Render(m.note) + "\n")
+		b.WriteString("\n\n " + styMuted.Render(truncate(m.note, measure)))
 	}
 
-	return pane(m.w, m.h, styPane.Render(b.String()))
+	return contentColumn(m.w, m.h,
+		paneHeader("Doctor", osName, countSummary(ok, len(m.checks), "present"), measure),
+		b.String())
 }
 
 func (m doctorModel) help() string {

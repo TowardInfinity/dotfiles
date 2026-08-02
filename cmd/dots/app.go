@@ -117,7 +117,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(
 					m.doc.Init(),
 					fetchDotfilesInfo(m.repo),
-					fetchServicesInfo(),
+					discoverServices(),
 					fetchProjectsInfo(),
 					fetchMachinesInfo(),
 				)

@@ -273,7 +273,11 @@ if [ "${DOTS_FORCE_BUILD:-}" != "1" ]; then
   # Download failed — offline, GitHub down. Fall back to whatever is cached,
   # however old, before resorting to a build.
   result=$(try_cached) && {
-    log "dots-resolve: using the cached binary (could not reach GitHub)"
+    # Say which version this actually is. "downloading v0.1.2..." followed by
+    # silently running v0.1.1 reads as success — that is exactly what happened
+    # installing seconds after a release, while the asset was still 404ing.
+    log "dots-resolve: download failed — falling back to the cached $(cat "$CACHE_DIR/current-version" 2>/dev/null)"
+    log "dots-resolve: re-run to pick up the newer release once it is reachable"
     printf '%s\n' "$result"
     exit 0
   }

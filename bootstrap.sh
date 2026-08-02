@@ -131,8 +131,48 @@ have() {
   return 1
 }
 
+# Homebrew is the one thing this script bootstraps on macOS, because nothing
+# else on a fresh Mac can be installed without it. Two things used to go wrong:
+#
+#   1. `command -v brew` reported it missing on machines that had it. On Apple
+#      Silicon brew lives in /opt/homebrew/bin, which is not on the PATH of the
+#      non-login `sh` this script runs under — that directory only gets added
+#      by .zprofile in an interactive shell. The `have` helper above already
+#      knows to look there; this one call did not use it.
+#   2. Missing brew called `die`, which killed the entire run — so an opt-in
+#      --deps failure also took out the linking step, which had nothing to do
+#      with packages and would have worked fine.
+#
+# Now: find it, else install it, else warn and let the rest of the run proceed.
+ensure_brew() {
+  if ! command -v brew >/dev/null 2>&1; then
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+      [ -x "$b" ] || continue
+      eval "$("$b" shellenv)"
+      break
+    done
+  fi
+  command -v brew >/dev/null 2>&1 && return 0
+
+  if $DRY; then echo "    would: install Homebrew first"; return 0; fi
+
+  say "Installing Homebrew"
+  # NONINTERACTIVE=1 stops it prompting for RETURN; it still asks for sudo once.
+  NONINTERACTIVE=1 /bin/bash -c \
+    "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+    || { warn "Homebrew install failed — skipping packages"; return 1; }
+
+  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [ -x "$b" ] || continue
+    eval "$("$b" shellenv)"
+    break
+  done
+  command -v brew >/dev/null 2>&1 \
+    || { warn "Homebrew installed but not on PATH — skipping packages"; return 1; }
+}
+
 install_macos_pkgs() {
-  command -v brew >/dev/null 2>&1 || die "Homebrew missing — install it first: https://brew.sh"
+  ensure_brew || return 0
   # Everything the macOS .zshrc references, plus the editor stack.
   #   fzf zoxide eza bat lazygit  -> aliases and keybindings in .zshrc
   #   fnm                         -> Node version manager
@@ -144,9 +184,16 @@ install_macos_pkgs() {
     echo "    would: brew install --cask ghostty font-jetbrains-mono-nerd-font"
   else
     say "Installing packages (brew)"
+    # `brew install a b c` exits non-zero if ANY formula fails, and `set -e`
+    # turns that into a dead script — one unavailable package used to abort the
+    # run before the configs were ever linked. Swallow it here; the verify step
+    # at the end reports what actually ended up missing, which is the thing
+    # worth knowing anyway.
     brew install neovim tmux git curl gh jq ripgrep fd fzf zoxide eza bat \
-      lazygit btop glow uv pnpm fnm go
-    brew install --cask ghostty font-jetbrains-mono-nerd-font || true
+      lazygit btop glow uv pnpm fnm go \
+      || warn "some formulae failed — see brew's output above"
+    brew install --cask ghostty font-jetbrains-mono-nerd-font \
+      || warn "some casks failed (already installed by hand?)"
   fi
 }
 
@@ -237,8 +284,14 @@ install_linux_pkgs() {
 # the ordering of these two steps stops mattering.
 install_omz() {
   if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    # ZSH= is pinned explicitly because the Oh My Zsh installer honours an
+    # exported $ZSH and will install there instead — and .zshrc exports it on
+    # line 6, *before* sourcing, so it is set in any shell using these configs
+    # even when Oh My Zsh is not actually installed. Without pinning, the
+    # directory we test for and the directory it installs into can differ, and
+    # the installer bails with "The $ZSH folder already exists".
     run "install Oh My Zsh" sh -c \
-      'KEEP_ZSHRC=yes RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
+      'ZSH="$HOME/.oh-my-zsh" KEEP_ZSHRC=yes RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"'
   fi
   # These two are NOT bundled with Oh My Zsh, but linux/zsh/.zshrc lists them
   # in `plugins=(...)`. Without them zsh complains on every start. The macOS
@@ -311,3 +364,30 @@ if $DRY; then
 else
   "$DEST/install.sh" $NVIM_ARGS
 fi
+
+# ── Verify ────────────────────────────────────────────────────
+# Say what is missing NOW, at the end of the run, instead of letting you find
+# out later as `zsh: command not found: eza` from an alias that looks broken.
+# Checked by binary name, not formula name, because those differ (neovim/nvim,
+# ripgrep/rg) and the formula being "installed" is not the question.
+verify() {
+  $DRY && return 0
+  missing=
+  for t in zsh git nvim tmux; do have "$t" || missing="$missing $t"; done
+  if $DEPS; then
+    extras="rg jq glow uv pnpm fnm go"
+    [ "$OS" = macos ] && extras="$extras fzf zoxide eza bat fd lazygit btop"
+    for t in $extras; do have "$t" || missing="$missing $t"; done
+  fi
+  [ -d "$HOME/.oh-my-zsh" ] || missing="$missing oh-my-zsh"
+
+  [ -n "$missing" ] || return 0
+  echo
+  warn "not installed:$missing"
+  if $DEPS; then
+    warn "these were meant to be installed — scroll up for the failure, then re-run"
+  else
+    warn "re-run with --deps to install them, or install them yourself"
+  fi
+}
+verify

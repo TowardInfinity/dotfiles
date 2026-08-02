@@ -348,9 +348,29 @@ install_omz() {
   done
 }
 
+# Python tools that belong to uv rather than to the system package manager.
+#
+# JupyterLab specifically must NOT come from brew/apt. Those builds ship their
+# own externally-managed Python, so the single kernel they register points into
+# the package's own site-packages: you cannot install project dependencies into
+# it, and an upgrade replaces the lot. `uv tool install` keeps one JupyterLab
+# on PATH while each project registers its own venv as a kernel — one Jupyter,
+# many kernels — which is the thing conda is usually dragged in to solve.
+install_uv_tools() {
+  have uv || { warn "uv not installed — skipping uv tools"; return 0; }
+  if $DRY; then
+    echo "    would: uv tool install jupyterlab"
+    return 0
+  fi
+  # `uv tool install` is idempotent and cheap when already present.
+  say "Installing uv tools (jupyterlab)"
+  uv tool install --quiet jupyterlab || warn "uv tool install jupyterlab failed"
+}
+
 if $DEPS; then
   say "Installing packages"
   if [ "$OS" = macos ]; then install_macos_pkgs; else install_linux_pkgs; fi
+  install_uv_tools
 fi
 
 # Always — see the comment on install_omz. A linked .zshrc without Oh My Zsh
@@ -371,6 +391,9 @@ verify() {
   else
     needed="$needed glow go uv pnpm fnm"
   fi
+  # Only expected when packages were requested — jupyter is not a shell
+  # dependency, so its absence should not warn on a plain install.
+  $DEPS && needed="$needed jupyter"
 
   missing=
   for t in $needed; do have "$t" || missing="$missing $t"; done

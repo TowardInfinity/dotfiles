@@ -118,6 +118,7 @@ here, otherwise a fresh machine errors on every prompt.
 | shell | *(Oh My Zsh — always, see above)* | *(+ zsh-autosuggestions, zsh-syntax-highlighting)* |
 | CLI | fzf, zoxide, eza, bat, ripgrep, fd, jq, lazygit, btop, glow | jq, ripgrep, glow |
 | languages | uv, pnpm, fnm, go | uv, pnpm, fnm, go |
+| notebooks | jupyterlab (via `uv tool`, not brew) | jupyterlab (via `uv tool`) |
 | git | git, gh | git, gh |
 
 Version managers rather than languages: **fnm** for Node and **uv** for Python,

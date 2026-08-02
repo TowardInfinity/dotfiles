@@ -193,6 +193,11 @@ else
   echo "Resolving dots..."
   if $BUILD; then
     export DOTS_FORCE_BUILD=1
+  else
+    # An install should pick up a newer release rather than reusing whatever
+    # this machine happens to have cached. Costs one redirect request; the
+    # binary is only re-downloaded when the version actually changed.
+    export DOTS_FORCE_FETCH=1
   fi
   DOTS_TARGET="$(sh "$REPO/bin/dots-resolve.sh")" || DOTS_TARGET=""
   if [[ -z "$DOTS_TARGET" || ! -e "$DOTS_TARGET" ]]; then

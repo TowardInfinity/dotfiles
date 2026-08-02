@@ -240,9 +240,43 @@ try_fallback() {
 }
 
 # ── Resolve ─────────────────────────────────────────────────────
+#
+# Tier 1 is a fast path, not a pin. It used to win unconditionally, so a
+# machine that had ever cached a binary never saw a newer release again — a1
+# sat on v0.1.0 after v0.1.1 shipped, reporting an old build as current, which
+# is worse than being slow.
+#
+# Two ways past it now:
+#
+#   DOTS_FORCE_FETCH=1  skip the cache entirely. install.sh sets this, because
+#                       an install is an explicit "make this machine right"
+#                       action and one redirect request is a fair price.
+#   CACHE_MAX_AGE_H     the cache goes stale on its own, so the curl route and
+#                       anything else eventually upgrades without being told.
+#
+# Skipping tier 1 is cheap: try_download resolves the latest tag from the
+# redirect and reuses an already-cached binary of that version rather than
+# re-downloading it. The cost is one request, not 11MB.
+CACHE_MAX_AGE_H="${DOTS_CACHE_MAX_AGE_H:-24}"
+
+cache_is_fresh() {
+  marker="$CACHE_DIR/current-version"
+  [ -f "$marker" ] || return 1
+  [ -z "$(find "$marker" -mmin "+$((CACHE_MAX_AGE_H * 60))" 2>/dev/null)" ]
+}
+
 if [ "${DOTS_FORCE_BUILD:-}" != "1" ]; then
-  result=$(try_cached) && { printf '%s\n' "$result"; exit 0; }
+  if [ "${DOTS_FORCE_FETCH:-}" != "1" ] && cache_is_fresh; then
+    result=$(try_cached) && { printf '%s\n' "$result"; exit 0; }
+  fi
   result=$(try_download) && { printf '%s\n' "$result"; exit 0; }
+  # Download failed — offline, GitHub down. Fall back to whatever is cached,
+  # however old, before resorting to a build.
+  result=$(try_cached) && {
+    log "dots-resolve: using the cached binary (could not reach GitHub)"
+    printf '%s\n' "$result"
+    exit 0
+  }
 else
   log "dots-resolve: --build requested — skipping the release tiers"
 fi

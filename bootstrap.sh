@@ -370,24 +370,34 @@ fi
 # out later as `zsh: command not found: eza` from an alias that looks broken.
 # Checked by binary name, not formula name, because those differ (neovim/nvim,
 # ripgrep/rg) and the formula being "installed" is not the question.
+# The list is what the linked configs actually CALL, taken from grepping each
+# .zshrc — not the --deps package list. That distinction is the whole point:
+# gating these checks on --deps meant a plain install linked a .zshrc whose
+# aliases were already broken and said nothing, which is how
+# `zsh: command not found: eza` got discovered by hand instead of reported here.
+# A tool the config references is missing whether or not you asked for packages.
 verify() {
   $DRY && return 0
-  missing=
-  for t in zsh git nvim tmux; do have "$t" || missing="$missing $t"; done
-  if $DEPS; then
-    extras="rg jq glow uv pnpm fnm go"
-    [ "$OS" = macos ] && extras="$extras fzf zoxide eza bat fd lazygit btop"
-    for t in $extras; do have "$t" || missing="$missing $t"; done
+  needed="zsh git nvim tmux"
+  if [ "$OS" = macos ]; then
+    needed="$needed bat eza fzf zoxide lazygit fnm"
+  else
+    needed="$needed glow go uv pnpm fnm"
   fi
+
+  missing=
+  for t in $needed; do have "$t" || missing="$missing $t"; done
   [ -d "$HOME/.oh-my-zsh" ] || missing="$missing oh-my-zsh"
 
   [ -n "$missing" ] || return 0
   echo
   warn "not installed:$missing"
   if $DEPS; then
-    warn "these were meant to be installed — scroll up for the failure, then re-run"
+    warn "these should have installed — scroll up for the failure, then re-run"
   else
-    warn "re-run with --deps to install them, or install them yourself"
+    warn "the linked configs call these, so some aliases will not work."
+    warn "install them with:"
+    warn "  sh -c \"\$(curl -fsSL https://toin.in/install)\" -- --deps"
   fi
 }
 verify

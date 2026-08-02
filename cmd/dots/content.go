@@ -119,6 +119,15 @@ func parseDoc(name, raw string) doc {
 	}
 	d.Body = strings.TrimLeft(body, "\n")
 
+	// Drop the leading H1. The pane renders the title itself in the header,
+	// and glamour rendering it again put the same word twice at the top of
+	// every single page.
+	if rest, ok := strings.CutPrefix(d.Body, "# "); ok {
+		if i := strings.Index(rest, "\n"); i >= 0 {
+			d.Body = strings.TrimLeft(rest[i+1:], "\n")
+		}
+	}
+
 	for _, line := range strings.Split(head, "\n") {
 		k, v, ok := strings.Cut(line, ":")
 		if !ok {
@@ -187,4 +196,25 @@ func isRepo(dir string) bool {
 	}
 	_, err := os.Stat(filepath.Join(dir, "docs"))
 	return err == nil
+}
+
+// outline pulls the H2 headings out of a page for the right-hand rail. It is
+// what turns the empty half of a wide terminal into something useful: on a
+// long page you can see its shape without scrolling through it.
+func outline(body string) []string {
+	var out []string
+	fence := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "```") {
+			fence = !fence
+			continue
+		}
+		if fence {
+			continue
+		}
+		if h, ok := strings.CutPrefix(line, "## "); ok {
+			out = append(out, strings.TrimSpace(h))
+		}
+	}
+	return out
 }

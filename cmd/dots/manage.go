@@ -37,8 +37,13 @@ var sectionNames = [numSections]string{"Dotfiles", "Services", "Projects", "Mach
 type dotfilesInfo struct {
 	sha    string
 	branch string
-	dirty  bool
-	behind int // -1 = unknown (no upstream, or the git call failed)
+	// dirtyKnown separates "checked, and it is clean" from "could not check".
+	// Without it a failed `git status` fell through to the zero value and the
+	// pane showed a confident green "clean" for a directory it had learned
+	// nothing about.
+	dirtyKnown bool
+	dirty      bool
+	behind     int // -1 = unknown (no upstream, or the git call failed)
 }
 
 type serviceStatus struct {
@@ -54,12 +59,13 @@ type servicesInfo struct {
 }
 
 type projectInfo struct {
-	name   string
-	path   string
-	branch string
-	dirty  bool
-	ahead  int // -1 = unknown
-	tmux   bool
+	name       string
+	path       string
+	branch     string
+	dirtyKnown bool
+	dirty      bool
+	ahead      int // -1 = unknown
+	tmux       bool
 }
 
 type machineInfo struct {
@@ -168,6 +174,10 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		if m.projCursor < 0 {
 			m.projCursor = 0
 		}
+		return m, nil
+
+	case projTmuxMsg:
+		m.projTmuxHint = msg.hint
 		return m, nil
 
 	case machinesInfoMsg:
@@ -308,7 +318,7 @@ func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	case "enter":
 		if m.projCursor < len(m.projects) {
 			m.projSelected = m.projCursor
-			m = m.openProjectTmux(m.projects[m.projCursor])
+			return m, m.openProjectTmux(m.projects[m.projCursor])
 		}
 	}
 	return m, nil
@@ -323,18 +333,34 @@ func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 // client without any of that, so it runs for real. Otherwise there is
 // nothing this process can safely do: record what the user would run and
 // show it as a hint line.
-func (m manageModel) openProjectTmux(p projectInfo) manageModel {
+type projTmuxMsg struct{ hint string }
+
+// openProjectTmux does not go through the action runner: attaching to a tmux
+// session needs to own the terminal, which an overlay cannot give it.
+//
+// It is still async. Running exec directly inside Update() blocked the whole
+// UI thread for the duration of the call — every other exec in this file is a
+// tea.Cmd for exactly that reason, and tmux stalling is not hypothetical on a
+// box with a wedged session.
+func (m manageModel) openProjectTmux(p projectInfo) tea.Cmd {
 	cmdLine := fmt.Sprintf("tmux new-session -A -s %s -c %s", p.name, p.path)
+
 	if os.Getenv("TMUX") == "" {
-		m.projTmuxHint = "run in a terminal: " + cmdLine
-		return m
+		return func() tea.Msg {
+			return projTmuxMsg{hint: "run in a terminal: " + cmdLine}
+		}
 	}
-	if err := exec.Command("tmux", "switch-client", "-t", p.name).Run(); err != nil {
-		m.projTmuxHint = "no session named " + p.name + " yet — run: " + cmdLine
-	} else {
-		m.projTmuxHint = "switched to " + p.name
+
+	name, path := p.name, p.path
+	_ = path
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(ctx, "tmux", "switch-client", "-t", name).Run(); err != nil {
+			return projTmuxMsg{hint: "no session named " + name + " yet — run: " + cmdLine}
+		}
+		return projTmuxMsg{hint: "switched to " + name}
 	}
-	return m
 }
 
 func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
@@ -355,6 +381,11 @@ func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 				Argv: []string{"ssh",
 					"-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
 					alias, "dots", "doctor"},
+				// Read-only, but it still opens a connection to another
+				// machine. Every other key in this app asks first, and a
+				// keystroke that reaches out over the network without asking
+				// is a surprise even when it changes nothing.
+				Confirm: "Run doctor on " + alias + " over SSH?",
 				Timeout: 20 * time.Second,
 			}
 			return m, func() tea.Msg { return runActionMsg{spec: spec} }
@@ -387,6 +418,7 @@ func fetchDotfilesInfo(repo string) tea.Cmd {
 			info.branch = strings.TrimSpace(out)
 		}
 		if out, err := runGit(ctx, repo, "status", "--porcelain"); err == nil {
+			info.dirtyKnown = true
 			info.dirty = strings.TrimSpace(out) != ""
 		}
 		if out, err := runGit(ctx, repo, "rev-list", "--count", "HEAD..@{u}"); err == nil {
@@ -536,6 +568,7 @@ func fetchProjectsInfo() tea.Cmd {
 				p.branch = strings.TrimSpace(out)
 			}
 			if out, err := runGit(ctx, p.path, "status", "--porcelain"); err == nil {
+				p.dirtyKnown = true
 				p.dirty = strings.TrimSpace(out) != ""
 			}
 			if out, err := runGit(ctx, p.path, "rev-list", "--count", "@{u}..HEAD"); err == nil {
@@ -713,7 +746,9 @@ func (m manageModel) viewDotfiles() string {
 		b.WriteString(styKey.Render("sha     ") + styValue.Render(sha) + "\n")
 	}
 
-	if m.dfInfo.dirty {
+	if !m.dfInfo.dirtyKnown {
+		b.WriteString(styKey.Render("status  ") + styMuted.Render("unknown") + "\n")
+	} else if m.dfInfo.dirty {
 		b.WriteString(styKey.Render("status  ") + styBad.Render("dirty") + "\n")
 	} else {
 		b.WriteString(styKey.Render("status  ") + styOK.Render("clean") + "\n")
@@ -782,7 +817,9 @@ func (m manageModel) viewProjects() string {
 		branch := padRight(truncate(p.branch, 16), 16)
 
 		status := styOK.Render("clean")
-		if p.dirty {
+		if !p.dirtyKnown {
+			status = styMuted.Render("unknown")
+		} else if p.dirty {
 			status = styBad.Render("dirty")
 		}
 

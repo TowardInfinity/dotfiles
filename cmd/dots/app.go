@@ -84,6 +84,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case runActionMsg:
+		// One at a time. Overwriting a live action orphaned its process: it
+		// kept running to completion with its output going nowhere and no way
+		// to see or stop it, while the overlay showed the newer one.
+		if m.act != nil {
+			return m, nil
+		}
 		w, h := m.contentSize()
 		a := newAction(msg.spec, w, h)
 		if a.confirm {
@@ -104,7 +110,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// so the pane you return to is not showing a stale answer.
 				// Doctor's checks cover installs; services/machines cover
 				// the Manage actions that now run through this same overlay.
-				return m, tea.Batch(m.doc.Init(), fetchServicesInfo(), fetchMachinesInfo())
+				// Dotfiles and Projects were missing here, so after `u` pulled
+				// new commits the pane still showed the old sha, branch and
+				// behind-count — the one place you would actually look to
+				// confirm the update landed.
+				return m, tea.Batch(
+					m.doc.Init(),
+					fetchDotfilesInfo(m.repo),
+					fetchServicesInfo(),
+					fetchProjectsInfo(),
+					fetchMachinesInfo(),
+				)
 			}
 			m.act = &a
 			return m, cmd
@@ -152,16 +168,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	var cmd tea.Cmd
-	switch m.tab {
-	case tabDocs:
-		m.docs, cmd = m.docs.update(msg)
-	case tabDoctor:
-		m.doc, cmd = m.doc.update(msg)
-	case tabManage:
-		m.man, cmd = m.man.update(msg)
-	}
-	return m, cmd
+	// Broadcast to every pane, not just the visible one.
+	//
+	// Routing by active tab dropped any async result whose pane was in the
+	// background — and Init() starts the doctor check while Docs is in front,
+	// so its result was delivered to Docs and discarded. Doctor then sat on
+	// "checking…" forever, which is exactly what it did.
+	//
+	// Panes ignore messages they do not recognise, so a broadcast is cheap and
+	// removes a whole class of "this pane never loads" bug rather than fixing
+	// one instance of it.
+	var cmds []tea.Cmd
+	var c tea.Cmd
+
+	m.docs, c = m.docs.update(msg)
+	cmds = append(cmds, c)
+	m.doc, c = m.doc.update(msg)
+	cmds = append(cmds, c)
+	m.man, c = m.man.update(msg)
+	cmds = append(cmds, c)
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m model) View() string {

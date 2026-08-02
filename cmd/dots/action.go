@@ -38,17 +38,18 @@ type actDoneMsg struct {
 }
 
 type actionModel struct {
-	spec    actionSpec
-	lines   []string
-	vp      viewport.Model
-	w, h    int
-	confirm bool
-	running bool
-	done    bool
-	code    int
-	err     error
-	ch      chan tea.Msg
-	cancel  context.CancelFunc
+	spec      actionSpec
+	lines     []string
+	vp        viewport.Model
+	w, h      int
+	confirm   bool
+	running   bool
+	done      bool
+	cancelled bool
+	code      int
+	err       error
+	ch        chan tea.Msg
+	cancel    context.CancelFunc
 }
 
 func newAction(spec actionSpec, w, h int) actionModel {
@@ -169,12 +170,36 @@ func (a actionModel) update(msg tea.Msg) (actionModel, tea.Cmd, bool) {
 			if a.done {
 				return a, nil, true
 			}
-			// Running: esc cancels the command rather than the overlay, so a
-			// long install can be stopped without killing the whole program.
-			if a.running && a.cancel != nil {
-				a.cancel()
+			// Running: cancel the command, not the overlay, so a long install
+			// can be stopped without killing the program.
+			//
+			// Re-arming the stream here is essential. Returning nil dropped the
+			// only pending read on the channel, so the actDoneMsg that follows
+			// cancellation was never consumed — the overlay stayed "running"
+			// forever and, because it owns the keyboard, took the whole TUI
+			// down with it. Cancelling has to keep listening for the end it
+			// just caused.
+			if a.running {
+				if a.cancel != nil {
+					a.cancel()
+				}
+				a.cancelled = true
+				return a, waitFor(a.ch), false
 			}
 			return a, nil, false
+
+		case "ctrl+c":
+			// Always available. The overlay consumes every key, so without an
+			// explicit case there was no way out of a wedged action at all.
+			if a.running {
+				if a.cancel != nil {
+					a.cancel()
+				}
+				a.cancelled = true
+				return a, waitFor(a.ch), false
+			}
+			return a, nil, true
+
 		case "j", "down":
 			a.vp.LineDown(1)
 			return a, nil, false
@@ -215,6 +240,9 @@ func (a actionModel) view() string {
 		head = styPending.Render("? ") + styTitle.Render(a.spec.Title)
 	case a.running:
 		head = styPending.Render("⟳ ") + styTitle.Render(a.spec.Title)
+	case a.cancelled:
+		head = styPending.Render("⊘ ") + styTitle.Render(a.spec.Title) +
+			styMuted.Render("  stopped")
 	case a.code == 0:
 		head = styOK.Render("✓ ") + styTitle.Render(a.spec.Title)
 	default:

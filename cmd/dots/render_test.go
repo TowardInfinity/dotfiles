@@ -176,3 +176,67 @@ func TestActionReportsFailure(t *testing.T) {
 		t.Error("a failing command reported success")
 	}
 }
+
+// Async results must reach their pane even when another tab is in front.
+// Init() starts the doctor check while Docs is active, so routing by active
+// tab dropped it and Doctor sat on "checking…" forever.
+func TestAsyncResultReachesInactiveTab(t *testing.T) {
+	m := newModel()
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	if tm.(model).tab != tabDocs {
+		t.Fatal("expected Docs to be the starting tab")
+	}
+	tm, _ = tm.Update(runDoctorChecks())
+	if strings.Contains(tm.(model).doc.view(), "checking") {
+		t.Error("doctor still shows 'checking' after its results arrived")
+	}
+}
+
+// Cancelling a running action must not wedge the overlay. The overlay owns
+// the keyboard, so a stuck one takes the whole program with it.
+func TestCancelDoesNotWedge(t *testing.T) {
+	a := newAction(actionSpec{Title: "Sleep", Argv: []string{"sleep", "30"}}, 80, 20)
+	a, cmd := a.start()
+
+	a, cmd, _ = a.update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("cancel returned no command — the done message can never arrive")
+	}
+	if !a.cancelled {
+		t.Error("cancel did not mark the action cancelled")
+	}
+
+	done := make(chan actionModel, 1)
+	go func() {
+		aa, c := a, cmd
+		for !aa.done && c != nil {
+			aa, c, _ = aa.update(c())
+		}
+		done <- aa
+	}()
+	select {
+	case aa := <-done:
+		if !aa.done {
+			t.Error("overlay never reached a finished state after cancelling")
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("overlay wedged after cancel — this is the freeze")
+	}
+}
+
+// A second action must not replace a running one, orphaning its process.
+func TestOneActionAtATime(t *testing.T) {
+	m := newModel()
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	tm, _ = tm.Update(runActionMsg{spec: actionSpec{Title: "First", Argv: []string{"sleep", "5"}}})
+	first := tm.(model).act
+	if first == nil {
+		t.Fatal("first action did not open")
+	}
+	tm, _ = tm.Update(runActionMsg{spec: actionSpec{Title: "Second", Argv: []string{"echo", "hi"}}})
+	if tm.(model).act.spec.Title != "First" {
+		t.Error("a second action replaced the running one")
+	}
+}

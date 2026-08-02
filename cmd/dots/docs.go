@@ -22,9 +22,12 @@ type docsModel struct {
 	rows []row
 	cur  int
 
-	vp      viewport.Model
-	w, h    int
-	sidebar int
+	vp          viewport.Model
+	w, h        int
+	sidebar     int
+	outlineW    int
+	showNav     bool
+	showOutline bool
 
 	filtering bool
 	filter    string
@@ -34,7 +37,7 @@ type docsModel struct {
 }
 
 func newDocsModel(all []doc) docsModel {
-	m := docsModel{all: all, sidebar: 22}
+	m := docsModel{all: all, sidebar: navWidth, showNav: true}
 	m.rebuild()
 	return m
 }
@@ -107,22 +110,51 @@ func (m docsModel) current() *doc {
 	return nil
 }
 
+// Layout, widest first:
+//
+//	nav │ content │ outline     >= 132 cols
+//	nav │ content               >= 76
+//	content                     narrower still
+//
+// The content column is capped at maxMeasure regardless of how wide the
+// terminal is. Prose set across 200 columns is genuinely hard to read — the
+// eye loses the line on the way back — and it was the main reason the old
+// full-width layout felt off even though nothing was technically wrong.
+const (
+	navWidth     = 24
+	outlineWidth = 26
+	maxMeasure   = 92
+)
+
 func (m docsModel) resize(w, h int) docsModel {
 	m.w, m.h = w, h
-	m.sidebar = w / 4
-	if m.sidebar < 16 {
-		m.sidebar = 16
+
+	m.showNav = w >= 76
+	m.showOutline = w >= 132
+
+	m.sidebar = 0
+	if m.showNav {
+		m.sidebar = navWidth
 	}
-	if m.sidebar > 30 {
-		m.sidebar = 30
+	m.outlineW = 0
+	if m.showOutline {
+		m.outlineW = outlineWidth
 	}
-	m.vp = newViewport(m.contentWidth(), h)
+
+	m.vp = newViewport(m.contentWidth(), h-2)
 	m.lastDoc = "" // force a re-render at the new width
 	return m
 }
 
+// contentWidth is the reading measure: what is left after the rails, capped.
 func (m docsModel) contentWidth() int {
-	w := m.w - m.sidebar - 5
+	w := m.w - m.sidebar - m.outlineW - 6
+	if m.showNav {
+		w-- // the nav's right border, drawn outside its Width
+	}
+	if w > maxMeasure {
+		w = maxMeasure
+	}
 	if w < 20 {
 		w = 20
 	}
@@ -222,26 +254,40 @@ func (m *docsModel) ensureRendered() {
 func (m docsModel) view() string {
 	m.ensureRendered()
 
-	// ── sidebar ──
-	var b strings.Builder
-	inner := m.sidebar - 1
+	cols := []string{}
+	if m.showNav {
+		cols = append(cols, m.viewNav())
+	}
+	cols = append(cols, m.viewContent())
+	if m.showOutline {
+		cols = append(cols, m.viewOutline())
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, cols...)
+}
 
+func (m docsModel) viewNav() string {
+	var b strings.Builder
+	inner := navWidth - 2
+
+	// The filter lives at the top of the nav so it reads as "narrowing this
+	// list", which is what it does.
 	if m.filtering || m.filter != "" {
 		cue := styFilter.Render("/" + m.filter)
 		if m.filtering {
-			cue += styFilter.Render("▋")
+			cue += styFilter.Render("▏")
 		}
-		b.WriteString(padRight(truncate(cue, inner), inner) + "\n")
+		b.WriteString(" " + padRight(truncate(cue, inner), inner) + "\n")
 	} else {
-		b.WriteString(styMuted.Render(padRight(truncate(fmt.Sprintf("%d pages", len(m.all)), inner), inner)) + "\n")
+		b.WriteString(" " + styMuted.Render(padRight(
+			truncate(fmt.Sprintf("%d pages", len(m.all)), inner), inner)) + "\n")
 	}
+	b.WriteString("\n")
 
-	// Keep the cursor in view when the list is taller than the pane.
-	start := 0
-	visible := m.h - 2
+	visible := m.h - 3
 	if visible < 1 {
 		visible = 1
 	}
+	start := 0
 	if len(m.rows) > visible {
 		start = m.cur - visible/2
 		if start < 0 {
@@ -259,36 +305,95 @@ func (m docsModel) view() string {
 	for i := start; i < end; i++ {
 		r := m.rows[i]
 		if r.isHead {
-			b.WriteString(styGroup.Render(truncate(strings.ToUpper(r.group), inner)) + "\n")
+			b.WriteString(" " + styGroup.Render(truncate(strings.ToUpper(r.group), inner)) + "\n")
 			continue
 		}
-		label := truncate(r.doc.Title, inner-3)
+		label := truncate(r.doc.Title, inner-2)
 		if i == m.cur {
-			b.WriteString(styItemCursor.Render("▍") + styItemOn.Render(padRight(label, inner-2)) + "\n")
+			b.WriteString(styItemCursor.Render("▌") +
+				styItemOn.Render(padRight(" "+label, navWidth-1)) + "\n")
 		} else {
-			b.WriteString(styItem.Render(label) + "\n")
+			b.WriteString("  " + styItem.Render(label) + "\n")
 		}
 	}
 
-	side := stySidebar.Width(m.sidebar).Height(m.h).Render(b.String())
+	return stySidebar.Width(navWidth).Height(m.h).Render(b.String())
+}
 
-	// ── content ──
+func (m docsModel) viewContent() string {
+	measure := m.contentWidth()
+
+	// Breadcrumb rather than a bare title: on a 22-page reference, which group
+	// a page belongs to is as useful as its name.
 	var head string
 	if d := m.current(); d != nil {
-		head = styTitle.Render(d.Title)
+		head = styGroup.Render(strings.ToUpper(d.Group)) +
+			styMuted.Render(" › ") +
+			styTitle.Render(d.Title)
 		if d.Summary != "" {
-			head += styMuted.Render("  " + d.Summary)
+			head += "\n" + styMuted.Render(truncate(d.Summary, measure))
 		}
 	}
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		truncate(head, m.contentWidth()),
+
+	rule := styMuted.Render(strings.Repeat("─", measure))
+
+	body := lipgloss.JoinVertical(lipgloss.Left,
+		head,
+		rule,
 		m.vp.View(),
 	)
-	// -1 for the sidebar's right border, which sits outside its Width().
-	// Without it every docs line is exactly one column too wide.
-	content = styPane.Width(m.w - m.sidebar - 1).Height(m.h).Render(content)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, side, content)
+	// Centre the measure in whatever space is left, so a very wide terminal
+	// gets margins instead of a 200-column line.
+	//
+	// The -1 is the nav's right border: lipgloss draws borders OUTSIDE the
+	// declared Width, so the rail actually occupies navWidth+1 columns. This
+	// is the second time that has cost an off-by-one, hence spelling it out.
+	avail := m.w - m.sidebar - m.outlineW
+	if m.showNav {
+		avail--
+	}
+	if avail < 20 {
+		avail = 20
+	}
+	return lipgloss.NewStyle().
+		Width(avail).
+		Height(m.h).
+		Padding(0, 2).
+		Render(body)
+}
+
+// viewOutline is the page's own H2 headings. On a wide terminal the right
+// third was simply empty; showing the shape of the page is the most useful
+// thing that space can hold, and it costs nothing to compute.
+func (m docsModel) viewOutline() string {
+	d := m.current()
+	var b strings.Builder
+
+	b.WriteString(styGroup.Render("ON THIS PAGE") + "\n\n")
+	if d != nil {
+		heads := outline(d.Body)
+		if len(heads) == 0 {
+			b.WriteString(styMuted.Render(" —") + "\n")
+		}
+		for _, h := range heads {
+			b.WriteString(" " + styMuted.Render("·") + " " +
+				styItem.Render(truncate(h, outlineWidth-5)) + "\n")
+		}
+	}
+
+	// Scroll position, which the old layout gave no indication of at all.
+	pct := 100
+	if m.vp.Height > 0 {
+		pct = int(m.vp.ScrollPercent() * 100)
+	}
+	b.WriteString("\n" + styMuted.Render(fmt.Sprintf(" %d%%", pct)))
+
+	return lipgloss.NewStyle().
+		Width(outlineWidth).
+		Height(m.h).
+		PaddingLeft(1).
+		Render(b.String())
 }
 
 func (m docsModel) help() string {

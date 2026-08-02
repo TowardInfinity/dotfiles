@@ -252,8 +252,15 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		// is nothing to relink if the pull failed. The path is a resolved
 		// local directory, not input, and it is quoted regardless.
 		spec := actionSpec{
-			Title:   "Update dotfiles",
-			Argv:    []string{"sh", "-c", "cd " + shellQuote(m.repo) + " && git pull --ff-only && ./install.sh"},
+			Title: "Update dotfiles",
+			// Naming the remote and branch explicitly rather than relying on
+			// `git pull --ff-only` alone: without upstream tracking that fails
+			// with a wall of git's own help text, which is exactly what it did
+			// on a repo whose remote had been re-added by hand.
+			Argv: []string{"sh", "-c",
+				"cd " + shellQuote(m.repo) +
+					` && git pull --ff-only origin "$(git symbolic-ref --short HEAD)"` +
+					" && ./install.sh"},
 			Confirm: "Pull the latest dotfiles and relink configs?",
 			Timeout: 10 * time.Minute,
 		}
@@ -496,8 +503,23 @@ func fetchDotfilesInfo(repo string) tea.Cmd {
 			info.dirtyKnown = true
 			info.dirty = strings.TrimSpace(out) != ""
 		}
-		if out, err := runGit(ctx, repo, "rev-list", "--count", "HEAD..@{u}"); err == nil {
-			if n, cerr := strconv.Atoi(strings.TrimSpace(out)); cerr == nil {
+		// @{u} needs upstream tracking, which is NOT set by `git push origin
+		// main` — only by `push -u` or a fresh clone. A repo whose remote was
+		// re-added by hand therefore has none, and this silently reported
+		// "behind unknown" forever. Fall back to origin/<branch>, which needs
+		// no tracking at all.
+		countBehind := func(ref string) (int, bool) {
+			out, err := runGit(ctx, repo, "rev-list", "--count", "HEAD.."+ref)
+			if err != nil {
+				return 0, false
+			}
+			n, cerr := strconv.Atoi(strings.TrimSpace(out))
+			return n, cerr == nil
+		}
+		if n, ok := countBehind("@{u}"); ok {
+			info.behind = n
+		} else if info.branch != "" {
+			if n, ok := countBehind("origin/" + info.branch); ok {
 				info.behind = n
 			}
 		}

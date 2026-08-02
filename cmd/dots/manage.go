@@ -87,6 +87,10 @@ type manageModel struct {
 	svcFilter    string
 	svcFiltering bool
 	svcTI        textinput.Model
+	// svcRunningOnly hides everything not currently running. A server can
+	// carry 165 units of which two thirds are oneshots that fired at boot;
+	// listing them all by default is honest but not useful.
+	svcRunningOnly bool
 
 	projects     []projectInfo
 	projLoading  bool
@@ -343,6 +347,10 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		m.svcFiltering = true
 		m.svcTI.Focus()
 		return m, textinput.Blink
+	case "a":
+		m.svcRunningOnly = !m.svcRunningOnly
+		m.svcCursor = 0
+		return m, nil
 	case "r":
 		m.svcLoading = true
 		m.svcMsg = ""
@@ -413,7 +421,13 @@ type projTmuxMsg struct{ hint string }
 // tea.Cmd for exactly that reason, and tmux stalling is not hypothetical on a
 // box with a wedged session.
 func (m manageModel) openProjectTmux(p projectInfo) tea.Cmd {
-	cmdLine := fmt.Sprintf("tmux new-session -A -s %s -c %s", p.name, p.path)
+	// Abbreviate $HOME. The point of this line is that you can read it and
+	// retype it; a path that runs off the edge of the pane serves neither.
+	shown := p.path
+	if home := os.Getenv("HOME"); home != "" && strings.HasPrefix(shown, home) {
+		shown = "~" + strings.TrimPrefix(shown, home)
+	}
+	cmdLine := fmt.Sprintf("tmux new-session -A -s %s -c %s", p.name, shown)
 
 	if os.Getenv("TMUX") == "" {
 		return func() tea.Msg {
@@ -764,7 +778,11 @@ func (m manageModel) servicesSummary() string {
 	if src == "" {
 		src = "none"
 	}
-	return fmt.Sprintf("%d of %d running  ·  via %s", run, len(m.services), src)
+	scope := "all"
+	if m.svcRunningOnly {
+		scope = "running only"
+	}
+	return fmt.Sprintf("%d of %d running  ·  %s  ·  via %s", run, len(m.services), scope, src)
 }
 
 func (m manageModel) viewDotfiles() string {
@@ -917,15 +935,17 @@ func svcSourceName(s svcSource) string {
 // visibleServices applies the search box. Discovery is deliberately broad, so
 // filtering is what makes a list of dozens usable.
 func (m manageModel) visibleServices() []service {
-	if m.svcFilter == "" {
-		return m.services
-	}
 	q := strings.ToLower(m.svcFilter)
-	var out []service
+	out := make([]service, 0, len(m.services))
 	for _, s := range m.services {
-		if strings.Contains(strings.ToLower(s.Name+" "+s.ID+" "+svcSourceName(s.Source)), q) {
-			out = append(out, s)
+		if m.svcRunningOnly && !s.Running {
+			continue
 		}
+		if q != "" && !strings.Contains(
+			strings.ToLower(s.Name+" "+s.ID+" "+svcSourceName(s.Source)), q) {
+			continue
+		}
+		out = append(out, s)
 	}
 	return out
 }
@@ -979,7 +999,14 @@ func (m manageModel) viewProjects() string {
 		b.WriteString(line + "\n")
 	}
 	if m.projTmuxHint != "" {
-		b.WriteString("\n" + styMuted.Render(truncate(m.projTmuxHint, m.w-4)) + "\n")
+		// Wrap rather than truncate. This hint exists to be read and retyped,
+		// so cutting the end off the path defeats the whole point of showing
+		// it — the tail is the part you need.
+		measure := measureFor(m.w - railWidth - 1)
+		for _, ln := range wrapPlain(m.projTmuxHint, measure) {
+			b.WriteString("\n" + styMuted.Render(ln))
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -1023,4 +1050,28 @@ func (m manageModel) viewMachines() string {
 // directly and never goes near a shell.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// wrapPlain breaks a string on spaces to fit a width, without hyphenating or
+// dropping anything. Used where the text must stay complete — a command you
+// are meant to copy cannot be elided.
+func wrapPlain(s string, w int) []string {
+	if w < 8 {
+		w = 8
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return nil
+	}
+	var out []string
+	line := words[0]
+	for _, word := range words[1:] {
+		if len(line)+1+len(word) <= w {
+			line += " " + word
+			continue
+		}
+		out = append(out, line)
+		line = word
+	}
+	return append(out, line)
 }

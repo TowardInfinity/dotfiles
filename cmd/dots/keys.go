@@ -87,7 +87,7 @@ func (m manageModel) keys() []key.Binding {
 		return []key.Binding{nav,
 			bind("j/k", "move"), bind("/", "filter"),
 			bind("s", "start"), bind("x", "stop"), bind("R", "restart"),
-			bind("r", "rescan"),
+			bind("a", "all/running"), bind("r", "rescan"),
 		}
 	// Only advertise a key that can act. A listed key that does nothing is
 	// worse than an absent one — the same rule Doctor's `i` already follows.

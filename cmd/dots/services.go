@@ -303,13 +303,27 @@ func parseSystemdUnits(out string, userUnit bool) []service {
 			continue
 		}
 		unit, active, sub := fields[0], fields[2], fields[3]
+
+		// SUB, not ACTIVE, decides whether something is running.
+		//
+		// A oneshot unit that has done its job sits at active/exited — it is
+		// "active" in systemd's sense but nothing is running. Keying off ACTIVE
+		// put 40-odd exited units in the running count and rendered each as
+		// "running … exited", which contradicts itself on one line.
+		running := sub == "running"
+
+		detail := sub
+		if active == "failed" || sub == "failed" {
+			detail = "failed"
+		}
+
 		svcs = append(svcs, service{
 			ID:       unit,
 			Name:     prettifyIdentifier(strings.TrimSuffix(unit, ".service")),
 			Source:   srcSystemd,
 			UserUnit: userUnit,
-			Running:  active == "active",
-			Detail:   sub,
+			Running:  running,
+			Detail:   detail,
 		})
 	}
 	return svcs

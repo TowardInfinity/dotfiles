@@ -65,6 +65,12 @@ func main() {
 		}
 	case "doctor":
 		os.Exit(runDoctorCLI())
+	case "install":
+		os.Exit(runInstallCLI(args[1:]))
+	case "update":
+		os.Exit(runUpdateCLI(args[1:]))
+	case "docs":
+		os.Exit(runDocsCLI(args[1:]))
 	case "edit":
 		editDoc(args[1:])
 	default:
@@ -89,10 +95,15 @@ func usage() {
   dots <topic>         print one page
   dots search <term>   search every page
   dots doctor          check the tools these configs call
+  dots install         relink configs; --deps also installs the tools
+  dots update          pull the latest configs, then relink
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path
   dots version         print the version of this binary
+
+install, update and docs are commands, not pages. The pages of those names
+are at: dots docs install, dots docs update.
 
 In the TUI: 1/2/3 or tab switch panes, / filters, j/k moves, q quits.
 `)

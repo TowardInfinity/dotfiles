@@ -120,6 +120,19 @@ If a binding in the docs disagrees with the machine, **the machine is
 right** — the docs were generated from the configs and have drifted. Fix the
 doc.
 
+## Re-running the installer
+
+On a machine that already has `dots`, you do not need the curl one-liner:
+
+```sh
+dots install          # relink every config
+dots install --deps   # also install the tools the configs call
+dots install --dry    # print what would happen, change nothing
+```
+
+`dots install` is repair and top-up — you already have the checkout. The
+one-liner below is for a machine that has none of this yet.
+
 ## Reinstalling from scratch
 
 ```sh
@@ -129,3 +142,9 @@ sh -c "$(curl -fsSL https://toin.in/install)" -- --deps
 Existing files are moved to `<path>.backup.<timestamp>` rather than
 overwritten. `--dry` first if you want to see the plan without committing to
 it.
+
+## `install` and `update` are commands
+
+`dots install` and `dots update` do things. The pages of the same name — this
+one included — are at `dots docs install` and `dots docs update`, and are
+always available in the Docs tab.

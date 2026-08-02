@@ -137,3 +137,34 @@ func itoa(n int) string {
 	}
 	return string(b)
 }
+
+// install and update must be COMMANDS, not doc pages. docs/install.md and
+// docs/update.md both exist, and the collision was previously resolved the
+// wrong way — `dots update` printed the page about updating rather than
+// updating anything, which the bash version it replaced did do.
+func TestVerbsAreCommandsNotPages(t *testing.T) {
+	docs, _ := loadDocs(findRepo())
+	byName := map[string]bool{}
+	for _, d := range docs {
+		byName[d.Name] = true
+	}
+	// The pages still exist — the point is that the verbs shadow them, and
+	// `dots docs <name>` is the way back to them.
+	for _, n := range []string{"install", "update"} {
+		if !byName[n] {
+			t.Errorf("docs/%s.md is gone; the collision this guards no longer exists", n)
+		}
+	}
+	// printDoc must still find them, which is what `dots docs <name>` calls.
+	for _, n := range []string{"install", "update"} {
+		found := false
+		for _, d := range docs {
+			if d.Name == n {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("dots docs %s would not resolve", n)
+		}
+	}
+}

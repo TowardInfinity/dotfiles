@@ -95,16 +95,36 @@ sha256_of() {
 }
 
 # ── Tier 1: cached release binary ─────────────────────────────
-# `try_download` (tier 2) records the version it last verified in
-# $CACHE_DIR/current-version. This tier trusts that record rather than hitting
-# the network again — that record only exists once a checksum has already
-# passed, so trusting it here is not a weaker guarantee than tier 2's.
+# `try_download` (tier 2) records the version it verified in
+# $CACHE_DIR/current-version and the digest it verified in dots-<v>.sha256.
+#
+# The digest is re-checked here rather than assuming the cache is still what
+# was written. Be clear about what that does and does not buy: it catches a
+# truncated or corrupted file — an interrupted write, a full disk, a bad
+# sector — which would otherwise be cached and reused forever, silently.
+#
+# It is NOT a security boundary. Anything able to rewrite the binary can
+# rewrite the digest beside it, and could just as easily replace the symlink
+# in ~/.local/bin. Both live in the user's own home directory. Corruption is
+# the realistic failure here, and it is the one this catches.
 try_cached() {
   [ -f "$CACHE_DIR/current-version" ] || return 1
   v=$(cat "$CACHE_DIR/current-version" 2>/dev/null) || return 1
   [ -n "$v" ] || return 1
   bin="$CACHE_DIR/dots-$v"
   [ -x "$bin" ] || return 1
+
+  want_file="$CACHE_DIR/dots-$v.sha256"
+  if [ -f "$want_file" ]; then
+    want=$(cat "$want_file" 2>/dev/null)
+    got=$(sha256_of "$bin")
+    if [ -n "$want" ] && [ -n "$got" ] && [ "$want" != "$got" ]; then
+      log "dots-resolve: cached binary failed its checksum — discarding and refetching"
+      rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
+      return 1
+    fi
+  fi
+
   printf '%s\n' "$bin"
 }
 
@@ -176,6 +196,9 @@ try_download() {
 
   chmod +x "$tmp" 2>/dev/null || { log "dots-resolve: could not make $tmp executable"; rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$dest" 2>/dev/null || { log "dots-resolve: could not install to $dest"; rm -f "$tmp"; return 1; }
+  # Record the digest of what actually landed on disk, so tier 1 can tell a
+  # corrupted cache from a good one on the next run.
+  sha256_of "$dest" > "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
   printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
   printf '%s\n' "$dest"
 }

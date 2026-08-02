@@ -1,3 +1,10 @@
+---
+title: Tools
+group: Reference
+order: 20
+summary: CLI tools installed by --deps
+---
+
 # Tools
 
 Installed by `--deps`. The list is driven by what the configs actually

@@ -1,3 +1,10 @@
+---
+title: Updating
+group: Maintain
+order: 20
+summary: Pulling updates and rolling them out
+---
+
 # Updating
 
 ## The short version

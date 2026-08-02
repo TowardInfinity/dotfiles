@@ -1,3 +1,10 @@
+---
+title: Languages
+group: Reference
+order: 10
+summary: Language servers and formatters per language
+---
+
 # Languages
 
 Servers and formatters install themselves on first launch. If something

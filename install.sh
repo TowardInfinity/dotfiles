@@ -143,7 +143,25 @@ link common/nvim "$HOME/.config/nvim"
 # The reference/maintenance CLI. Linked into ~/.local/bin, which both .zshrc
 # files already put on PATH. It resolves back through this symlink to find the
 # repo, so `dots update` works from anywhere.
-link bin/dots "$HOME/.local/bin/dots"
+# The Go build is the real tool; bin/dots is the bash fallback for machines
+# without a Go toolchain. Building here rather than shipping a binary keeps the
+# repo free of platform artifacts, and the build is a couple of seconds.
+if command -v go >/dev/null 2>&1 || [[ -x /usr/local/go/bin/go ]]; then
+  GO=go; command -v go >/dev/null 2>&1 || GO=/usr/local/go/bin/go
+  if $DRY; then
+    printf '  \033[36mwould build\033[0m  dots (go)\n'
+  else
+    echo "Building dots..."
+    if (cd "$REPO" && "$GO" build -o "$REPO/bin/dots-bin" ./cmd/dots/ 2>&1 | sed 's/^/    /'); then
+      link bin/dots-bin "$HOME/.local/bin/dots"
+    else
+      printf '  \033[33mwarning\033[0m  go build failed — linking the shell fallback\n'
+      link bin/dots "$HOME/.local/bin/dots"
+    fi
+  fi
+else
+  link bin/dots "$HOME/.local/bin/dots"
+fi
 
 # --copy keeps no repo, so `dots` has nothing to read its docs out of — its
 # own parent directory becomes ~/.local. The docs have to travel with it.

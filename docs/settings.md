@@ -1,3 +1,10 @@
+---
+title: Settings
+group: Maintain
+order: 10
+summary: Where to edit each config and setting
+---
+
 # Settings
 
 Where everything lives, and which file to open when you want to change

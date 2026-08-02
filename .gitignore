@@ -22,3 +22,4 @@ macos/ghostty/*.pre-*
 
 # Machine-local shell overrides — intentionally untracked
 .zshrc.local
+bin/dots-bin

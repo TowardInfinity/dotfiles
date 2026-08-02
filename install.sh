@@ -145,6 +145,13 @@ link common/nvim "$HOME/.config/nvim"
 # repo, so `dots update` works from anywhere.
 link bin/dots "$HOME/.local/bin/dots"
 
+# --copy keeps no repo, so `dots` has nothing to read its docs out of — its
+# own parent directory becomes ~/.local. The docs have to travel with it.
+# Symlink installs skip this: there the repo is right there and current.
+if $COPY; then
+  link docs "$HOME/.local/share/dots/docs"
+fi
+
 # ── Claude Code ───────────────────────────────────────────────
 # Only the delegation policy is shared. Each box's ~/.claude/CLAUDE.md stays
 # untracked and machine-specific (different toolchains, different guardrails)

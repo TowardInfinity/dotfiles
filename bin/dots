@@ -31,7 +31,20 @@ while [[ -L "$self" ]]; do
   [[ $target == /* ]] && self="$target" || self="$(cd "$(dirname "$self")" && pwd)/$target"
 done
 REPO="$(cd "$(dirname "$self")/.." && pwd)"
-DOCS="$REPO/docs"
+
+# Docs are usually alongside the script in the repo, but --copy installs keep
+# no repo at all — the script is copied to ~/.local/bin and its parent is then
+# ~/.local, which has no docs in it. So the docs travel separately in that mode
+# and this looks in every place they can legitimately be.
+if [[ -n ${DOTS_DOCS:-} && -d ${DOTS_DOCS:-} ]]; then
+  DOCS="$DOTS_DOCS"
+elif [[ -d "$REPO/docs" ]]; then
+  DOCS="$REPO/docs"
+elif [[ -d "$HOME/.local/share/dots/docs" ]]; then
+  DOCS="$HOME/.local/share/dots/docs"
+else
+  DOCS="$REPO/docs"
+fi
 
 # ── Palette ───────────────────────────────────────────────────
 # Tokyo Night, the same one Ghostty, tmux and NvChad use. Suppressed when
@@ -288,7 +301,14 @@ search() {
 
 # ── Update ────────────────────────────────────────────────────
 update() {
-  [[ -d "$REPO/.git" ]] || die "$REPO is not a git checkout — nothing to pull"
+  # A --copy install has no repo to pull, by design. Say what to do instead of
+  # reporting a missing .git directory the user never expected to have.
+  if [[ ! -d "$REPO/.git" ]]; then
+    warn "this looks like a --copy install — there is no repo to pull"
+    printf '  Update it by re-running the installer:\n    %ssh -c "$(curl -fsSL https://toin.in/install)" -- --copy%s\n' \
+      "$CYAN" "$R"
+    return 1
+  fi
 
   info "Updating $REPO"
   local before after

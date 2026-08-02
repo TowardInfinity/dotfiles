@@ -14,6 +14,7 @@ macos/
 linux/
   zsh/.zshrc       apt, ss, TERM fallback, glow-backed cat
   tmux/tmux.conf   prefix Ctrl-b, OSC 52 clipboard, targets tmux 3.2a
+bootstrap.sh       the curl'd one-liner — clones, optional packages, then runs:
 install.sh         detects the OS and links the right set
 ```
 
@@ -30,21 +31,24 @@ full of `if [[ $OSTYPE ]]`.
 One command on a new machine — macOS or Ubuntu:
 
 ```sh
-sh -c "$(curl -fsSL https://toin.in/install.sh)"
+sh -c "$(curl -fsSL https://toin.in/install)"
 ```
 
 With packages installed too:
 
 ```sh
-sh -c "$(curl -fsSL https://toin.in/install.sh)" -- --deps
+sh -c "$(curl -fsSL https://toin.in/install)" -- --deps
 ```
 
-That installer lives in a small **public** repo,
-[`dotfiles-install`](https://github.com/TowardInfinity/dotfiles-install), so it
-can be `curl`'d without credentials. **This** repo stays private, so the machine
-still needs GitHub access before the configs can be fetched — `gh auth login`
-or an SSH key on the account. The installer checks up front and prints the fix
-rather than failing halfway through.
+**No GitHub account needed.** This repo is public, so a machine you will never
+log into GitHub from can still install from it. If the machine happens to have
+an SSH key on the account, the clone uses SSH so you can push config changes
+back; otherwise it clones read-only over HTTPS and says so. It never stops to
+ask for credentials.
+
+That one-liner is `bootstrap.sh` in this repo, served through a Worker route on
+`toin.in` so the public command stays stable even when the file moves.
+`https://toin.in/install.sh` is kept working as an alias.
 
 ### Options
 
@@ -68,7 +72,7 @@ re-running the installer instead of `git pull`.
 
 ```sh
 # throwaway machine, no repo kept
-sh -c "$(curl -fsSL https://toin.in/install.sh)" -- --copy
+sh -c "$(curl -fsSL https://toin.in/install)" -- --copy
 ```
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default
@@ -88,7 +92,11 @@ cd ~/Codes/dotfiles
 ```
 
 `install.sh` only does the linking. Cloning, package installation and `--copy`
-all live in the public installer, so there is exactly one copy of that logic.
+live in `bootstrap.sh`, so there is exactly one copy of that logic.
+
+The two are split by what they can assume, not by what they do: `bootstrap.sh`
+is POSIX `sh` because it runs on a machine where nothing is installed yet,
+while `install.sh` is bash and only ever runs from a clone.
 
 ### Prerequisites
 
@@ -178,8 +186,17 @@ the default branch, but NvChad v2.5 drives the old API and
 `require("nvim-treesitter.configs")` exists only on `master`. The spec pins
 `branch = "master"` for this reason. Without it a fresh clone installs `main`,
 every parser fails with *module 'nvim-treesitter.configs' not found*, and you
-get zero parsers. `lazy-lock.json` records the branch too, but only
-`:Lazy restore` honours it — `:Lazy sync` follows the remote default.
+get zero parsers.
+
+**`lazy-lock.json` is a snapshot, not a pin.** It records a `branch` per plugin,
+but lazy only ever runs `git checkout <sha>` — never `git checkout <branch>` —
+so `:Lazy restore` does not honour that field. An unpinned plugin follows
+whatever the remote's default branch was *on the day that machine cloned it*,
+frozen in its `origin/HEAD`. Two boxes set up months apart land on different
+branches with nobody running a wrong command, and because lazy rewrites the
+whole lockfile from disk after every operation, the drift gets recorded as
+truth. Only `branch =` in the spec enforces anything — which is why
+`nvim-treesitter`, `nvchad/base46` and `nvchad/ui` all carry one.
 
 **Switching a machine off another nvim distro? Clear `~/.local/share/nvim/site/`.**
 nvim-treesitter's `main` branch installs parsers and queries there, and `site/`

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 )
 
 // Shared chrome. Every pane was drawing its own header in its own way, which
@@ -159,4 +160,35 @@ func countSummary(have, total int, noun string) string {
 		return styOK.Render(s)
 	}
 	return styPending.Render(s)
+}
+
+// dataTable renders rows as a real table with rules, rather than columns of
+// hand-padded spaces. lipgloss/table measures each column itself, so a long
+// path no longer shoves the next column sideways — which is what made the
+// hand-rolled version drift out of alignment as content changed.
+//
+// selected is the row index to highlight, or -1 for none.
+func dataTable(headers []string, rows [][]string, selected, maxW int) string {
+	t := table.New().
+		Border(lipgloss.NormalBorder()).
+		BorderStyle(lipgloss.NewStyle().Foreground(cLine)).
+		BorderTop(false).
+		BorderLeft(false).
+		BorderRight(false).
+		BorderColumn(false).
+		Headers(headers...).
+		Rows(rows...).
+		Width(maxW).
+		StyleFunc(func(row, col int) lipgloss.Style {
+			base := lipgloss.NewStyle().Padding(0, 1)
+			switch {
+			case row == table.HeaderRow:
+				return base.Foreground(cFaint).Bold(true)
+			case row == selected:
+				return base.Foreground(cInk).Background(cSurface).Bold(true)
+			default:
+				return base.Foreground(cInkDim)
+			}
+		})
+	return t.String()
 }

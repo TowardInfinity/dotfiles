@@ -682,7 +682,7 @@ func fetchMachinesInfo() tea.Cmd {
 
 // ── view ──────────────────────────────────────────────────────
 
-func (m manageModel) view() string {
+func (m manageModel) view(spin string) string {
 	// A left rail rather than horizontal segments, so all three tabs share one
 	// shape: rail, then a content column with a two-line header and a rule.
 	// The sections were a row of pills here and a sidebar in Docs, which is a
@@ -695,7 +695,7 @@ func (m manageModel) view() string {
 		items = append(items, railItem{label: sectionNames[i]})
 	}
 
-	body, summary := m.sectionBody()
+	body, summary := m.sectionBody(spin)
 	contentW := m.w
 	if showRail {
 		contentW = m.w - railWidth - 1 // -1: the rail border sits outside Width
@@ -714,12 +714,12 @@ func (m manageModel) view() string {
 
 // sectionBody returns the section's content and a one-line summary for the
 // header, so every section states its own state in the same place.
-func (m manageModel) sectionBody() (string, string) {
+func (m manageModel) sectionBody(spin string) (string, string) {
 	switch m.section {
 	case secDotfiles:
 		return m.viewDotfiles(), m.dotfilesSummary()
 	case secServices:
-		return m.viewServices(), m.servicesSummary()
+		return m.viewServices(spin), m.servicesSummary()
 	case secProjects:
 		return m.viewProjects(), fmt.Sprintf("%d repositories under ~/Codes", len(m.projects))
 	case secMachines:
@@ -815,43 +815,34 @@ func (m manageModel) viewDotfiles() string {
 	return b.String()
 }
 
-func (m manageModel) viewServices() string {
+func (m manageModel) viewServices(spin string) string {
 	measure := measureFor(m.w - railWidth - 1)
 
 	if m.svcLoading {
-		return "\n  " + styPending.Render("⟳ discovering")
+		return "\n  " + spin + styPending.Render(" discovering")
 	}
 	if len(m.services) == 0 {
-		return "\n  " + styMuted.Render("Nothing found. Looked for launchd agents, systemd units and docker containers.")
+		return "\n  " + styMuted.Render(
+			"Nothing found. Looked for launchd agents, systemd units and docker containers.")
 	}
 
-	var b strings.Builder
+	var head string
 	if m.svcFilter != "" || m.svcFiltering {
 		cue := styFilter.Render("/" + m.svcFilter)
 		if m.svcFiltering {
 			cue += styFilter.Render("▏")
 		}
-		b.WriteString("  " + cue + "\n\n")
+		head = "  " + cue + "\n"
 	}
 
 	vis := m.visibleServices()
 	if len(vis) == 0 {
-		return b.String() + "  " + styMuted.Render("nothing matches that filter")
+		return head + "  " + styMuted.Render("nothing matches that filter")
 	}
 
-	nameW := 16
-	for _, s := range vis {
-		if len(s.Name) > nameW {
-			nameW = len(s.Name)
-		}
-	}
-	if nameW > 34 {
-		nameW = 34
-	}
-
-	// Only as many rows as fit, with the cursor kept in view — a Mac can have
-	// dozens of agents and the pane must not try to draw them all.
-	rows := m.h - 8
+	// Only as many rows as fit, cursor kept in view: a Mac can carry dozens of
+	// agents and the pane must not try to draw them all.
+	rows := m.h - 9
 	if rows < 3 {
 		rows = 3
 	}
@@ -870,33 +861,39 @@ func (m manageModel) viewServices() string {
 		end = len(vis)
 	}
 
+	data := make([][]string, 0, end-start)
 	for i := start; i < end; i++ {
 		s := vis[i]
-		cursor := "  "
-		if i == m.svcCursor {
-			cursor = styItemCursor.Render("▌ ")
-		}
-		// Probed-but-not-listening is the interesting failure and gets its own
-		// mark, rather than being folded into "running".
+		// Running-but-not-answering gets its own mark. Folding it into
+		// "running" hides the failure that actually matters.
 		dot := stateDot(s.Running, true)
-		if s.Running && s.Probed && !s.Healthy {
-			dot = styPending.Render("●")
+		state := "stopped"
+		if s.Running {
+			state = "running"
+			if s.Probed && !s.Healthy {
+				dot = styPending.Render("●")
+				state = "not answering"
+			}
 		}
-		line := cursor + dot + " " + styValue.Render(padRight(truncate(s.Name, nameW), nameW))
-		line += " " + styMuted.Render(padRight(svcSourceName(s.Source), 8))
-		if s.Detail != "" {
-			line += " " + styMuted.Render(s.Detail)
-		}
-		b.WriteString(truncate(line, measure) + "\n")
+		data = append(data, []string{
+			dot + " " + s.Name,
+			svcSourceName(s.Source),
+			state,
+			s.Detail,
+		})
 	}
 
+	body := head + dataTable(
+		[]string{"SERVICE", "VIA", "STATE", "DETAIL"},
+		data, m.svcCursor-start, measure)
+
 	if len(vis) > rows {
-		b.WriteString(styMuted.Render(fmt.Sprintf("  … %d more", len(vis)-rows)) + "\n")
+		body += "\n  " + styMuted.Render(fmt.Sprintf("… %d more, / to filter", len(vis)-rows))
 	}
 	if m.svcMsg != "" {
-		b.WriteString("\n  " + styMuted.Render(truncate(m.svcMsg, measure)))
+		body += "\n  " + styMuted.Render(truncate(m.svcMsg, measure))
 	}
-	return b.String()
+	return body
 }
 
 func svcSourceName(s svcSource) string {

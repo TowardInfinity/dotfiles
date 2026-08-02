@@ -233,13 +233,13 @@ func (a actionModel) update(msg tea.Msg) (actionModel, tea.Cmd, bool) {
 	return a, nil, false
 }
 
-func (a actionModel) view() string {
+func (a actionModel) view(spin string) string {
 	var head string
 	switch {
 	case a.confirm:
 		head = styPending.Render("? ") + styTitle.Render(a.spec.Title)
 	case a.running:
-		head = styPending.Render("⟳ ") + styTitle.Render(a.spec.Title)
+		head = spin + " " + styTitle.Render(a.spec.Title)
 	case a.cancelled:
 		head = styPending.Render("⊘ ") + styTitle.Render(a.spec.Title) +
 			styMuted.Render("  stopped")

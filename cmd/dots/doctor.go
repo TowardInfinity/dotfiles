@@ -288,7 +288,7 @@ func checkGroup(name string) string {
 	}
 }
 
-func (m doctorModel) view() string {
+func (m doctorModel) view(spin string) string {
 	osName := "Linux"
 	if runtime.GOOS == "darwin" {
 		osName = "macOS"
@@ -298,56 +298,53 @@ func (m doctorModel) view() string {
 	if m.loading {
 		return contentColumn(m.w, m.h,
 			paneHeader("Doctor", osName, "checking what the configs call…", measure),
-			"\n  "+styPending.Render("⟳ checking"))
+			"\n  "+spin+styPending.Render(" checking"))
 	}
 
 	ok := 0
-	nameW := 12
 	for _, c := range m.checks {
 		if c.state == checkOK {
 			ok++
 		}
-		if len(c.name) > nameW {
-			nameW = len(c.name)
-		}
 	}
 
-	var b strings.Builder
+	// A real table rather than padded columns. The resolved paths vary wildly
+	// in length, and hand-padding drifted out of alignment the moment one of
+	// them changed; lipgloss measures the columns itself.
+	rows := make([][]string, 0, len(m.checks))
 	lastGroup := ""
 	for _, c := range m.checks {
-		if g := checkGroup(c.name); g != lastGroup {
-			if lastGroup != "" {
-				b.WriteString("\n")
-			}
-			b.WriteString(" " + styGroup.Render(strings.ToUpper(g)) + "\n")
+		g := checkGroup(c.name)
+		label := ""
+		if g != lastGroup {
+			label = strings.ToUpper(g)
 			lastGroup = g
 		}
-
-		mark := stateDot(c.state == checkOK, c.state != checkPending)
-		line := "  " + mark + "  " + styValue.Render(padRight(c.name, nameW))
-		if c.path != "" {
-			line += "  " + styMuted.Render(truncate(c.path, measure-nameW-8))
-		} else if c.state == checkBad {
-			line += "  " + styMuted.Render("not found")
+		where := c.path
+		if where == "" && c.state == checkBad {
+			where = "not found"
 		}
-		b.WriteString(truncate(line, measure) + "\n")
+		rows = append(rows, []string{
+			label,
+			stateDot(c.state == checkOK, c.state != checkPending) + " " + c.name,
+			where,
+		})
 	}
 
-	// Missing things get an explicit call to action rather than leaving you to
-	// work out what to do with the information.
-	b.WriteString("\n" + hrule(measure) + "\n")
+	body := dataTable([]string{"", "TOOL", "WHERE"}, rows, -1, measure) + "\n"
+
 	if ok == len(m.checks) {
-		b.WriteString(" " + styOK.Render("Everything the configs call is installed."))
+		body += " " + styOK.Render("Everything the configs call is installed.")
 	} else {
-		b.WriteString(" " + styPending.Render("i") + styMuted.Render(" installs the missing ones"))
+		body += " " + styPending.Render("i") + styMuted.Render(" installs the missing ones")
 	}
 	if m.note != "" {
-		b.WriteString("\n\n " + styMuted.Render(truncate(m.note, measure)))
+		body += "\n " + styMuted.Render(truncate(m.note, measure))
 	}
 
 	return contentColumn(m.w, m.h,
 		paneHeader("Doctor", osName, countSummary(ok, len(m.checks), "present"), measure),
-		b.String())
+		body)
 }
 
 func (m doctorModel) help() string {

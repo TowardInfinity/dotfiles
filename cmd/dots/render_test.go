@@ -188,7 +188,7 @@ func TestAsyncResultReachesInactiveTab(t *testing.T) {
 		t.Fatal("expected Docs to be the starting tab")
 	}
 	tm, _ = tm.Update(runDoctorChecks())
-	if strings.Contains(tm.(model).doc.view(), "checking") {
+	if strings.Contains(tm.(model).doc.view("⣾"), "checking") {
 		t.Error("doctor still shows 'checking' after its results arrived")
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -35,13 +36,24 @@ type model struct {
 	// underneath it.
 	act *actionModel
 
+	// One spinner for the whole app rather than one per pane. Each pane
+	// keeping its own would start a separate tick loop, and with messages now
+	// broadcast to every pane that means several overlapping animations
+	// driving redraws. The root ticks once and hands the current frame down.
+	sp spinner.Model
+
 	err string
 }
 
 func newModel() model {
 	repo := findRepo()
 	docs, src := loadDocs(repo)
+	sp := spinner.New(
+		spinner.WithSpinner(spinner.Dot),
+		spinner.WithStyle(styPending),
+	)
 	return model{
+		sp:     sp,
 		repo:   repo,
 		source: src,
 		docs:   newDocsModel(docs),
@@ -51,7 +63,7 @@ func newModel() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.doc.Init(), m.man.Init())
+	return tea.Batch(m.doc.Init(), m.man.Init(), m.sp.Tick)
 }
 
 // contentSize is the area inside the tab bar and status line. Every pane is
@@ -155,6 +167,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if _, ok := msg.(spinner.TickMsg); ok {
+		var c tea.Cmd
+		m.sp, c = m.sp.Update(msg)
+		return m, c
+	}
+
 	if m.act != nil {
 		switch msg.(type) {
 		case actLineMsg, actDoneMsg:
@@ -213,9 +231,9 @@ func (m model) View() string {
 	case tabDocs:
 		body, help = m.docs.view(), m.docs.help()
 	case tabDoctor:
-		body, help = m.doc.view(), m.doc.help()
+		body, help = m.doc.view(m.sp.View()), m.doc.help()
 	case tabManage:
-		body, help = m.man.view(), m.man.help()
+		body, help = m.man.view(m.sp.View()), m.man.help()
 	}
 
 	// Hard clamp. Every pane is handed the same height, but an arithmetic slip
@@ -234,7 +252,7 @@ func (m model) View() string {
 	)
 
 	if m.act != nil {
-		body = m.act.view()
+		body = m.act.view(m.sp.View())
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, bar, body, status)

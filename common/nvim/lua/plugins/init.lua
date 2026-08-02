@@ -1,5 +1,26 @@
 return {
   -- ══════════════════════════════════════════════════════════
+  -- NvChad's own repos — branch pins, not new plugins
+  -- ══════════════════════════════════════════════════════════
+  -- init.lua pins NvChad core to v2.5, but the two repos it pulls in
+  -- (`nvchad/base46`, `nvchad/ui`) are declared with no branch at all in
+  -- nvchad/plugins/init.lua. An unpinned plugin follows whatever the remote's
+  -- default branch was *at clone time*, frozen into that clone's origin/HEAD —
+  -- so two machines set up months apart land on different branches and both
+  -- think they are right. lazy-lock.json cannot fix this: `:Lazy restore` only
+  -- ever checks out commits, never branches, and it rewrites the lockfile from
+  -- whatever is on disk afterwards, so drift gets recorded as truth.
+  --
+  -- These entries merge into NvChad's specs by name, adding only the branch.
+  -- The values are the combination both machines are actually running today,
+  -- verified working — not an upgrade. base46 v2.5 is deliberate: it is the
+  -- branch that matches the pinned v2.5 core. ui v3.0 is likewise deliberate:
+  -- it owns nvconfig.lua, whose nested `base46 = {}` schema is the one
+  -- chadrc.lua is written against.
+  { "nvchad/base46", branch = "v2.5" },
+  { "nvchad/ui", branch = "v3.0" },
+
+  -- ══════════════════════════════════════════════════════════
   -- Core: formatting, LSP, syntax
   -- ══════════════════════════════════════════════════════════
 

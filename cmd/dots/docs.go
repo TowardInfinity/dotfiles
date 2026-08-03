@@ -132,7 +132,7 @@ func (m docsModel) current() *doc {
 // full-width layout felt off even though nothing was technically wrong.
 const (
 	navWidth     = 24
-	outlineWidth = 26
+	outlineWidth = 32
 	maxMeasure   = 92
 )
 
@@ -317,15 +317,20 @@ func (m docsModel) viewNav() string {
 	for i := start; i < end; i++ {
 		r := m.rows[i]
 		if r.isHead {
+			// Groups sit one column in, pages three. They were both at two,
+			// which is how the whole rail ended up reading as one flat list.
+			if i > start {
+				b.WriteString("\n")
+			}
 			b.WriteString(" " + styGroup.Render(truncate(strings.ToUpper(r.group), inner)) + "\n")
 			continue
 		}
-		label := truncate(r.doc.Title, inner-2)
+		label := truncate(r.doc.Title, inner-3)
 		if i == m.cur {
 			b.WriteString(styItemCursor.Render("▌") +
-				styItemOn.Render(padRight(" "+label, navWidth-1)) + "\n")
+				styItemOn.Render(padRight("  "+label, navWidth-1)) + "\n")
 		} else {
-			b.WriteString("  " + styItem.Render(label) + "\n")
+			b.WriteString("   " + styItem.Render(label) + "\n")
 		}
 	}
 
@@ -393,11 +398,21 @@ func (m docsModel) viewOutline() string {
 		}
 		for _, h := range heads {
 			// Strip inline-code ticks: "Why `Q` does not drop you" reads as
-			// markup in a rail, and the backticks eat width that the heading
-			// needs.
+			// markup in a rail, and the backticks eat width the heading needs.
 			h = strings.ReplaceAll(h, "`", "")
-			b.WriteString(" " + styMuted.Render("·") + " " +
-				styItem.Render(truncate(h, outlineWidth-4)) + "\n")
+
+			// Wrap rather than truncate. An outline exists so you can see the
+			// shape of a page without scrolling it — "The servers are arm64…"
+			// tells you nothing the heading was for. Continuation lines are
+			// indented under the bullet so the entries stay distinguishable.
+			lines := wrapPlain(h, outlineWidth-4)
+			for j, ln := range lines {
+				if j == 0 {
+					b.WriteString(" " + styMuted.Render("·") + " " + styItem.Render(ln) + "\n")
+				} else {
+					b.WriteString("   " + styItem.Render(ln) + "\n")
+				}
+			}
 		}
 	}
 

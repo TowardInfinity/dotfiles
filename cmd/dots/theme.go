@@ -48,8 +48,7 @@ var (
 	// Sidebar
 	styGroup = lipgloss.NewStyle().
 			Foreground(cFaint).
-			Bold(true).
-			PaddingLeft(1)
+			Bold(true)
 
 	// Colour and weight only — no padding. These styles are applied to strings
 	// the caller has already measured and padded to a rail width, so carrying

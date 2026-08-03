@@ -133,12 +133,12 @@ func renderRail(items []railItem, cursor, w, h int, top string) string {
 			b.WriteString(" " + styGroup.Render(truncate(strings.ToUpper(it.label), inner)) + "\n")
 			continue
 		}
-		label := truncate(it.label, inner-2)
+		label := truncate(it.label, inner-3)
 		if i == cursor {
 			b.WriteString(styItemCursor.Render("▌") +
-				styItemOn.Render(padRight(" "+label, w-1)) + "\n")
+				styItemOn.Render(padRight("  "+label, w-1)) + "\n")
 		} else {
-			b.WriteString("  " + styItem.Render(label) + "\n")
+			b.WriteString("   " + styItem.Render(label) + "\n")
 		}
 	}
 

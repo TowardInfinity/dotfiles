@@ -12,9 +12,14 @@ import (
 func TestVerbsBeatPageNames(t *testing.T) {
 	bin := buildDots(t)
 
-	// --help proves the verb was dispatched, without changing anything.
+	// --help must work with no checkout anywhere. Letting these inherit the
+	// environment meant they ran inside the repo and passed against a real
+	// ordering bug: the repo check came before argument parsing, so on CI both
+	// --help and an unknown flag reported "no checkout found".
 	for _, verb := range []string{"install", "update"} {
-		out, err := exec.Command(bin, verb, "--help").CombinedOutput()
+		cmd := exec.Command(bin, verb, "--help")
+		cmd.Env = noRepoEnv()
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s --help: %v\n%s", verb, err, out)
 		}
@@ -45,7 +50,7 @@ func TestVerbsBeatPageNames(t *testing.T) {
 func TestInstallWithoutRepoExplains(t *testing.T) {
 	bin := buildDots(t)
 	cmd := exec.Command(bin, "install")
-	cmd.Env = []string{"HOME=/tmp/dots-no-such-home", "PATH=/usr/bin:/bin", "DOTFILES_DIR=/tmp/dots-no-such-repo"}
+	cmd.Env = noRepoEnv()
 	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Error("expected a non-zero exit with no checkout")
@@ -57,7 +62,9 @@ func TestInstallWithoutRepoExplains(t *testing.T) {
 
 func TestInstallRejectsUnknownFlag(t *testing.T) {
 	bin := buildDots(t)
-	out, err := exec.Command(bin, "install", "--definitely-not-a-flag").CombinedOutput()
+	cmd := exec.Command(bin, "install", "--definitely-not-a-flag")
+	cmd.Env = noRepoEnv()
+	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Error("unknown flag should be a non-zero exit")
 	}
@@ -74,4 +81,15 @@ func buildDots(t *testing.T) string {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	return bin
+}
+
+// noRepoEnv is an environment in which findRepo cannot succeed, so a test
+// exercises the same path a released binary hits on a machine with no
+// checkout — which is what CI is.
+func noRepoEnv() []string {
+	return []string{
+		"HOME=/tmp/dots-no-such-home",
+		"PATH=/usr/bin:/bin",
+		"DOTFILES_DIR=/tmp/dots-no-such-repo",
+	}
 }

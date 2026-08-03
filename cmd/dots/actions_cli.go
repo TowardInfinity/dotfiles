@@ -58,11 +58,10 @@ func needRepo(what string) (string, bool) {
 // so the machine is already installed. The curl one-liner is what bootstraps a
 // bare machine, and the error path above says so.
 func runInstallCLI(args []string) int {
-	repo, ok := needRepo("install")
-	if !ok {
-		return 1
-	}
-
+	// Parse before touching the filesystem. Checking for a checkout first meant
+	// `--help` and even an unknown flag reported "no checkout found" — help has
+	// to work everywhere, and a typo deserves to be named as a typo. This
+	// passed locally only because the tests happened to run inside the repo.
 	deps, dry := false, false
 	for _, a := range args {
 		switch a {
@@ -85,6 +84,11 @@ To set up a machine that has none of this yet:
 			fmt.Fprintf(os.Stderr, "dots install: unknown option: %s\n", a)
 			return 1
 		}
+	}
+
+	repo, ok := needRepo("install")
+	if !ok {
+		return 1
 	}
 
 	// --deps lives in bootstrap.sh, everything else in install.sh. Routing by

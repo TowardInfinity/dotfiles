@@ -318,11 +318,19 @@ Done. To finish:
   1. exec zsh
   2. tmux source-file ~/.config/tmux/tmux.conf     (never kill-server on a
                                                     box with live sessions)
+EOF
+
+# Only mention the editor steps on a machine that has the editor. A --light
+# box does not, and telling someone to run :MasonToolsInstall there is an
+# instruction that cannot be followed.
+if command -v nvim >/dev/null 2>&1; then
+  cat <<EOF
   3. nvim, :Lazy restore      lines plugins up with lazy-lock.json (commits
                               only — branches come from the specs; see the
                               caveat above install.sh's restore step)
   4. :MasonToolsInstall       inside nvim, installs LSPs + formatters
 EOF
+fi
 
 if [[ $OS == macos ]]; then
   echo "  Ghostty reloads its config on restart, or Cmd+R."

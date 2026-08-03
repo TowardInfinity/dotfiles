@@ -461,10 +461,17 @@ install_ai_clis() {
 # function falls back to real cat when glow is absent.
 install_light() {
   if $DRY; then
+    echo "    would: record the light profile in ~/.config/dots/profile"
     echo "    would: apt-get install zsh tmux git curl ripgrep jq"
     echo "    would: skip neovim, go, node, java and python tooling (low memory)"
     return 0
   fi
+
+  # Record the profile. Otherwise every other tool has to guess why a machine
+  # has no Go toolchain, and `dots doctor` reports seven things missing that
+  # were deliberately declined.
+  mkdir -p "$HOME/.config/dots" 2>/dev/null || true
+  printf 'light\n' > "$HOME/.config/dots/profile" 2>/dev/null || true
 
   say "Installing packages (light)"
   sudo apt-get update -qq || warn "apt-get update failed"

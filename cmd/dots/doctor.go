@@ -53,7 +53,27 @@ func newDoctorModel(repo string) doctorModel {
 // checkNames mirrors bin/dots' doctor(): the tools the CONFIGS call, not the
 // --deps package list — those are different lists, and conflating them is
 // exactly the bug that list was written to avoid.
+// profileIsLight reports whether this machine was set up with --light.
+//
+// bootstrap.sh records it in ~/.config/dots/profile. Without that, doctor lists
+// nvim, glow, go, uv, pnpm, fnm and sdkman as missing on a box that
+// deliberately declined all seven — seven false alarms on every run, which
+// trains you to ignore the one that matters.
+func profileIsLight() bool {
+	b, err := os.ReadFile(filepath.Join(os.Getenv("HOME"), ".config", "dots", "profile"))
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(b)) == "light"
+}
+
 func checkNames() []string {
+	// A light box has a shell and tmux and nothing else by design. Check what it
+	// was actually asked to have.
+	if profileIsLight() {
+		return []string{"zsh", "git", "tmux", "oh-my-zsh", "tpm"}
+	}
+
 	need := []string{"zsh", "git", "nvim", "tmux"}
 	if runtime.GOOS == "darwin" {
 		need = append(need, "bat", "eza", "fzf", "zoxide", "lazygit", "fnm", "uv")

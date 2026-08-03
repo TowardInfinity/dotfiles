@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,14 +23,15 @@ import (
 type manageSection int
 
 const (
-	secDotfiles manageSection = iota
+	secOverview manageSection = iota
+	secDotfiles
 	secServices
 	secProjects
 	secMachines
 	numSections
 )
 
-var sectionNames = [numSections]string{"Dotfiles", "Services", "Projects", "Machines"}
+var sectionNames = [numSections]string{"Overview", "Dotfiles", "Services", "Projects", "Machines"}
 
 // ── data shapes ───────────────────────────────────────────────
 
@@ -75,6 +77,9 @@ type manageModel struct {
 	w, h    int
 	section manageSection
 
+	ovInfo    overviewInfo
+	ovLoading bool
+
 	dfInfo    dotfilesInfo
 	dfLoading bool
 	dfMsg     string
@@ -119,6 +124,7 @@ func newManageModel(repo string) manageModel {
 	return manageModel{
 		svcTI:        ti,
 		repo:         repo,
+		ovLoading:    true,
 		dfInfo:       dotfilesInfo{behind: -1},
 		dfLoading:    true,
 		svcLoading:   true,
@@ -130,6 +136,7 @@ func newManageModel(repo string) manageModel {
 
 func (m manageModel) Init() tea.Cmd {
 	return tea.Batch(
+		fetchOverviewInfo(),
 		fetchDotfilesInfo(m.repo),
 		discoverServices(),
 		fetchProjectsInfo(),
@@ -146,6 +153,11 @@ func (m manageModel) resize(w, h int) manageModel {
 
 func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case overviewInfoMsg:
+		m.ovInfo = msg.info
+		m.ovLoading = false
+		return m, nil
+
 	case dotfilesInfoMsg:
 		m.dfInfo = msg.info
 		m.dfLoading = false
@@ -218,6 +230,8 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		}
 
 		switch m.section {
+		case secOverview:
+			return m.updateOverviewKey(msg)
 		case secDotfiles:
 			return m.updateDotfilesKey(msg)
 		case secServices:
@@ -227,6 +241,18 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		case secMachines:
 			return m.updateMachinesKey(msg)
 		}
+	}
+	return m, nil
+}
+
+// updateOverviewKey is deliberately narrow: this section only ever reports
+// on the machine, it never acts on it, so "r" (refresh) is the only key it
+// handles.
+func (m manageModel) updateOverviewKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		m.ovLoading = true
+		return m, fetchOverviewInfo()
 	}
 	return m, nil
 }
@@ -736,6 +762,8 @@ func (m manageModel) view(spin string) string {
 // header, so every section states its own state in the same place.
 func (m manageModel) sectionBody(spin string) (string, string) {
 	switch m.section {
+	case secOverview:
+		return m.viewOverview(spin), m.overviewSummary()
 	case secDotfiles:
 		return m.viewDotfiles(), m.dotfilesSummary()
 	case secServices:
@@ -746,6 +774,17 @@ func (m manageModel) sectionBody(spin string) (string, string) {
 		return m.viewMachines(), fmt.Sprintf("%d hosts in ~/.ssh/config", len(m.machines))
 	}
 	return "", ""
+}
+
+func (m manageModel) overviewSummary() string {
+	if m.ovLoading {
+		return "gathering machine info…"
+	}
+	host := m.ovInfo.host
+	if host == "" {
+		host = "this machine"
+	}
+	return fmt.Sprintf("%s  ·  %s  ·  %s", host, m.ovInfo.osName, m.ovInfo.arch)
 }
 
 func (m manageModel) dotfilesSummary() string {
@@ -783,6 +822,135 @@ func (m manageModel) servicesSummary() string {
 		scope = "running only"
 	}
 	return fmt.Sprintf("%d of %d running  ·  %s  ·  via %s", run, len(m.services), scope, src)
+}
+
+// viewOverview is read-only: every field either comes straight from
+// overviewInfo, or — for repo/tools/services — from state another section
+// already fetched, so this never re-shells git and never re-scans services.
+func (m manageModel) viewOverview(spin string) string {
+	if m.ovLoading {
+		return "\n  " + spin + styPending.Render(" gathering machine info")
+	}
+
+	measure := measureFor(m.w - railWidth - 1)
+	const keyW = 10
+	valW := measure - keyW
+	if valW < 4 {
+		valW = 4
+	}
+
+	info := m.ovInfo
+	var b strings.Builder
+
+	host := info.host
+	if host == "" {
+		host = "unknown"
+	}
+	b.WriteString(statRow("host", styValue.Render(truncate(host, valW)), keyW) + "\n")
+
+	osName := info.osName
+	if osName == "" {
+		osName = runtime.GOOS
+	}
+	b.WriteString(statRow("os", styValue.Render(truncate(osName, valW)), keyW) + "\n")
+
+	b.WriteString(statRow("arch", styValue.Render(info.arch), keyW) + "\n")
+
+	profile := "full"
+	if info.profileLight {
+		profile = "light"
+	}
+	b.WriteString(statRow("profile", styValue.Render(profile), keyW) + "\n")
+
+	dots := info.version
+	if dots == "" {
+		dots = "dev"
+	}
+	if info.distSource != "" {
+		dots += " (" + info.distSource + ")"
+	}
+	b.WriteString(statRow("dots", styValue.Render(truncate(dots, valW)), keyW) + "\n")
+
+	b.WriteString(statRow("repo", m.overviewRepoLine(valW), keyW) + "\n")
+
+	b.WriteString(statRow("tools", countSummary(info.toolsHave, info.toolsTotal, "present"), keyW) + "\n")
+
+	b.WriteString(statRow("services", m.overviewServicesLine(), keyW) + "\n")
+
+	if info.memKnown {
+		mem := fmt.Sprintf("%s free / %s", formatBytes(info.memFreeBytes), formatBytes(info.memTotalBytes))
+		b.WriteString(statRow("memory", styValue.Render(truncate(mem, valW)), keyW) + "\n")
+	} else {
+		b.WriteString(statRow("memory", styMuted.Render("unknown"), keyW) + "\n")
+	}
+
+	if info.diskKnown {
+		disk := fmt.Sprintf("%s free / %s", formatBytes(info.diskFreeBytes), formatBytes(info.diskTotalBytes))
+		b.WriteString(statRow("disk", styValue.Render(truncate(disk, valW)), keyW) + "\n")
+	} else {
+		b.WriteString(statRow("disk", styMuted.Render("unknown"), keyW) + "\n")
+	}
+
+	if info.uptimeKnown {
+		b.WriteString(statRow("uptime", styValue.Render(formatDuration(info.uptime)), keyW) + "\n")
+	} else {
+		b.WriteString(statRow("uptime", styMuted.Render("unknown"), keyW) + "\n")
+	}
+
+	return b.String()
+}
+
+// overviewRepoLine reuses m.repo/m.dfInfo — the same state Dotfiles renders
+// — rather than shelling out to git again.
+func (m manageModel) overviewRepoLine(w int) string {
+	if m.repo == "" {
+		return styMuted.Render("not found")
+	}
+	path := styValue.Render(truncate(m.repo, w))
+	if m.dfLoading {
+		return path + "  " + styMuted.Render("checking…")
+	}
+
+	bits := []string{path}
+	if m.dfInfo.sha != "" {
+		bits = append(bits, styValue.Render(m.dfInfo.sha))
+	}
+	if m.dfInfo.branch != "" {
+		bits = append(bits, styValue.Render(m.dfInfo.branch))
+	}
+	switch {
+	case !m.dfInfo.dirtyKnown:
+		bits = append(bits, styMuted.Render("status unknown"))
+	case m.dfInfo.dirty:
+		bits = append(bits, styBad.Render("dirty"))
+	default:
+		bits = append(bits, styOK.Render("clean"))
+	}
+	switch {
+	case m.dfInfo.behind > 0:
+		bits = append(bits, styPending.Render(fmt.Sprintf("%d behind", m.dfInfo.behind)))
+	case m.dfInfo.behind == 0:
+		bits = append(bits, styOK.Render("up to date"))
+	}
+	return truncate(strings.Join(bits, styMuted.Render("  ·  ")), w)
+}
+
+// overviewServicesLine reuses m.services — already discovered for the
+// Services section — rather than scanning launchd/systemd/docker again.
+func (m manageModel) overviewServicesLine() string {
+	if m.svcLoading && len(m.services) == 0 {
+		return styMuted.Render("discovering…")
+	}
+	if len(m.services) == 0 {
+		return styMuted.Render("none discovered")
+	}
+	run := 0
+	for _, s := range m.services {
+		if s.Running {
+			run++
+		}
+	}
+	return countSummary(run, len(m.services), "running")
 }
 
 func (m manageModel) viewDotfiles() string {

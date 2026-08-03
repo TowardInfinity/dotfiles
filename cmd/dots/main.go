@@ -69,6 +69,8 @@ func main() {
 		os.Exit(runInstallCLI(args[1:]))
 	case "update":
 		os.Exit(runUpdateCLI(args[1:]))
+	case "sync":
+		os.Exit(runSyncCLI(args[1:]))
 	case "docs":
 		os.Exit(runDocsCLI(args[1:]))
 	case "edit":
@@ -97,6 +99,7 @@ func usage() {
   dots doctor          check the tools these configs call
   dots install         relink configs; --deps also installs the tools
   dots update          pull the latest configs, then relink
+  dots sync            push changes here, then update every other machine
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

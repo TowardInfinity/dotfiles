@@ -39,7 +39,8 @@ func TestTmuxHintNotTruncated(t *testing.T) {
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 118, Height: 30})
 	tm, _ = tm.Update(fetchProjectsInfo()())
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Projects
 
 	var cmd tea.Cmd

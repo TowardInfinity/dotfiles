@@ -75,6 +75,8 @@ func (m doctorModel) keys() []key.Binding {
 func (m manageModel) keys() []key.Binding {
 	nav := bind("h/l", "section")
 	switch m.section {
+	case secOverview:
+		return []key.Binding{nav, bind("r", "refresh")}
 	case secDotfiles:
 		return []key.Binding{nav,
 			bind("u", "update"), bind("L", "relink"),

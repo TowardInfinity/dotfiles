@@ -14,6 +14,7 @@ func TestFilterCapturesGlobalKeys(t *testing.T) {
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
 	tm, _ = tm.Update(discoverServices()())
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
 

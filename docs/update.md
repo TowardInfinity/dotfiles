@@ -39,7 +39,31 @@ git push
 
 Then on any other machine, `dots update`.
 
-## Rolling a change out to the servers
+## Rolling a change out to every machine
+
+```sh
+dots sync
+```
+
+Commits and pushes whatever changed here, then runs `dots update` on each
+reachable host from `~/.ssh/config`. It asks twice — once before pushing, once
+before touching the remotes — because the two halves fail differently: a push
+is hard to walk back, and a remote update happens on a machine you are not
+looking at.
+
+| | |
+|---|---|
+| `dots sync -m "message"` | your own commit message |
+| `dots sync --push-only` | commit and push, touch no remotes |
+| `dots sync --remotes-only` | update the remotes, never write to the repo |
+| `dots sync -y` | do not ask — for scripts |
+
+With no terminal it declines rather than assuming yes, so an unattended run
+never pushes on its own. Unreachable hosts are skipped, not retried, and a
+failed local push stops the run before any remote is touched — otherwise the
+remotes would pull a change that is not there.
+
+## Rolling a change out to one server
 
 ```sh
 ssh a1

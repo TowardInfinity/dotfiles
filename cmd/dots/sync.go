@@ -1,0 +1,313 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+// dots sync — push this machine's config changes, then update every other one.
+//
+// The workflow this replaces: edit a config, commit, push, then ssh into a1,
+// v1 and v2 in turn and run dots update on each. Four steps that must not be
+// forgotten, on a four-machine setup, which is exactly the kind of thing that
+// drifts.
+//
+// It confirms twice, because the two halves fail differently. Pushing is
+// outward-facing and hard to walk back. Updating a remote is recoverable but
+// touches machines you are not looking at, and one of them runs long-lived
+// sessions.
+
+const syncSSHTimeout = 60 * time.Second
+
+func runSyncCLI(args []string) int {
+	message := ""
+	assumeYes := false
+	pushOnly := false
+	remotesOnly := false
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-h", "--help":
+			fmt.Print(`dots sync — push local config changes, then update every machine
+
+  dots sync                 commit + push here, then update each reachable host
+  dots sync -m "message"    use your own commit message
+  dots sync --push-only     commit and push, touch no remotes
+  dots sync --remotes-only  update the remotes, never write to the repo
+  dots sync -y              do not ask (for scripts; it still prints what it did)
+
+Hosts come from ~/.ssh/config. Unreachable ones are skipped, not retried.
+`)
+			return 0
+		case "-m", "--message":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "dots sync: -m needs a message")
+				return 1
+			}
+			i++
+			message = args[i]
+		case "-y", "--yes":
+			assumeYes = true
+		case "--push-only":
+			pushOnly = true
+		case "--remotes-only":
+			remotesOnly = true
+		default:
+			fmt.Fprintf(os.Stderr, "dots sync: unknown option: %s\n", args[i])
+			return 1
+		}
+	}
+
+	if pushOnly && remotesOnly {
+		fmt.Fprintln(os.Stderr, "dots sync: --push-only and --remotes-only are contradictory")
+		return 1
+	}
+
+	repo, ok := needRepo("sync")
+	if !ok {
+		return 1
+	}
+
+	rc := 0
+	if !remotesOnly {
+		if code := syncLocal(repo, message, assumeYes); code != 0 {
+			// A failed push means the remotes would pull something that is not
+			// there. Stop rather than reporting success on three machines for a
+			// change none of them received.
+			fmt.Fprintln(os.Stderr, "dots sync: local push failed — not touching the remotes")
+			return code
+		}
+	}
+	if !pushOnly {
+		rc = syncRemotes(assumeYes)
+	}
+	return rc
+}
+
+// syncLocal commits anything outstanding and pushes.
+func syncLocal(repo, message string, assumeYes bool) int {
+	out, err := exec.Command("git", "-C", repo, "status", "--porcelain").Output()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dots sync: cannot read git status: %v\n", err)
+		return 1
+	}
+	changed := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(changed) == 1 && changed[0] == "" {
+		changed = nil
+	}
+
+	if len(changed) > 0 {
+		fmt.Printf("%s\n", styTitle.Render("Local changes"))
+		for _, l := range changed {
+			fmt.Printf("  %s\n", styMuted.Render(l))
+		}
+		if message == "" {
+			message = fmt.Sprintf("sync: update %s", plural(len(changed), "config", "configs"))
+		}
+		fmt.Printf("\n  commit message: %s\n", styValue.Render(message))
+		if !confirm(fmt.Sprintf("Commit %s and push?", plural(len(changed), "file", "files")), assumeYes) {
+			fmt.Println("  skipped")
+			return 0
+		}
+		if code := runStreaming(repo, "git", "-C", repo, "add", "-A"); code != 0 {
+			return code
+		}
+		if code := runStreaming(repo, "git", "-C", repo, "commit", "-m", message); code != 0 {
+			return code
+		}
+	} else {
+		fmt.Println(styMuted.Render("No local changes to commit."))
+	}
+
+	// Push regardless of whether we just committed: there may be earlier
+	// commits that never went out, and the remotes cannot pull those either.
+	branch := currentBranch(repo)
+	ahead := commitsAhead(repo, branch)
+	if ahead == 0 {
+		fmt.Println(styMuted.Render("Nothing to push."))
+		return 0
+	}
+
+	fmt.Printf("\n%s %s\n", styTitle.Render("Push"),
+		styMuted.Render(fmt.Sprintf("%s ahead on %s", plural(ahead, "commit", "commits"), branch)))
+	if !confirm("Push to origin?", assumeYes) {
+		fmt.Println("  skipped")
+		return 0
+	}
+	return runStreaming(repo, "git", "-C", repo, "push", "origin", branch)
+}
+
+// syncRemotes runs `dots update` on each reachable host from ~/.ssh/config.
+func syncRemotes(assumeYes bool) int {
+	hosts := sshHosts()
+	if len(hosts) == 0 {
+		fmt.Println(styMuted.Render("No hosts in ~/.ssh/config."))
+		return 0
+	}
+
+	fmt.Printf("\n%s %s\n", styTitle.Render("Machines"),
+		styMuted.Render(strings.Join(hosts, ", ")))
+	if !confirm(fmt.Sprintf("Update %s over SSH?", plural(len(hosts), "host", "hosts")), assumeYes) {
+		fmt.Println("  skipped")
+		return 0
+	}
+
+	failed := 0
+	for _, h := range hosts {
+		fmt.Printf("\n%s\n", styTitle.Render(h))
+
+		if !reachable(h) {
+			fmt.Printf("  %s\n", styMuted.Render("unreachable — skipped"))
+			continue
+		}
+
+		// `dots update` on the far side rather than raw git: it pulls AND
+		// relinks, which is what the local one does, and it keeps the logic in
+		// one place instead of two that can disagree.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		cmd := exec.CommandContext(ctx, "ssh",
+			"-o", "BatchMode=yes",
+			"-o", "ConnectTimeout=8",
+			h, "$HOME/.local/bin/dots update")
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		err := cmd.Run()
+		cancel()
+
+		if err != nil {
+			fmt.Printf("  %s\n", styBad.Render("failed: "+err.Error()))
+			failed++
+			continue
+		}
+		fmt.Printf("  %s\n", styOK.Render("updated"))
+	}
+
+	if failed > 0 {
+		fmt.Fprintf(os.Stderr, "\n%s\n",
+			styBad.Render(fmt.Sprintf("%s failed", plural(failed, "host", "hosts"))))
+		return 1
+	}
+	return 0
+}
+
+// ── helpers ──────────────────────────────────────────────────
+
+func currentBranch(repo string) string {
+	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--short", "HEAD").Output()
+	if err != nil {
+		return "main"
+	}
+	if b := strings.TrimSpace(string(out)); b != "" {
+		return b
+	}
+	return "main"
+}
+
+// commitsAhead counts what origin does not have yet.
+//
+// Compares against origin/<branch> rather than @{u}: upstream tracking is not
+// set by `git push origin main`, so a repo whose remote was re-added by hand
+// has none — and reporting "nothing to push" there would be wrong in the most
+// misleading direction.
+func commitsAhead(repo, branch string) int {
+	_ = exec.Command("git", "-C", repo, "fetch", "-q", "origin", branch).Run()
+	out, err := exec.Command("git", "-C", repo,
+		"rev-list", "--count", "origin/"+branch+"..HEAD").Output()
+	if err != nil {
+		return 1 // unknown: assume there is something, and let push decide
+	}
+	n := 0
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(out)), "%d", &n); err != nil {
+		return 1
+	}
+	return n
+}
+
+// sshHosts reads Host aliases from ~/.ssh/config, skipping wildcards and any
+// entry with no HostName — the same rule the Machines pane uses.
+func sshHosts() []string {
+	f, err := os.Open(os.Getenv("HOME") + "/.ssh/config")
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var out []string
+	var pending []string
+	hasHostName := false
+
+	flush := func() {
+		if hasHostName {
+			out = append(out, pending...)
+		}
+		pending, hasHostName = nil, false
+	}
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "host":
+			flush()
+			for _, alias := range fields[1:] {
+				if strings.ContainsAny(alias, "*?!") {
+					continue
+				}
+				// One alias per host block is enough; the first is the short one.
+				if len(pending) == 0 {
+					pending = append(pending, alias)
+				}
+			}
+		case "hostname":
+			hasHostName = true
+		}
+	}
+	flush()
+	return out
+}
+
+func reachable(host string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), syncSSHTimeout)
+	defer cancel()
+	return exec.CommandContext(ctx, "ssh",
+		"-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+		host, "true").Run() == nil
+}
+
+// confirm asks on the terminal. With no terminal it declines rather than
+// assuming yes — an unattended `dots sync` should not push on its own unless
+// -y says so explicitly.
+func confirm(question string, assumeYes bool) bool {
+	if assumeYes {
+		return true
+	}
+	if !isTTY() {
+		fmt.Fprintf(os.Stderr, "dots sync: %s — declining, no terminal to ask on (use -y)\n", question)
+		return false
+	}
+	fmt.Printf("  %s %s ", question, styMuted.Render("[y/N]"))
+	sc := bufio.NewScanner(os.Stdin)
+	if !sc.Scan() {
+		return false
+	}
+	a := strings.ToLower(strings.TrimSpace(sc.Text()))
+	return a == "y" || a == "yes"
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}

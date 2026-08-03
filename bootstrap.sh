@@ -332,7 +332,12 @@ install_linux_pkgs() {
 # with a stock file and your config vanishes. With it, ours is left alone and
 # the ordering of these two steps stops mattering.
 install_omz() {
-  if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  # Check for the entry point, not the directory. A directory can exist without
+  # Oh My Zsh being installed — anything that creates ~/.oh-my-zsh/custom/... on
+  # the way to a failed install leaves one behind, and a -d test then reports
+  # "installed" forever with no oh-my-zsh.sh in sight. Exactly what happened on
+  # v1, and the same weak-presence-check bug TPM had.
+  if [ ! -r "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]; then
     # ZSH= is pinned explicitly because the Oh My Zsh installer honours an
     # exported $ZSH and will install there instead — and .zshrc exports it on
     # line 6, *before* sourcing, so it is set in any shell using these configs
@@ -356,6 +361,15 @@ install_omz() {
   # in `plugins=(...)`. Without them zsh complains on every start. The macOS
   # .zshrc uses plugins=(git macos pip), so it does not need them.
   [ "$OS" = linux ] || return 0
+
+  # Bail if the core install did not land. Cloning plugins into a framework
+  # that is not there both fails silently at runtime and creates the very
+  # directory that makes the check above lie on the next run.
+  if [ ! -r "$HOME/.oh-my-zsh/oh-my-zsh.sh" ] && ! $DRY; then
+    warn "Oh My Zsh is not installed — skipping its plugins"
+    return 0
+  fi
+
   custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
   for plug in zsh-autosuggestions zsh-syntax-highlighting; do
     if [ ! -d "$custom/plugins/$plug" ]; then

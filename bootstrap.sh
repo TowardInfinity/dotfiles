@@ -458,16 +458,13 @@ install_light() {
     zsh tmux git curl ripgrep jq \
     || warn "some apt packages failed — see above"
 
-  # zsh-autosuggestions and zsh-syntax-highlighting are in linux/.zshrc's
-  # plugins list, so without them zsh complains on every prompt. Two small
-  # git clones, not a toolchain.
-  custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
-  for plug in zsh-autosuggestions zsh-syntax-highlighting; do
-    if [ ! -d "$custom/plugins/$plug" ]; then
-      run "install $plug" git clone -q --depth 1 \
-        "https://github.com/zsh-users/$plug" "$custom/plugins/$plug"
-    fi
-  done
+  # Oh My Zsh and the two zsh plugins are NOT installed here. install_omz
+  # already does both, unconditionally, and at the right point — after linking.
+  #
+  # Cloning the plugins here would have created ~/.oh-my-zsh before Oh My Zsh
+  # itself existed, and install_omz skips when that directory is present. The
+  # result would be the plugins installed into a framework that never got
+  # installed: a shell that warns on every prompt.
 }
 
 # Python tools that belong to uv rather than to the system package manager.

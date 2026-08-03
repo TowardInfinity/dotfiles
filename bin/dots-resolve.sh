@@ -215,6 +215,20 @@ try_download() {
 # Set DOTS_ALLOW_LOW_MEM_BUILD=1 to override.
 enough_memory_to_build() {
   [ "${DOTS_ALLOW_LOW_MEM_BUILD:-}" = 1 ] && return 0
+
+  # A recorded light profile settles it, regardless of what the numbers say.
+  #
+  # The memory check below counts swap, so adding a swapfile to a 956 MB box
+  # makes it pass — and then a build "succeeds" by thrashing for ten minutes
+  # against network-backed disk. That is worse than fetching an 11 MB binary.
+  # The profile records that this machine is deliberately constrained, which is
+  # a statement of intent and does not stop being true when swap appears.
+  profile="${XDG_CONFIG_HOME:-$HOME/.config}/dots/profile"
+  if [ -r "$profile" ] && [ "$(cat "$profile" 2>/dev/null)" = light ]; then
+    log "dots-resolve: light profile — not building from source"
+    return 1
+  fi
+
   [ -r /proc/meminfo ] || return 0   # not Linux: no cheap check, assume fine
 
   avail_kb=$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo 2>/dev/null)

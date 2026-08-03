@@ -392,8 +392,12 @@ func (m docsModel) viewOutline() string {
 			b.WriteString(styMuted.Render(" —") + "\n")
 		}
 		for _, h := range heads {
+			// Strip inline-code ticks: "Why `Q` does not drop you" reads as
+			// markup in a rail, and the backticks eat width that the heading
+			// needs.
+			h = strings.ReplaceAll(h, "`", "")
 			b.WriteString(" " + styMuted.Render("·") + " " +
-				styItem.Render(truncate(h, outlineWidth-5)) + "\n")
+				styItem.Render(truncate(h, outlineWidth-4)) + "\n")
 		}
 	}
 

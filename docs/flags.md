@@ -14,6 +14,7 @@ summary: Install flags and updating an existing box
 | `--dry` | Print what would happen, change nothing |
 | `--copy` | Keep no repo — fetch a tarball, copy files into place, discard it |
 | `--nvim` | Also restore nvim plugins from `lazy-lock.json` after linking |
+| `--ai` | Also install the AI CLIs: claude, codex, opencode |
 | `DOTFILES_DIR=` | Env var — clone somewhere other than the default |
 
 ## Updating an existing box

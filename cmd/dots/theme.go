@@ -51,15 +51,19 @@ var (
 			Bold(true).
 			PaddingLeft(1)
 
+	// Colour and weight only — no padding. These styles are applied to strings
+	// the caller has already measured and padded to a rail width, so carrying
+	// PaddingLeft here silently added 2-3 columns on top and pushed the line
+	// past the rail, where it wrapped: the selected row grew a blank
+	// highlighted second line, and outline entries broke mid-word.
+	// A style that changes geometry behind the caller's back is the problem.
 	styItem = lipgloss.NewStyle().
-		Foreground(cInkDim).
-		PaddingLeft(3)
+		Foreground(cInkDim)
 
 	styItemOn = lipgloss.NewStyle().
 			Foreground(cInk).
 			Background(cSurface).
-			Bold(true).
-			PaddingLeft(2)
+			Bold(true)
 
 	styItemCursor = lipgloss.NewStyle().Foreground(cMac).Bold(true)
 

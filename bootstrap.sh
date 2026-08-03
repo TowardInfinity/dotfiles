@@ -21,6 +21,7 @@
 #   --copy    don't keep a repo — fetch a tarball, copy configs, discard it
 #   --dry     print what would happen, change nothing
 #   --nvim    also restore nvim plugins from the lockfile after linking
+#   --ai      also install the AI CLIs: claude, codex, opencode
 #
 # POSIX sh on purpose: this runs before anything is installed, so it must not
 # assume bash. install.sh next to this file, which does the linking, is bash
@@ -40,12 +41,14 @@ DEPS=false
 DRY=false
 COPY=false
 NVIM=false
+AI=false
 for arg in "$@"; do
   case "$arg" in
     --deps) DEPS=true ;;
     --dry)  DRY=true ;;
     --copy) COPY=true ;;
     --nvim) NVIM=true ;;
+    --ai)   AI=true ;;
     # The documented form is `sh -c "$(curl ...)" -- --deps`, where the `--` is
     # eaten by the outer `sh -c`. Running this file directly with the same
     # syntax — the natural thing to do when testing a clone — passed the `--`
@@ -358,6 +361,71 @@ install_omz() {
   done
 }
 
+# SDKMAN, and a JDK through it.
+#
+# This belongs in --deps by the rule the rest of the list follows — if a config
+# calls it, it is a dependency. Both .zshrc files source
+# ~/.sdkman/bin/sdkman-init.sh, and common/nvim/ftplugin/java.lua points jdtls
+# at ~/.sdkman/candidates/java/current. Neither was ever installed, so a fresh
+# machine got no Java at all and a Java LSP aimed at a path that did not exist.
+#
+# rcupdate=false because our .zshrc already does the sourcing; letting the
+# installer append its own block would duplicate it into a tracked file.
+install_sdkman() {
+  if [ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+    return 0
+  fi
+  if $DRY; then
+    echo "    would: install SDKMAN and a default JDK"
+    return 0
+  fi
+  say "Installing SDKMAN"
+  curl -fsSL "https://get.sdkman.io?rcupdate=false" | bash \
+    || { warn "SDKMAN install failed — skipping the JDK"; return 0; }
+
+  # sdk is a shell function, so it only exists after sourcing the init script.
+  # </dev/null keeps `sdk install java` from stopping on its set-as-default
+  # prompt when there is no one to answer it.
+  say "Installing a default JDK"
+  # shellcheck disable=SC1091
+  ( . "$HOME/.sdkman/bin/sdkman-init.sh" && sdk install java </dev/null ) \
+    || warn "JDK install failed — run: sdk install java"
+}
+
+# The AI CLIs are deliberately NOT in --deps.
+#
+# Nothing in these configs calls them, which is the line --deps draws, and
+# putting them there would push three of them onto every server — a1 is a
+# free-tier box where that is disk and noise for no benefit. --ai is opt-in on
+# the machines you actually want them.
+install_ai_clis() {
+  if $DRY; then
+    echo "    would: install claude, codex and opencode"
+    return 0
+  fi
+
+  have claude || {
+    say "Installing Claude Code"
+    curl -fsSL https://claude.ai/install.sh | bash || warn "claude install failed"
+  }
+
+  have codex || {
+    say "Installing Codex"
+    if have pnpm; then
+      pnpm add -g @openai/codex || warn "codex install failed"
+    elif have npm; then
+      npm install -g @openai/codex || warn "codex install failed"
+    else
+      warn "codex needs pnpm or npm — run --deps first"
+    fi
+  }
+
+  have opencode || {
+    say "Installing opencode"
+    curl -fsSL https://opencode.ai/install | bash || warn "opencode install failed"
+  }
+}
+
 # Python tools that belong to uv rather than to the system package manager.
 #
 # JupyterLab specifically must NOT come from brew/apt. Those builds ship their
@@ -381,6 +449,12 @@ if $DEPS; then
   say "Installing packages"
   if [ "$OS" = macos ]; then install_macos_pkgs; else install_linux_pkgs; fi
   install_uv_tools
+  install_sdkman
+fi
+
+if $AI; then
+  say "Installing AI CLIs"
+  install_ai_clis
 fi
 
 

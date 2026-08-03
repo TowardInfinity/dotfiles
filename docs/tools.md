@@ -34,6 +34,27 @@ call — if `.zshrc` references a tool, it is here.
 | `gh` | GitHub CLI — convenience only now the repo is public | both |
 | Oh My Zsh | Installed on every run, not just `--deps` | both |
 | TPM | tmux plugin manager. `prefix I` installs plugins | both |
+| SDKMAN | Java version manager. Both `.zshrc` files source it, and Neovim points jdtls at `~/.sdkman/candidates/java/current` | both |
+| `java` | Installed *through* SDKMAN, not directly — `sdk install java` | both |
 
-Java is left to SDKMAN, which `.zshrc` sources if present. Version
-managers rather than languages, so versions stay per-project.
+Version managers rather than languages — **fnm** for Node, **uv** for Python,
+**SDKMAN** for Java — so versions stay per-project. `--deps` installs the
+manager and a default JDK; `sdk install java <version>` gets you others.
+
+## AI CLIs — opt in with `--ai`
+
+Not part of `--deps`, and deliberately so: nothing in these configs calls
+them, which is the line `--deps` draws, and installing three of them on every
+server would be disk and noise on a free-tier box for no benefit.
+
+```sh
+sh -c "$(curl -fsSL https://toin.in/install)" -- --ai
+```
+
+| Tool | Installed via |
+|---|---|
+| `claude` | the official installer, lands in `~/.local/bin` |
+| `codex` | `pnpm add -g @openai/codex`, falling back to npm |
+| `opencode` | the official installer, lands in `~/.opencode/bin` |
+
+Each is skipped if already present, so the flag is safe to re-run.

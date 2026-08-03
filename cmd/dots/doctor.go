@@ -60,7 +60,11 @@ func checkNames() []string {
 	} else {
 		need = append(need, "glow", "go", "uv", "pnpm", "fnm")
 	}
-	need = append(need, "oh-my-zsh", "tpm")
+	// sdkman is checked on both: both .zshrc files source its init script and
+	// common/nvim/ftplugin/java.lua points jdtls at its JDK, so a machine
+	// without it has no Java and a Java LSP aimed at nothing. It went unchecked
+	// for as long as it went uninstalled.
+	need = append(need, "oh-my-zsh", "tpm", "sdkman")
 	return need
 }
 
@@ -91,6 +95,19 @@ func runDoctorChecks() tea.Msg {
 func evalCheck(name string) checkResult {
 	home := os.Getenv("HOME")
 	switch name {
+	case "sdkman":
+		init := filepath.Join(home, ".sdkman", "bin", "sdkman-init.sh")
+		if st, err := os.Stat(init); err == nil && !st.IsDir() {
+			// Report the JDK it resolves to, not the init script — that is the
+			// thing nvim actually needs to exist.
+			jdk := filepath.Join(home, ".sdkman", "candidates", "java", "current")
+			if _, err := os.Stat(jdk); err == nil {
+				return checkResult{name: name, state: checkOK, path: jdk}
+			}
+			return checkResult{name: name, state: checkBad, path: "installed, but no JDK"}
+		}
+		return checkResult{name: name, state: checkBad}
+
 	case "oh-my-zsh":
 		dir := filepath.Join(home, ".oh-my-zsh")
 		if st, err := os.Stat(dir); err == nil && st.IsDir() {
@@ -281,7 +298,7 @@ func checkGroup(name string) string {
 	switch name {
 	case "zsh", "git", "nvim", "tmux":
 		return "Core"
-	case "oh-my-zsh", "tpm":
+	case "oh-my-zsh", "tpm", "sdkman":
 		return "Frameworks"
 	default:
 		return "Tools"

@@ -204,7 +204,37 @@ try_download() {
 }
 
 # ── Tier 3: build from source ──────────────────────────────────
+# Refuse to build on a box that cannot afford it.
+#
+# `go build` of this program peaks around a gigabyte. v1 and v2 have 956 MB
+# total, under 500 MB available, and no swap — so a build there does not fail
+# politely, it invokes the OOM killer, which may take sshd or a service with it
+# rather than the compiler. Downloading an 11 MB binary is the correct answer on
+# such a machine, and if that is unreachable the shell fallback still works.
+#
+# Set DOTS_ALLOW_LOW_MEM_BUILD=1 to override.
+enough_memory_to_build() {
+  [ "${DOTS_ALLOW_LOW_MEM_BUILD:-}" = 1 ] && return 0
+  [ -r /proc/meminfo ] || return 0   # not Linux: no cheap check, assume fine
+
+  avail_kb=$(awk '/^MemAvailable:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+  [ -n "$avail_kb" ] || return 0
+
+  swap_kb=$(awk '/^SwapTotal:/{print $2; exit}' /proc/meminfo 2>/dev/null)
+  [ -n "$swap_kb" ] || swap_kb=0
+
+  # 900 MB of headroom counting swap. Under that, do not risk it.
+  total_kb=$((avail_kb + swap_kb))
+  [ "$total_kb" -ge 921600 ] && return 0
+
+  log "dots-resolve: only $((total_kb / 1024)) MB available (incl. swap) — skipping the source build"
+  log "dots-resolve: override with DOTS_ALLOW_LOW_MEM_BUILD=1 if you know better"
+  return 1
+}
+
 try_build() {
+  enough_memory_to_build || return 1
+
   go_bin=""
   if command -v go >/dev/null 2>&1; then
     go_bin=go

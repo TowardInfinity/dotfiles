@@ -22,6 +22,8 @@
 #   --dry     print what would happen, change nothing
 #   --nvim    also restore nvim plugins from the lockfile after linking
 #   --ai      also install the AI CLIs: claude, codex, opencode
+#   --light   a small install for a memory-constrained box: shell and tmux
+#             only, no editor toolchain. See install_light for what and why.
 #
 # POSIX sh on purpose: this runs before anything is installed, so it must not
 # assume bash. install.sh next to this file, which does the linking, is bash
@@ -42,6 +44,7 @@ DRY=false
 COPY=false
 NVIM=false
 AI=false
+LIGHT=false
 for arg in "$@"; do
   case "$arg" in
     --deps) DEPS=true ;;
@@ -49,6 +52,7 @@ for arg in "$@"; do
     --copy) COPY=true ;;
     --nvim) NVIM=true ;;
     --ai)   AI=true ;;
+    --light) LIGHT=true ;;
     # The documented form is `sh -c "$(curl ...)" -- --deps`, where the `--` is
     # eaten by the outer `sh -c`. Running this file directly with the same
     # syntax — the natural thing to do when testing a clone — passed the `--`
@@ -426,6 +430,46 @@ install_ai_clis() {
   }
 }
 
+# --light: a usable shell on a box that cannot afford the rest.
+#
+# v1 and v2 have 956 MB of RAM, under 500 MB of it available, and NO SWAP.
+# Disk is not the problem — they have 40 GB free. Memory is. On a box like
+# that the full --deps set is actively harmful:
+#
+#   go build          wants ~1 GB and would OOM-kill something
+#   Mason LSPs        jdtls alone asks for roughly a gigabyte of heap
+#   a JDK             installs fine, then cannot run
+#   node/pnpm/uv      pulled in for tooling that box will never run
+#
+# So this installs what a shell session actually needs and stops. Every
+# package here is in apt and small. The configs degrade on their own: the
+# Linux .zshrc guards fnm, uv and glow behind existence checks, and its `cat`
+# function falls back to real cat when glow is absent.
+install_light() {
+  if $DRY; then
+    echo "    would: apt-get install zsh tmux git curl ripgrep jq"
+    echo "    would: skip neovim, go, node, java and python tooling (low memory)"
+    return 0
+  fi
+
+  say "Installing packages (light)"
+  sudo apt-get update -qq || warn "apt-get update failed"
+  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    zsh tmux git curl ripgrep jq \
+    || warn "some apt packages failed — see above"
+
+  # zsh-autosuggestions and zsh-syntax-highlighting are in linux/.zshrc's
+  # plugins list, so without them zsh complains on every prompt. Two small
+  # git clones, not a toolchain.
+  custom="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  for plug in zsh-autosuggestions zsh-syntax-highlighting; do
+    if [ ! -d "$custom/plugins/$plug" ]; then
+      run "install $plug" git clone -q --depth 1 \
+        "https://github.com/zsh-users/$plug" "$custom/plugins/$plug"
+    fi
+  done
+}
+
 # Python tools that belong to uv rather than to the system package manager.
 #
 # JupyterLab specifically must NOT come from brew/apt. Those builds ship their
@@ -444,6 +488,15 @@ install_uv_tools() {
   say "Installing uv tools (jupyterlab)"
   uv tool install --quiet jupyterlab || warn "uv tool install jupyterlab failed"
 }
+
+if $LIGHT && $DEPS; then
+  warn "--light and --deps both given; --light wins (it is the constrained one)"
+  DEPS=false
+fi
+
+if $LIGHT; then
+  install_light
+fi
 
 if $DEPS; then
   say "Installing packages"
@@ -466,6 +519,18 @@ fi
 # A tool the config references is missing whether or not you asked for packages.
 verify() {
   $DRY && return 0
+  # A light install did not fail to get nvim and friends — it deliberately does
+  # not have them. Reporting them missing would be noise on every single run.
+  if $LIGHT; then
+    missing=
+    for t in zsh git tmux; do have "$t" || missing="$missing $t"; done
+    [ -d "$HOME/.oh-my-zsh" ] || missing="$missing oh-my-zsh"
+    [ -n "$missing" ] || return 0
+    echo
+    warn "not installed:$missing"
+    return 0
+  fi
+
   needed="zsh git nvim tmux"
   if [ "$OS" = macos ]; then
     needed="$needed bat eza fzf zoxide lazygit fnm"

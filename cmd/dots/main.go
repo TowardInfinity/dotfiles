@@ -83,7 +83,17 @@ func main() {
 }
 
 func runTUI() {
-	p := tea.NewProgram(newModel(), tea.WithAltScreen())
+	// WithMouseCellMotion so the wheel scrolls. Without it Bubble Tea never
+	// requests mouse reporting from the terminal, so no wheel event arrives at
+	// all and scrolling appears broken rather than unbound.
+	//
+	// The trade is real and worth knowing: with mouse reporting on, the terminal
+	// hands drags to this program instead of using them to select text. Hold
+	// Option in Ghostty (Shift in most others) to select as usual.
+	p := tea.NewProgram(newModel(),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
+	)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "dots: %v\n", err)
 		os.Exit(1)

@@ -157,6 +157,7 @@ func (m docsModel) resize(w, h int) docsModel {
 	// which is why the Docs tab appeared to have no header at all.
 	m.vp = newViewport(m.contentWidth(), h-3)
 	m.lastDoc = "" // force a re-render at the new width
+	m.ensureRendered()
 	return m
 }
 
@@ -175,7 +176,22 @@ func (m docsModel) contentWidth() int {
 	return w
 }
 
+// update renders after handling the message, so the viewport in the MODEL holds
+// the page rather than one built inside view() and thrown away.
+//
+// ensureRendered used to be called only from view(), which has a value
+// receiver — so it filled a copy's viewport and the copy was discarded. The
+// model's viewport therefore had zero lines, and a viewport with no content
+// cannot scroll: d, u, space, PgDn and the wheel all left YOffset at 0. The
+// percentage in the outline still looked plausible because it was computed on
+// that same temporary copy.
 func (m docsModel) update(msg tea.Msg) (docsModel, tea.Cmd) {
+	m2, cmd := m.updateInner(msg)
+	m2.ensureRendered()
+	return m2, cmd
+}
+
+func (m docsModel) updateInner(msg tea.Msg) (docsModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.filtering {
@@ -229,13 +245,32 @@ func (m docsModel) update(msg tea.Msg) (docsModel, tea.Cmd) {
 				m.rebuild()
 			}
 			return m, nil
-		case "d", "pgdown", " ":
+		case "d", "ctrl+d", "pgdown", " ":
 			m.vp.HalfPageDown()
 			return m, nil
-		case "u", "pgup":
+		case "u", "ctrl+u", "pgup":
 			m.vp.HalfPageUp()
 			return m, nil
+		case "ctrl+f":
+			m.vp.ViewDown()
+			return m, nil
+		case "ctrl+b":
+			m.vp.ViewUp()
+			return m, nil
 		}
+
+	case tea.MouseMsg:
+		// Three lines per notch is what most terminals send and what reads as
+		// "a scroll" rather than a jump.
+		switch msg.Button {
+		case tea.MouseButtonWheelDown:
+			m.vp.LineDown(3)
+			return m, nil
+		case tea.MouseButtonWheelUp:
+			m.vp.LineUp(3)
+			return m, nil
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -416,12 +451,16 @@ func (m docsModel) viewOutline() string {
 		}
 	}
 
-	// Scroll position, which the old layout gave no indication of at all.
+	// Scroll position. A bare percentage is easy to miss — say plainly when
+	// there is more below, since "is that the whole page?" is the question.
 	pct := 100
 	if m.vp.Height > 0 {
 		pct = int(m.vp.ScrollPercent() * 100)
 	}
 	b.WriteString("\n" + styMuted.Render(fmt.Sprintf(" %d%%", pct)))
+	if !m.vp.AtBottom() {
+		b.WriteString("  " + styPending.Render("▼ more"))
+	}
 
 	return lipgloss.NewStyle().
 		Width(outlineWidth).

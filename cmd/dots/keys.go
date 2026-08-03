@@ -56,6 +56,7 @@ func (m docsModel) keys() []key.Binding {
 		bind("j/k", "page"),
 		bind("/", "filter"),
 		bind("d/u", "scroll"),
+		bind("wheel", "scroll"),
 	}
 }
 

@@ -214,6 +214,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, kc
 	}
 
+	// Mouse is input, so it goes where keys go: the visible pane, not every
+	// pane. Broadcasting it would have three panes reacting to one wheel notch.
+	if _, ok := msg.(tea.MouseMsg); ok {
+		if m.act != nil {
+			return m, nil // the overlay owns input while it is up
+		}
+		var c tea.Cmd
+		switch m.tab {
+		case tabDocs:
+			m.docs, c = m.docs.update(msg)
+		case tabDoctor:
+			m.doc, c = m.doc.update(msg)
+		case tabManage:
+			m.man, c = m.man.update(msg)
+		}
+		return m, c
+	}
+
 	if _, ok := msg.(spinner.TickMsg); ok {
 		var c tea.Cmd
 		m.sp, c = m.sp.Update(msg)

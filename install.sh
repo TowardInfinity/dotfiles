@@ -216,11 +216,27 @@ if $COPY; then
 fi
 
 # ── Claude Code ───────────────────────────────────────────────
-# Only the delegation policy is shared. Each box's ~/.claude/CLAUDE.md stays
-# untracked and machine-specific (different toolchains, different guardrails)
-# and pulls this in with a single `@~/.claude/delegation.md` line. settings.json
-# holds machine-local permissions and is deliberately not tracked either.
+# Each box's ~/.claude/CLAUDE.md stays untracked and machine-specific (different
+# toolchains, different guardrails) and pulls the shared policy in with a single
+# `@~/.claude/delegation.md` line.
+#
+# settings.json IS tracked now: the model/effort/compaction keys in it are the
+# whole point of the policy, and leaving them per-machine meant a1 quietly kept
+# running Opus on everything. Claude Code writes to this file via /config, and
+# those writes pass through the symlink into the repo — the same arrangement as
+# common/nvim/lazy-lock.json. Anything genuinely machine-local (one-off
+# permission grants) belongs in the untracked ~/.claude/settings.local.json.
+link common/claude/settings.json "$HOME/.claude/settings.json"
 link common/claude/delegation.md "$HOME/.claude/delegation.md"
+
+# ── Codex CLI ─────────────────────────────────────────────────
+# ~/.codex/config.toml is deliberately NOT linked: Codex writes machine-specific
+# [projects."/abs/path"] trust blocks and [plugins.*] entries into it, so sharing
+# it would push local paths across machines and conflict on every pull. The model
+# policy for that file is recorded in common/codex/config.policy.toml and applied
+# by hand. What is safe to share is linked here.
+link common/codex/AGENTS.md       "$HOME/.codex/AGENTS.md"
+link common/codex/sol.config.toml "$HOME/.codex/sol.config.toml"
 
 # ── tmux ──────────────────────────────────────────────────────
 # Linked as individual files, not the whole directory, so TPM plugins and

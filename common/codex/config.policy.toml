@@ -1,0 +1,48 @@
+# Canonical Codex model policy for a ChatGPT Plus $20 plan.
+#
+# NOT symlinked. ~/.codex/config.toml cannot be shared because Codex writes to
+# it: every "trust this directory" answer appends a [projects."/abs/path"] block
+# and /plugins writes [plugins.*] entries, all machine-specific. So this file is
+# the record, and the keys below are applied by hand to ~/.codex/config.toml on
+# each machine. Everything else in that file stays local.
+#
+# Apply with:
+#   codex -c model=gpt-5.6-terra ...        # one-off override, or
+#   edit ~/.codex/config.toml to match      # persistent
+#
+# Verify afterwards: `codex doctor` and `codex --strict-config`.
+
+# Terra is the everyday tier: half Sol's price, and a larger 5-hour allowance
+# (20-110 messages vs Sol's 15-90). Escalate with `codex -p sol`.
+model = "gpt-5.6-terra"
+
+# medium, not high. high/xhigh run several times the tokens of medium for the
+# same prompt. Reasoning effort is the sharpest single lever in this file.
+model_reasoning_effort = "medium"
+
+# "user", not "auto_review". Each auto-review sub-call is a separate
+# quota-consuming request (openai/codex#29717); it was firing nearly as often as
+# the main model. This asks a human to approve risky commands instead — also the
+# more conservative default.
+approvals_reviewer = "user"
+
+[agents]
+# Subagents consume MORE total tokens than a comparable single-agent run — each
+# keeps its own context and starts cold. They buy a smaller main context and
+# parallelism, not savings. Kept available, but at concurrency 1 and routed to
+# the cheap tier; raise deliberately per task, never as a standing default.
+# See openai/codex#9748 ("concurrent subagents instantly drain quota").
+enabled = true
+max_concurrent_threads_per_session = 1
+default_subagent_model = "gpt-5.6-luna"
+default_subagent_reasoning_effort = "low"
+interrupt_message = true
+
+# ── Plugins: do NOT expect token savings from disabling them ──────────────
+# Measured 2026-08-05 with `codex debug prompt-input`: the <skills_instructions>
+# block is budget-capped at ~22k chars (~5.5k tokens) sent every turn. Disabling
+# 9 skills took the list 71 -> 62 entries but shrank the block by only 43 chars —
+# the survivors' truncated descriptions expanded to fill the freed budget
+# (20,619 -> 20,933 chars of entries). Disable plugins to improve skill-selection
+# relevance, not to save quota. The levers that actually move cost are the model,
+# the reasoning effort, and the subagent count above.

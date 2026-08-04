@@ -1,0 +1,8 @@
+# Escalation profile — layered on top of ~/.codex/config.toml by `codex -p sol`.
+#
+# Sol is 2x Terra and 5x Luna per token, and has the smallest 5-hour allowance on
+# Plus (15-90 messages). Use it for a whole session of genuinely hard design or
+# correctness work, then go back to the bare `codex`.
+
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"

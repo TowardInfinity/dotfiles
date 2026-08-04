@@ -1,0 +1,65 @@
+{
+  "model": "sonnet",
+  "effortLevel": "high",
+  "fallbackModel": ["haiku"],
+  "alwaysThinkingEnabled": false,
+  "cleanupPeriodDays": 99999,
+  "env": {
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run typecheck *)",
+      "Bash(npm run test *)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx wrangler tail *)",
+      "mcp__claude-in-chrome__tabs_context_mcp",
+      "mcp__claude-in-chrome__read_network_requests",
+      "mcp__claude-in-chrome__read_console_messages",
+      "mcp__kite__get_profile",
+      "mcp__kite__get_holdings",
+      "mcp__kite__get_mf_holdings",
+      "mcp__kite__get_margins",
+      "mcp__kite__get_quotes",
+      "mcp__kite__get_ltp",
+      "mcp__kite__get_orders",
+      "mcp__kite__login"
+    ],
+    "ask": [
+      "mcp__kite__place_order",
+      "mcp__kite__modify_order",
+      "mcp__kite__cancel_order",
+      "mcp__kite__place_gtt_order",
+      "mcp__kite__modify_gtt_order",
+      "mcp__kite__delete_gtt_order"
+    ]
+  },
+  "skillOverrides": {
+    "agents-sdk": "off",
+    "cloudflare-email-service": "off",
+    "cloudflare-one": "off",
+    "cloudflare-one-migrations": "off",
+    "sandbox-sdk": "off",
+    "turnstile-spin": "off",
+    "web-perf": "off",
+    "workers-best-practices": "off",
+    "wrangler": "off"
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"$HOME/.claude/hooks/save_to_obsidian.py\"; [ -f \"$f\" ] || exit 0; exec python3 \"$f\"",
+            "timeout": 360,
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}

@@ -2,7 +2,6 @@
   "model": "sonnet",
   "effortLevel": "high",
   "fallbackModel": ["haiku"],
-  "alwaysThinkingEnabled": false,
   "cleanupPeriodDays": 99999,
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"

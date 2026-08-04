@@ -84,6 +84,12 @@ tokens of `medium` for the same prompt.
 `MAX_THINKING_TOKENS` does nothing on Opus 5 / Sonnet 5 / Fable 5 — they use
 adaptive reasoning, so effort level is the only control.
 
+**Do not set `alwaysThinkingEnabled: false` to save tokens.** Per the binary it
+is a kill switch, not a dial — *"When false, thinking is disabled"* — and it
+overrides `effortLevel` entirely. On adaptive-reasoning models, leaving it
+absent lets the model spend reasoning only where a turn needs it, which is
+already the cheap behaviour. Turn the effort dial down instead if you want less.
+
 ## Subagents cost more, not less
 
 A subagent does **not** save tokens. It starts cold and reloads CLAUDE.md /

@@ -100,9 +100,32 @@ Delegate only when the work produces verbose, disposable output — test runs, l
 triage, broad search, dependency scans — so the raw output stays in the subagent
 and only a summary returns. Do not delegate quick targeted edits.
 
-In Claude Code, `Explore` and `Plan` skip CLAUDE.md and git status, so they are
-the cheap agent types. Never enable agent teams
-(`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) — roughly 7× a normal session.
+### Claude Code subagents
+
+There is **no settings.json key** for the subagent model. Resolution order,
+verified in the v2.1.221 binary:
+
+1. `CLAUDE_CODE_SUBAGENT_MODEL` — checked first, and it returns before the
+   per-call value is ever read. **Never set it.** It is a hard override that
+   flattens every tier below onto one model. (`"inherit"` is the one safe value,
+   and it is the same as leaving it unset.)
+2. The `model` parameter on the Agent call, or an agent's `model:` frontmatter.
+3. Otherwise **inherit the main-loop model.**
+
+Because of (3), the subagent tier is set by whatever the main session is running
+— there is nothing global to configure, only something not to break. This is
+also why the Opus→Sonnet change mattered twice over: **`Explore` agents inherit
+the parent model rather than defaulting to Haiku**, so every unnoticed fan-out
+was previously running Opus.
+
+Pass `model` explicitly on every Agent call: **Sonnet** where judgment is
+needed, **Haiku** for mechanical lookups and rote transforms (batch those into
+one call rather than spawning several). `Explore` and `Plan` additionally skip
+CLAUDE.md and git status, so they are the cheap agent *types* regardless of
+model.
+
+Never enable agent teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) — roughly 7×
+a normal session.
 
 Codex is capped at 1 concurrent subagent, routed to **Terra at `low`** — see
 below for why not Luna. Never enable Codex's ultra / parallel-agent mode either:
@@ -168,12 +191,25 @@ coding tasks:
 | Sol | 63.7% | 20,968 |
 | Terra | 40.7% | 55,594 |
 
-The cheaper tier used **2.65× more tokens and passed 23 points less**. Flailing
-costs more than the per-token saving. Broader retry analysis agrees: a 5× retry
-multiplier moves cost per solved task from $5.73 to $28.65, and loop design
-moves cost more than model choice does. On a subscription the metered unit is
-*requests per window*, not tokens — a bigger message allowance only helps if the
-model finishes in comparable turns.
+The cheaper tier used **2.65× more tokens and passed 23 points less** — $2.05 vs
+$0.99 per *solved* task. Flailing can cost more than the per-token saving.
+
+But do not over-read that. It measures Sol vs Terra (a 2× price gap) and says
+nothing directly about Luna, whose gap to Terra is another 2.5×. Run the
+break-even honestly: at equal token burn, **Luna only has to pass 16% against
+Terra's 40.7% to tie on token cost.** That is a lot of headroom, and on pure API
+economics the cheap tier is hard to beat.
+
+The reason it still isn't the default here is that **this account is not billed
+in tokens.** The Plus meter is *requests per 5-hour window* — Terra 20–110,
+Luna 50–280. So Luna wins only if it needs fewer than ~2.5× Terra's *turns*, and
+turn count is exactly what degrades when a model retries. Broader analysis puts
+a 5× retry multiplier at $5.73 → $28.65 per solved task, and concludes loop
+design moves cost more than model choice does.
+
+The deciding factor is therefore not cost at all — it is that a recall miss
+produces *plausible wrong code*, silently, and the cost of that lands on your
+review time rather than your quota.
 
 One last trap: the orchestrator is told *"all agents in the team are equally
 intelligent and capable."* Downgrade the subagent and the parent sizes handoffs

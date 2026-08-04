@@ -43,11 +43,18 @@ else. So:
   thread: exploration, log triage, test execution, inventorying, summarization.
 - **Do not delegate** trivial one-step work, tightly sequential work, work whose
   coordination cost exceeds the task, or overlapping writes.
-- **Luna at low/medium** for narrow, repetitive, read-heavy work: targeted
-  searches, file inventories, metadata extraction, log triage, mechanical QA.
-  This is the configured subagent default.
-- **Terra at medium** when a delegated task needs real judgment.
-- **Never spawn Sol subagents** unless the user asks explicitly.
+- **Terra at low** is the configured subagent default. Terra keeps 89.6%
+  long-context recall where Luna drops to 41.3%, and delegated work here is
+  read-heavy by definition — logs, search results, test output. Low effort is
+  where the saving comes from; raise it only after the subagent returns
+  incomplete or missing-field output.
+- **Luna only for bounded, short-context work with explicit success criteria**:
+  a mechanical transform with a known pattern, a rename, an extraction against
+  an existing named test. **Never hand Luna a whole spec, log file, or
+  codebase** — that is its one real weakness, not a general one.
+- **Never spawn Sol subagents** unless the user asks explicitly. **Never enable
+  ultra / parallel-agent mode** — ~3× the cost for ~3 points, and it is
+  reported to loop.
 - **Cap active subagents at 1** (the configured default). Raise deliberately for
   read-only fan-out; never as a standing default.
 - Prefer parallel read-heavy work. For writes, give each subagent exclusive file
@@ -71,7 +78,8 @@ other idles is the most common waste — route deliberately:
 | Architecture, planning, "what should I build" | Claude Code (`/model opusplan`) |
 | Multi-file refactors, cross-cutting changes, review | Claude Code (Sonnet) |
 | Bulk implementation from a written spec | **Codex** (Terra) |
-| Test writing, log/CI triage, mechanical transforms | **Codex** (Luna) |
+| Log/CI triage, reading long output | **Codex** (Terra — not Luna) |
+| Mechanical transforms with a known pattern, bounded edits | **Codex** (Luna) |
 | Anything after one tool caps out | the other one |
 
 When handing a task across, write the plan to a file first. Re-explaining context

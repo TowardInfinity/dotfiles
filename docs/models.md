@@ -46,6 +46,18 @@ something selects it. On this account it silently became the single largest
 line item — 4,256 main-session turns, ~46% of all spend — while doing work
 Sonnet would have done at a fifth the price.
 
+The honest caveat: Fable 5 does lead **SWE-Bench Pro at 80%** (vs Sol's 64.6%),
+so it is genuinely the strongest repo-level coder in the table. It is still the
+wrong choice on Pro — at 5× Sonnet and 2× Opus out of one shared bucket, it buys
+a few points of pass rate for most of the month's allowance. It also *trails*
+Opus 5 on general coding (Frontier-Bench 33.7% vs 43.3%), so it is not a
+straight upgrade.
+
+Escalation to Opus is worth it when the task is genuinely hard reasoning rather
+than execution — Opus 5 scores 30.2% on ARC-AGI-3 against Sol's 7.8%, which is a
+real gap, not a rounding difference. That is what `opusplan` is for: pay for the
+thinking, not the typing.
+
 ## What actually costs money
 
 Measured on this account across 101 sessions and 19,180 turns:
@@ -86,7 +98,37 @@ In Claude Code, `Explore` and `Plan` skip CLAUDE.md and git status, so they are
 the cheap agent types. Never enable agent teams
 (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) — roughly 7× a normal session.
 
-Codex is capped at 1 concurrent subagent, routed to Luna at `low`.
+Codex is capped at 1 concurrent subagent, routed to **Terra at `low`** — see
+below for why not Luna. Never enable Codex's ultra / parallel-agent mode either:
+~3× the cost for ~3 benchmark points, and it is widely reported to get stuck in
+review loops.
+
+## Luna is not "the cheap Terra"
+
+Worth knowing before reaching for it. Luna is within ~3 points of Terra on
+everything that looks like agent work:
+
+| | Sol | Terra | Luna |
+|---|---|---|---|
+| Agents' Last Exam | 53.6 | 50.4 | 50.3 |
+| Terminal-Bench 2.1 | 88.8% | 87.4% | 84.7% |
+| Coding Agent Index | 80 | 77.4 | 74.6 |
+| **MRCR long-context recall** | **91.5%** | **89.6%** | **41.3%** |
+
+One cliff, and it is enormous. A 1M context window does not mean 1M usable
+tokens. The rule every independent write-up converges on: **do not hand Luna a
+whole spec, log file, or codebase.**
+
+That is why subagents run Terra. Delegated work here is read-heavy by
+definition — logs, search results, test output — which is exactly the axis Luna
+fails on, and a wrong summary costs a full re-run on top of the wasted call.
+Take the saving from **effort** instead: `low` cuts planning and checking tokens
+without touching retrieval fidelity. Raise effort only after a run comes back
+with incomplete or missing fields.
+
+Luna is still the right pick for bounded, short-context, mechanically-specified
+work with a clear success test — a rename with a known pattern, an extraction
+checked by an existing test.
 
 ## Plugins do not cost what you would expect
 
@@ -112,7 +154,8 @@ Draining one while the other idles is the most common waste.
 | Architecture, planning, "what should I build" | Claude Code, `/model opusplan` |
 | Multi-file refactors, cross-cutting changes, review | Claude Code (Sonnet) |
 | Bulk implementation from a written spec | Codex (Terra) |
-| Test writing, log/CI triage, mechanical transforms | Codex (Luna) |
+| Log/CI triage, reading long output | Codex (Terra — *not* Luna) |
+| Mechanical transforms with a known pattern | Codex (Luna) |
 | Anything after one tool caps out | the other one |
 
 When handing work across, **write the plan to a file first**. Re-explaining

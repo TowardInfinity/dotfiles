@@ -29,14 +29,51 @@ approvals_reviewer = "user"
 [agents]
 # Subagents consume MORE total tokens than a comparable single-agent run — each
 # keeps its own context and starts cold. They buy a smaller main context and
-# parallelism, not savings. Kept available, but at concurrency 1 and routed to
-# the cheap tier; raise deliberately per task, never as a standing default.
+# parallelism, not savings. Kept available, but at concurrency 1; raise
+# deliberately per task, never as a standing default.
 # See openai/codex#9748 ("concurrent subagents instantly drain quota").
 enabled = true
 max_concurrent_threads_per_session = 1
-default_subagent_model = "gpt-5.6-luna"
+
+# ── Why Terra and not Luna for subagents (revised 2026-08-05) ─────────────
+# The first version of this policy put Luna here on price alone (1x vs Terra's
+# 2.5x). That was an inference from the price ratio, not from measured
+# behaviour, and it was wrong for this workload.
+#
+# Luna is not broadly weaker than Terra — it is within ~3 points on everything
+# that looks like agent work:
+#   Agents' Last Exam    Terra 50.4  Luna 50.3
+#   Terminal-Bench 2.1   Terra 87.4% Luna 84.7%
+#   Coding Agent Index   Terra 77.4  Luna 74.6
+# It has exactly one cliff, and it is a big one:
+#   MRCR long-context recall  Sol 91.5%  Terra 89.6%  *Luna 41.3%*
+#   (MRCR v2 8-needle @512K-1M: Sol 73.8%, Luna 41.3%)
+#
+# Independent write-ups converge on the same rule: "do not hand Luna entire
+# specs, logs, or codebases"; Luna is for "bounded tasks with short context"
+# with explicit success criteria.
+#
+# That is dispositive here, because the delegation rule above only ever sends a
+# subagent verbose-output work — log triage, broad multi-file search, test
+# output, inventories. Every one of those is long-context recall. Luna's cheap
+# tokens would be spent on the single task it is worst at, and a wrong summary
+# costs a full re-run on Terra on top of the wasted Luna run.
+#
+# So: keep the model at Terra and take the saving from effort instead. `low`
+# reduces planning/checking tokens without touching retrieval fidelity, and the
+# corroborated escalation signal is "raise effort only after required-field
+# failures". Luna stays a per-task choice for genuinely bounded mechanical work
+# (a rename with a known pattern, a transform with an existing named test), not
+# a standing default.
+default_subagent_model = "gpt-5.6-terra"
 default_subagent_reasoning_effort = "low"
 interrupt_message = true
+
+# ── Also do not enable ultra / parallel-agent mode ────────────────────────
+# Vellum measures ultra at ~3x single-agent Sol's cost for "+3 points". Field
+# reports are worse than that: infinite review loops, agents re-evaluating the
+# same task, and spawning inefficient sub-agents. Nothing on a $20 plan justifies
+# it. `max` reasoning effort is Sol-only and is likewise out of budget.
 
 # ── Plugins: do NOT expect token savings from disabling them ──────────────
 # Measured 2026-08-05 with `codex debug prompt-input`: the <skills_instructions>

@@ -69,6 +69,41 @@ default_subagent_model = "gpt-5.6-terra"
 default_subagent_reasoning_effort = "low"
 interrupt_message = true
 
+# ── Considered and rejected: Luna + high effort as the coding subagent ────
+# Hypothesis: Terra plans and verifies, Luna at `high` does all the coding;
+# subagents are ephemeral so long-context recall should not matter. Three
+# separate checks say no.
+#
+# 1. Effort does not repair recall. They are orthogonal axes. arXiv 2410.04422
+#    finds long-context retrieval failures "stem from deeper architectural
+#    limitations rather than insufficient reasoning capacity"; the lost-in-
+#    thought work (arXiv 2604.09494) finds extra reasoning tokens *actively
+#    degrade* retrieval, because attention shifts to the reasoning trace and
+#    away from the source documents. Luna+high buys tokens, not recall.
+#
+# 2. "Ephemeral" does not mean "small context" — it means the opposite here.
+#    Per the live system prompt: full-history forks (`fork_turns` omitted or
+#    "all") inherit the parent model and effort and DO NOT accept overrides.
+#    Running a subagent on a different model REQUIRES fork_turns="none" or an
+#    integer. So a Luna subagent is by construction one that inherits almost
+#    nothing and must go read every file and test log itself — unsummarised raw
+#    material, accumulating fast. That is precisely the MRCR axis it fails on.
+#
+# 3. The cheap tier is not cheaper on coding. CodeRabbit, 100 long-horizon
+#    coding tasks: Sol 63.7% pass at 20,968 avg output tokens; Terra 40.7% at
+#    55,594. The cheaper tier used 2.65x MORE tokens and passed 23 points less.
+#    Their words: "For long coding jobs, measure cost per solved task before
+#    routing large volumes to it." Luna is a further step down that same
+#    gradient, and `high` stacks a ~2x effort multiplier on top of the flailing.
+#    On a subscription the metered unit is requests per 5h window, not tokens —
+#    Luna's 50-280 allowance only wins if it finishes in comparable turns.
+#
+# Also note the orchestrator is told "all agents in the team are equally
+# intelligent and capable". Downgrading the subagent silently falsifies that:
+# the parent sizes handoffs for a peer, and it only ever sees the FINAL_ANSWER
+# payload, not the work — so "Terra will check if it performed fine" costs a
+# full re-read of the same material, which is the expensive part.
+
 # ── Also do not enable ultra / parallel-agent mode ────────────────────────
 # Vellum measures ultra at ~3x single-agent Sol's cost for "+3 points". Field
 # reports are worse than that: infinite review loops, agents re-evaluating the

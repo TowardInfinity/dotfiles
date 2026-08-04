@@ -136,6 +136,56 @@ Luna is still the right pick for bounded, short-context, mechanically-specified
 work with a clear success test — a rename with a known pattern, an extraction
 checked by an existing test.
 
+### Why not "Luna at high effort" instead
+
+Tempting: let Terra plan, let a cheap model at high effort do the coding, and
+lean on the fact that subagents are throwaway. It doesn't hold up.
+
+**Effort and recall are different axes.** Raising effort does not repair
+retrieval. The research finds long-context retrieval failures "stem from deeper
+architectural limitations rather than insufficient reasoning capacity" — and the
+*lost-in-thought* result is worse than neutral: extra reasoning tokens actively
+**degrade** long-context retrieval, because attention shifts toward the model's
+own reasoning trace and away from the source documents. High effort on a
+low-recall model buys tokens, not accuracy.
+
+**"Throwaway" does not mean "small context" — it means the opposite.** From the
+live Codex system prompt:
+
+> Full-history forks (`fork_turns` omitted or `"all"`) inherit the parent model
+> and reasoning effort and do not accept overrides.
+
+So running a subagent on a *different* model requires `fork_turns="none"` or an
+integer. A cheap-tier subagent is by construction one that inherits almost
+nothing and must therefore go read every file and log itself — raw, unsummarised
+material piling up fast. That is exactly the axis it is weakest on.
+
+**And the cheap tier is not cheaper on coding.** CodeRabbit, 100 long-horizon
+coding tasks:
+
+| | Pass rate | Avg output tokens |
+|---|---|---|
+| Sol | 63.7% | 20,968 |
+| Terra | 40.7% | 55,594 |
+
+The cheaper tier used **2.65× more tokens and passed 23 points less**. Flailing
+costs more than the per-token saving. Broader retry analysis agrees: a 5× retry
+multiplier moves cost per solved task from $5.73 to $28.65, and loop design
+moves cost more than model choice does. On a subscription the metered unit is
+*requests per window*, not tokens — a bigger message allowance only helps if the
+model finishes in comparable turns.
+
+One last trap: the orchestrator is told *"all agents in the team are equally
+intelligent and capable."* Downgrade the subagent and the parent sizes handoffs
+for a peer it no longer has. It also only sees the final payload, not the work —
+so "the main model will verify it" means re-reading the same material, which is
+the expensive part you were trying to avoid.
+
+**The sound version of the instinct:** split by *task shape*, not by making
+coding the cheap tier. Coding is the worst candidate — it is long-horizon and
+read-heavy. Bounded single-file transforms with a test as the oracle are the
+good candidate, and that is what Luna is already reserved for.
+
 ## Plugins do not cost what you would expect
 
 Disabling Codex plugins does **not** save tokens. Measured with

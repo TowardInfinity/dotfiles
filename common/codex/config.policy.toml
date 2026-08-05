@@ -1,120 +1,42 @@
-# Canonical Codex model policy for a ChatGPT Plus $20 plan.
+# Codex model policy for a ChatGPT Plus $20 plan.
 #
-# NOT symlinked. ~/.codex/config.toml cannot be shared because Codex writes to
-# it: every "trust this directory" answer appends a [projects."/abs/path"] block
-# and /plugins writes [plugins.*] entries, all machine-specific. So this file is
-# the record, and the keys below are applied by hand to ~/.codex/config.toml on
-# each machine. Everything else in that file stays local.
+# This file is not symlinked — it is MERGED into ~/.codex/config.toml by
+# install.sh, between the "dots: managed" markers. Everything outside those
+# markers in that file is left alone, because Codex writes to it itself:
+# every "trust this directory" answer appends a [projects."/abs/path"] block
+# and /plugins writes [plugins.*] entries, all machine-specific.
 #
-# Apply with:
-#   codex -c model=gpt-5.6-terra ...        # one-off override, or
-#   edit ~/.codex/config.toml to match      # persistent
+# So: edit the policy here, run `dots sync`, and every machine converges.
+# Do not hand-edit the managed block in ~/.codex/config.toml — the next
+# install overwrites it.
 #
-# Verify afterwards: `codex doctor` and `codex --strict-config`.
+# The reasoning behind each choice is in `dots models`.
 
 # Terra is the everyday tier: half Sol's price, and a larger 5-hour allowance
-# (20-110 messages vs Sol's 15-90). Escalate with `codex -p sol`.
+# (20-110 messages vs Sol's 15-90). Escalate a hard session with `codex -p sol`.
 model = "gpt-5.6-terra"
 
-# medium, not high. high/xhigh run several times the tokens of medium for the
-# same prompt. Reasoning effort is the sharpest single lever in this file.
+# medium, not high. Effort is the sharpest single lever in this file — high and
+# xhigh run several times the tokens of medium for the same prompt.
 model_reasoning_effort = "medium"
 
-# "user", not "auto_review". Each auto-review sub-call is a separate
-# quota-consuming request (openai/codex#29717); it was firing nearly as often as
-# the main model. This asks a human to approve risky commands instead — also the
-# more conservative default.
+# "user", not "auto_review". Each auto-review sub-call is a separately
+# quota-consuming request, and it was firing nearly as often as the main model.
+# This asks a human to approve risky commands instead — also the safer default.
 approvals_reviewer = "user"
 
 [agents]
-# Subagents consume MORE total tokens than a comparable single-agent run — each
+# Subagents cost MORE total tokens than a comparable single-agent run: each
 # keeps its own context and starts cold. They buy a smaller main context and
-# parallelism, not savings. Kept available, but at concurrency 1; raise
-# deliberately per task, never as a standing default.
-# See openai/codex#9748 ("concurrent subagents instantly drain quota").
+# parallelism, not savings. Kept available, at concurrency 1.
 enabled = true
 max_concurrent_threads_per_session = 1
 
-# ── Why Terra and not Luna for subagents (revised 2026-08-05) ─────────────
-# The first version of this policy put Luna here on price alone (1x vs Terra's
-# 2.5x). That was an inference from the price ratio, not from measured
-# behaviour, and it was wrong for this workload.
-#
-# Luna is not broadly weaker than Terra — it is within ~3 points on everything
-# that looks like agent work:
-#   Agents' Last Exam    Terra 50.4  Luna 50.3
-#   Terminal-Bench 2.1   Terra 87.4% Luna 84.7%
-#   Coding Agent Index   Terra 77.4  Luna 74.6
-# It has exactly one cliff, and it is a big one:
-#   MRCR long-context recall  Sol 91.5%  Terra 89.6%  *Luna 41.3%*
-#   (MRCR v2 8-needle @512K-1M: Sol 73.8%, Luna 41.3%)
-#
-# Independent write-ups converge on the same rule: "do not hand Luna entire
-# specs, logs, or codebases"; Luna is for "bounded tasks with short context"
-# with explicit success criteria.
-#
-# That is dispositive here, because the delegation rule above only ever sends a
-# subagent verbose-output work — log triage, broad multi-file search, test
-# output, inventories. Every one of those is long-context recall. Luna's cheap
-# tokens would be spent on the single task it is worst at, and a wrong summary
-# costs a full re-run on Terra on top of the wasted Luna run.
-#
-# So: keep the model at Terra and take the saving from effort instead. `low`
-# reduces planning/checking tokens without touching retrieval fidelity, and the
-# corroborated escalation signal is "raise effort only after required-field
-# failures". Luna stays a per-task choice for genuinely bounded mechanical work
-# (a rename with a known pattern, a transform with an existing named test), not
-# a standing default.
+# Terra, not Luna. Luna is within ~3 points of Terra on every agentic and coding
+# benchmark but collapses to 41.3% on MRCR long-context recall (Terra 89.6%),
+# and delegated work here is read-heavy by definition. Note this only applies to
+# partial-history forks: a full-history fork inherits the parent model and
+# effort and rejects overrides entirely. See `dots models` for the cost maths.
 default_subagent_model = "gpt-5.6-terra"
 default_subagent_reasoning_effort = "low"
 interrupt_message = true
-
-# ── Considered and rejected: Luna + high effort as the coding subagent ────
-# Hypothesis: Terra plans and verifies, Luna at `high` does all the coding;
-# subagents are ephemeral so long-context recall should not matter. Three
-# separate checks say no.
-#
-# 1. Effort does not repair recall. They are orthogonal axes. arXiv 2410.04422
-#    finds long-context retrieval failures "stem from deeper architectural
-#    limitations rather than insufficient reasoning capacity"; the lost-in-
-#    thought work (arXiv 2604.09494) finds extra reasoning tokens *actively
-#    degrade* retrieval, because attention shifts to the reasoning trace and
-#    away from the source documents. Luna+high buys tokens, not recall.
-#
-# 2. "Ephemeral" does not mean "small context" — it means the opposite here.
-#    Per the live system prompt: full-history forks (`fork_turns` omitted or
-#    "all") inherit the parent model and effort and DO NOT accept overrides.
-#    Running a subagent on a different model REQUIRES fork_turns="none" or an
-#    integer. So a Luna subagent is by construction one that inherits almost
-#    nothing and must go read every file and test log itself — unsummarised raw
-#    material, accumulating fast. That is precisely the MRCR axis it fails on.
-#
-# 3. The cheap tier is not cheaper on coding. CodeRabbit, 100 long-horizon
-#    coding tasks: Sol 63.7% pass at 20,968 avg output tokens; Terra 40.7% at
-#    55,594. The cheaper tier used 2.65x MORE tokens and passed 23 points less.
-#    Their words: "For long coding jobs, measure cost per solved task before
-#    routing large volumes to it." Luna is a further step down that same
-#    gradient, and `high` stacks a ~2x effort multiplier on top of the flailing.
-#    On a subscription the metered unit is requests per 5h window, not tokens —
-#    Luna's 50-280 allowance only wins if it finishes in comparable turns.
-#
-# Also note the orchestrator is told "all agents in the team are equally
-# intelligent and capable". Downgrading the subagent silently falsifies that:
-# the parent sizes handoffs for a peer, and it only ever sees the FINAL_ANSWER
-# payload, not the work — so "Terra will check if it performed fine" costs a
-# full re-read of the same material, which is the expensive part.
-
-# ── Also do not enable ultra / parallel-agent mode ────────────────────────
-# Vellum measures ultra at ~3x single-agent Sol's cost for "+3 points". Field
-# reports are worse than that: infinite review loops, agents re-evaluating the
-# same task, and spawning inefficient sub-agents. Nothing on a $20 plan justifies
-# it. `max` reasoning effort is Sol-only and is likewise out of budget.
-
-# ── Plugins: do NOT expect token savings from disabling them ──────────────
-# Measured 2026-08-05 with `codex debug prompt-input`: the <skills_instructions>
-# block is budget-capped at ~22k chars (~5.5k tokens) sent every turn. Disabling
-# 9 skills took the list 71 -> 62 entries but shrank the block by only 43 chars —
-# the survivors' truncated descriptions expanded to fill the freed budget
-# (20,619 -> 20,933 chars of entries). Disable plugins to improve skill-selection
-# relevance, not to save quota. The levers that actually move cost are the model,
-# the reasoning effort, and the subagent count above.

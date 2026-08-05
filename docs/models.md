@@ -23,8 +23,15 @@ less per turn.
 | Claude Code | Sonnet 5, effort `high` | `/model opusplan` |
 | Codex | Terra, effort `medium` | `codex -p sol` |
 
-Both defaults are set in config — `common/claude/settings.json` and
-`~/.codex/config.toml`. You should rarely need to override them.
+Both defaults live in the repo and travel with `dots sync`:
+`common/claude/settings.json` is symlinked into place, and
+`common/codex/config.policy.toml` is *merged* into `~/.codex/config.toml`
+between `# >>> dots: managed block` markers — Codex writes its own
+`[projects.*]` trust and `[plugins.*]` entries into that file, so it cannot be a
+symlink, but everything outside the markers is left untouched.
+
+Edit the policy in the repo, never the managed block: the next install
+overwrites it. You should rarely need to override either default.
 
 `/model opusplan` runs Opus while planning and switches to Sonnet for
 execution, which is the cheapest way to get Opus-quality design decisions.

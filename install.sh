@@ -87,6 +87,63 @@ backup_dst() {
   prune_backups "$dst"
 }
 
+# merge_toml <src> <dst> — keep a block of shared TOML inside a file the
+# application also writes to.
+#
+# Some configs cannot be symlinked because the tool owns them: Codex appends a
+# [projects."/abs/path"] trust block every time you trust a directory. Linking
+# that file would push one machine's paths to all the others and conflict on
+# every pull. Leaving it unlinked meant the policy had to be copied by hand,
+# which is exactly the drift this repo exists to prevent.
+#
+# So $src is spliced into $dst between markers. Everything outside them is the
+# machine's own and is preserved; anything the policy defines is removed from
+# where the machine had it, so there is one definition, not two. Re-running is
+# idempotent: the previous managed block is stripped before the new one goes in.
+#
+# Order matters in TOML — bare top-level keys must precede every table header —
+# so the output is: the machine's own top-level keys, then the managed block,
+# then the machine's tables.
+MERGE_BEGIN="# >>> dots: managed block — edit the source in the dotfiles repo >>>"
+MERGE_END="# <<< dots: end managed block <<<"
+
+merge_toml() {
+  local src="$1" dst="$2"
+  case "$src" in /*) : ;; *) src="$REPO/$src" ;; esac
+
+  if [[ ! -e "$src" ]]; then
+    printf '  \033[31mmissing\033[0m  %s\n' "$src"
+    MISSING=$((MISSING + 1))
+    return 0
+  fi
+
+  # python3 does the parse. It ships with macOS and every server image here; if
+  # it is ever absent, say so rather than silently skipping the policy.
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '  \033[31mmissing\033[0m  python3 (needed to merge %s)\n' "${dst/#$HOME/$TILDE}"
+    MISSING=$((MISSING + 1))
+    return 0
+  fi
+
+  local out status
+  out="$(python3 "$REPO/bin/merge-toml-block.py" \
+           --src "$src" --dst "$dst" \
+           --begin "$MERGE_BEGIN" --end "$MERGE_END" \
+           $($DRY && echo --dry) 2>&1)" && status=0 || status=$?
+
+  if [[ $status -ne 0 ]]; then
+    printf '  \033[31mfailed\033[0m   %s\n%s\n' "${dst/#$HOME/$TILDE}" "$out"
+    MISSING=$((MISSING + 1))
+    return 0
+  fi
+
+  case "$out" in
+    unchanged) printf '  \033[90mok\033[0m       %s (managed block)\n' "${dst/#$HOME/$TILDE}" ;;
+    would-*)   printf '  \033[36mwould merge\033[0m %s (managed block)\n' "${dst/#$HOME/$TILDE}" ;;
+    *)         printf '  \033[32mmerged\033[0m   %s (managed block)\n' "${dst/#$HOME/$TILDE}" ;;
+  esac
+}
+
 link() {
   # $1 is usually a path relative to $REPO, but callers that already have an
   # absolute path (e.g. a resolved `dots` binary living under ~/.cache) pass
@@ -230,13 +287,14 @@ link common/claude/settings.json "$HOME/.claude/settings.json"
 link common/claude/delegation.md "$HOME/.claude/delegation.md"
 
 # ── Codex CLI ─────────────────────────────────────────────────
-# ~/.codex/config.toml is deliberately NOT linked: Codex writes machine-specific
+# ~/.codex/config.toml cannot be a symlink: Codex writes machine-specific
 # [projects."/abs/path"] trust blocks and [plugins.*] entries into it, so sharing
-# it would push local paths across machines and conflict on every pull. The model
-# policy for that file is recorded in common/codex/config.policy.toml and applied
-# by hand. What is safe to share is linked here.
+# the whole file would push local paths across machines and conflict on every
+# pull. But the model policy inside it still has to travel, so it is merged in
+# instead — see merge_toml() above. What is wholly safe to share is linked.
 link common/codex/AGENTS.md       "$HOME/.codex/AGENTS.md"
 link common/codex/sol.config.toml "$HOME/.codex/sol.config.toml"
+merge_toml common/codex/config.policy.toml "$HOME/.codex/config.toml"
 
 # ── tmux ──────────────────────────────────────────────────────
 # Linked as individual files, not the whole directory, so TPM plugins and

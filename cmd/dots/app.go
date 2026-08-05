@@ -33,6 +33,11 @@ type model struct {
 	doc  doctorModel
 	man  manageModel
 
+	// Whether this checkout is ahead of the other machines. Read once at
+	// startup and rendered as a status-bar badge; View runs per keystroke and
+	// must not shell out to git.
+	sync repoState
+
 	// Non-nil while an action overlay is up. It takes every key, so a long
 	// install cannot be interrupted by a stray tab that switches panes
 	// underneath it.
@@ -60,6 +65,7 @@ func newModel() model {
 		hp:     newHelp(),
 		repo:   repo,
 		source: src,
+		sync:   readRepoState(repo),
 		docs:   newDocsModel(docs),
 		doc:    newDoctorModel(repo),
 		man:    newManageModel(repo),
@@ -317,9 +323,27 @@ func (m model) View() string {
 	// is certainly current, and a stale zero here means no eliding at all —
 	// which put Manage's key list on two lines and cost the tab bar its row
 	// again, the very thing help was brought in to prevent.
+	// A right-aligned badge when this checkout is ahead of the other machines.
+	// It is computed once at startup, not per frame: it shells out to git, and
+	// View runs on every keystroke.
+	//
+	// Its width comes out of the help's budget *before* help renders, so the
+	// elision below still has the whole story and the bar cannot reach two
+	// lines — the failure this row has already had twice. Below 40 columns the
+	// badge is dropped entirely rather than squeezing the key hints to nothing.
+	badge := ""
+	if m.sync.needsSync() && m.w >= 40 {
+		badge = styPending.Render("● " + m.sync.summary() + " — dots sync")
+	}
+
+	hintW := m.w - 2 - lipgloss.Width(badge)
+
 	hp := m.hp
-	hp.Width = m.w - 2
+	hp.Width = hintW
 	hint := hp.ShortHelpView(append(append([]key.Binding{}, ks...), globalKeys...))
+	if badge != "" {
+		hint = padRight(truncate(hint, hintW), hintW) + badge
+	}
 
 	// Backstop, and not a redundant one. bubbles' shouldAddItem only stops
 	// early if the ellipsis itself still fits: when it does not, the branch

@@ -63,6 +63,36 @@ never pushes on its own. Unreachable hosts are skipped, not retried, and a
 failed local push stops the run before any remote is touched — otherwise the
 remotes would pull a change that is not there.
 
+### Being reminded
+
+The failure mode sync exists to prevent is silent: edit a config, relink, and
+this box looks correct while every other one quietly disagrees. So `dots` shows
+a status-bar badge and `dots doctor` prints a row when the checkout is ahead:
+
+```
+  !  repo           1 uncommitted file, 2 unpushed commits
+     run `dots sync` to push and update the other machines
+```
+
+It only ever reports. Nothing pushes without you asking, because a push is
+outward-facing and updates machines you are not looking at. Untracked files are
+not counted — a working machine collects backups and caches inside the repo, and
+counting those would nag on every run until the badge stopped meaning anything.
+`dots doctor`'s exit status is unaffected: unpushed work is normal mid-edit, not
+a failure.
+
+## main is protected
+
+The GitHub repo is public, so anyone can read it, fork it and open a pull
+request — but write access is the owner's alone, and a ruleset on `main` blocks
+force-pushes and branch deletion. It deliberately does **not** require pull
+requests: `dots sync` pushes straight to `main`, and requiring review would
+break the one command this whole setup runs on. The threat being defended
+against is an accident, not an intruder.
+
+Secret scanning and push protection are on, so a credential in a config is
+caught at `git push` rather than after it is public.
+
 ## Rolling a change out to one server
 
 ```sh

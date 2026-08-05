@@ -11,7 +11,7 @@ import (
 //
 // Exits non-zero when something is missing, so it is usable in a script or a
 // CI step, not only by eye.
-func runDoctorCLI() int {
+func runDoctorCLI(repo string) int {
 	results := make([]checkResult, 0, len(checkNames()))
 	for _, n := range checkNames() {
 		results = append(results, evalCheck(n))
@@ -28,6 +28,17 @@ func runDoctorCLI() int {
 			fmt.Printf("  %s  %s\n", styBad.Render("✗"), r.name)
 			missing = append(missing, r.name)
 		}
+	}
+
+	// Config drift is reported next to tool drift because they fail the same
+	// way: this box looks fine while the others quietly disagree with it.
+	// It is a note, never a failure — unpushed work is normal mid-edit, so it
+	// must not change the exit status a script is reading.
+	state := readRepoState(repo)
+	if state.needsSync() {
+		fmt.Println()
+		fmt.Printf("  %s  %-14s %s\n", styPending.Render("!"), "repo", state.summary())
+		fmt.Printf("     %s\n", styMuted.Render("run `dots sync` to push and update the other machines"))
 	}
 
 	fmt.Println()

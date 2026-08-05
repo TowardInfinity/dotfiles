@@ -64,7 +64,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "doctor":
-		os.Exit(runDoctorCLI())
+		os.Exit(runDoctorCLI(findRepo()))
 	case "install":
 		os.Exit(runInstallCLI(args[1:]))
 	case "update":

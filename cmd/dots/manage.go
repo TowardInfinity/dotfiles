@@ -220,6 +220,15 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// The rail is drawn vertically, so up/down would be the natural way to
+		// move it — and that is what Docs does. Here it cannot be
+		// unconditional: three of the five sections put a list in the body and
+		// up/down has to drive that. So up/down moves the rail only in the two
+		// sections with no list, which leaves all four arrows doing something
+		// everywhere without ever changing what a key already meant. The
+		// non-rail cases deliberately fall out of the switch rather than
+		// returning, so the section dispatch below still sees the key.
+		railUpDown := m.section == secOverview || m.section == secDotfiles
 		switch msg.String() {
 		case "l", "right":
 			m.section = (m.section + 1) % numSections
@@ -227,6 +236,16 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		case "h", "left":
 			m.section = (m.section + numSections - 1) % numSections
 			return m, nil
+		case "j", "down":
+			if railUpDown {
+				m.section = (m.section + 1) % numSections
+				return m, nil
+			}
+		case "k", "up":
+			if railUpDown {
+				m.section = (m.section + numSections - 1) % numSections
+				return m, nil
+			}
 		}
 
 		switch m.section {

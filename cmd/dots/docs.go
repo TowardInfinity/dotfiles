@@ -220,10 +220,14 @@ func (m docsModel) updateInner(msg tea.Msg) (docsModel, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "j", "down":
+		// left/right move the sidebar too. There is no horizontal axis in this
+		// pane — the body is wrapped to the reading measure, so nothing ever
+		// scrolls sideways — and leaving two of the four arrows dead here while
+		// Manage uses them for its rail is the inconsistency worth removing.
+		case "j", "down", "l", "right":
 			m.move(+1)
 			return m, nil
-		case "k", "up":
+		case "k", "up", "h", "left":
 			m.move(-1)
 			return m, nil
 		case "g", "home":

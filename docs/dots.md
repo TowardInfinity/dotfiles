@@ -34,6 +34,27 @@ dots search copy  # find which page mentions it
 
 `q` quits from anywhere.
 
+### The arrow keys
+
+All four work, everywhere something can move. The status bar shows the letter
+form because it is shorter, but the arrows are always aliases for it:
+
+| | Moves the rail | Moves the list |
+|---|---|---|
+| **Docs** | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
+| **Manage** — Overview, Dotfiles | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
+| **Manage** — Services, Projects, Machines | `←` `→` · `h` `l` | `↑` `↓` · `j` `k` |
+
+The one asymmetry is deliberate. Three of Manage's sections put a list in the
+body, and there `↑`/`↓` has to drive the list — so the rail keeps `←`/`→`. In
+the two sections with no list, `↑`/`↓` falls through to the rail instead of
+doing nothing.
+
+Doctor has neither a rail nor a list, so the arrows have nothing to move there.
+
+Nothing scrolls sideways anywhere: the body is wrapped to the reading measure,
+which is why `←`/`→` were free to mean "move the rail" in the first place.
+
 ### Manage's sections
 
 **Overview** · **Dotfiles** · **Services** · **Projects** · **Machines**

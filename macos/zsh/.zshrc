@@ -133,6 +133,13 @@ alias webui='open http://localhost:11435'
 alias ai-ram='ollama ps'             # which models are loaded in RAM right now
 alias shortcuts="grep -E '^alias ' ~/.zshrc | sed 's/^alias //' | sort"   # list my own shortcuts
 
+# ──── Claude Code (added 2026-08-05) ─────────────────────────
+# Auto-approve mode is machine-local on purpose. ~/.claude/settings.json is
+# symlinked from the dotfiles repo and shared with a1, which is internet-facing
+# — auto-approving tool calls there is not something to inherit by accident.
+# So the Mac opts in here rather than via "defaultMode" in the shared file.
+alias claude='claude --permission-mode auto'
+
 # ──── tmux (added 2026-07-26) ────────────────────────────────
 # Config lives at ~/.config/tmux/tmux.conf. Prefix is Ctrl-a.
 alias t='tmux'

@@ -27,3 +27,8 @@ bin/dots-bin
 # DIRECTORY, which silently ignored every new source file added there —
 # actions_cli.go never got committed and CI failed on an undefined symbol.
 /dots
+
+# Debugging output captured while testing. err2.log reached a public repo this
+# way — 899 bytes of a Neovim stack trace, carrying the absolute path of the
+# scratchpad it was produced in. Nothing here should ever be tracked.
+*.log

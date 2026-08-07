@@ -32,3 +32,10 @@ bin/dots-bin
 # way — 899 bytes of a Neovim stack trace, carrying the absolute path of the
 # scratchpad it was produced in. Nothing here should ever be tracked.
 *.log
+
+# Python bytecode from syntax-checking bin/*.py. install.sh runs those scripts
+# directly, which caches nothing — this only appears after a py_compile or
+# compileall. It matters because `dots sync` stages untracked files, so an
+# ignored-by-nobody .pyc gets offered up for commit on the next sync.
+__pycache__/
+*.py[cod]

@@ -81,7 +81,8 @@ table is a reference, not something to memorise.
 | `dots <topic>` | print one page |
 | `dots search <term>` | search every page |
 | `dots topics` | list every page with its summary |
-| `dots doctor` | check the tools these configs call |
+| `dots doctor` | check the tools these configs call, and the configuration itself |
+| `dots doctor --online` | also check the installed `dots` against the latest release |
 | `dots install` | relink configs; `--deps` also installs the tools |
 | `dots update` | pull the latest configs, then relink |
 | `dots sync` | push changes here, then update every other machine |
@@ -107,6 +108,47 @@ Colour and word-wrapping are dropped when stdout is not a terminal, so
 `dots tmux | grep prefix` reads like a text file rather than a screenshot.
 `dots doctor` exits non-zero when something is missing, so it works as a CI or
 script step. `dots search` exits non-zero on no match.
+
+## What doctor checks
+
+Two different questions, in two groups.
+
+**Tools** — Core, Tools and Frameworks — answer *can the configs run at all*: is
+nvim here, is tpm cloned. A `--light` box is checked against the shorter list it
+actually asked for, not the full one.
+
+**Config** answers something quieter and worse: everything is installed, but has
+the configuration drifted?
+
+| Row | Fails when |
+|---|---|
+| `codex config` | `~/.codex/config.toml` is missing or does not parse as TOML |
+| `codex mode` | it is anything other than `0600` |
+| `managed block` | the markers are missing, duplicated or out of order, or the block no longer matches `common/codex/config.policy.toml` |
+| `dots binary` | never — it reports the version and where the binary came from |
+| `release` | `--online` only: the installed version is behind Latest |
+
+The mode row exists because that file went `0664` on three servers and nothing
+errored. It can hold MCP credentials, so wider than owner-only is a finding.
+
+### Three states, and why warnings do not fail
+
+`✓` passed · `✗` failed · `!` could not be answered.
+
+A `!` never changes the exit status. Being offline, or running a `--copy`
+install with no checkout to compare the policy against, is not an unhealthy
+machine — and an exit code that cannot tell *unreachable* from *broken* is one
+you stop trusting. Missing, malformed, insecure and stale all stay `✗`.
+
+### Two repair keys, deliberately
+
+In the pane, `i` installs missing packages and `c` repairs configuration by
+re-running `install.sh`. They are separate because they fix disjoint problems:
+folding them together would let a missing brew formula block a config repair.
+`i` is never offered for a Config row — none of them names a package.
+
+`--online` is CLI-only. The pane's pass stays offline so opening it never
+stalls on a slow link for a check nobody asked for.
 
 ## Where the pages come from
 

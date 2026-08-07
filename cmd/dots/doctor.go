@@ -19,6 +19,13 @@ const (
 	checkPending checkState = iota
 	checkOK
 	checkBad
+	// checkWarn is "this could not be answered", not "this is wrong". It
+	// exists so that being offline, or running a --copy install with no
+	// checkout to compare against, does not make `dots doctor` exit non-zero
+	// — a script that cannot tell "unreachable" from "broken" is a script
+	// that gets ignored. Anything missing, malformed, insecure or stale stays
+	// checkBad and keeps the non-zero exit.
+	checkWarn
 )
 
 // checkResult is one row of the doctor view: a tool (or directory) name, its
@@ -97,6 +104,18 @@ func pendingChecks() []checkResult {
 	return out
 }
 
+// configRepairable reports whether anything in the Config group is actually
+// broken — warnings do not count, because relinking cannot fix "you are
+// offline" or "this install has no checkout".
+func configRepairable(checks []checkResult) bool {
+	for _, c := range checks {
+		if c.state == checkBad && isConfigCheck(c.name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m doctorModel) Init() tea.Cmd {
 	return runDoctorChecks
 }
@@ -109,7 +128,11 @@ func runDoctorChecks() tea.Msg {
 	for i, n := range names {
 		out[i] = evalCheck(n)
 	}
-	return doctorMsg{results: out}
+	// Config health is appended, never interleaved, so the Config group stays
+	// contiguous under its heading. Offline only: the TUI's pass must not
+	// reach the network, or opening the pane would stall on a slow link for a
+	// check nobody asked for. `dots doctor --online` is the opt-in.
+	return doctorMsg{results: append(out, configChecks(findRepo())...)}
 }
 
 func evalCheck(name string) checkResult {
@@ -205,9 +228,38 @@ func (m doctorModel) update(msg tea.Msg) (doctorModel, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		case "c":
+			if m.loading {
+				return m, nil
+			}
+			spec, note, ok := m.buildConfigRepair()
+			m.note = note
+			if !ok {
+				return m, nil
+			}
+			return m, func() tea.Msg { return runActionMsg{spec: spec} }
 		}
 	}
 	return m, nil
+}
+
+// buildConfigRepair is the "c" key: re-run install.sh, which re-links the
+// configs and re-merges the managed block. Kept separate from "i" because the
+// two fix disjoint problems — "i" installs packages, this repairs what is
+// already installed — and folding them together would mean a missing brew
+// formula could block a config repair, or vice versa.
+func (m doctorModel) buildConfigRepair() (spec actionSpec, note string, ok bool) {
+	if !configRepairable(m.checks) {
+		return actionSpec{}, "", false
+	}
+	if m.repo == "" {
+		return actionSpec{}, "no checkout found — nothing to relink from", false
+	}
+	return actionSpec{
+		Title: "Relink configs and re-merge the managed block",
+		Argv:  []string{filepath.Join(m.repo, "install.sh")},
+		Dir:   m.repo,
+	}, "", true
 }
 
 // brewFormulas maps a check's binary name to the brew formula name, for the
@@ -232,7 +284,10 @@ func brewFormula(check string) string {
 func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 	var missing []string
 	for _, c := range m.checks {
-		if c.state == checkBad {
+		// Config rows are deliberately skipped: none of them names a package,
+		// so letting them through would put `brew install "managed block"` in
+		// the generated command. They have their own repair action.
+		if c.state == checkBad && !isConfigCheck(c.name) {
 			missing = append(missing, c.name)
 		}
 	}
@@ -314,7 +369,25 @@ func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 
 // checkGroup labels a run of related checks, so the list reads as three short
 // sections rather than one undifferentiated column of thirteen.
+// configCheckNames are the rows produced by configChecks. They are grouped
+// apart from the tool checks, and — more importantly — excluded from the "i"
+// key's install set: none of them is a package, and brew install "codex mode"
+// is not a thing. They are repaired by relinking instead.
+var configCheckNames = map[string]bool{
+	"codex config":  true,
+	"codex mode":    true,
+	"managed block": true,
+	"dots binary":   true,
+	"release":       true,
+}
+
+func isConfigCheck(name string) bool { return configCheckNames[name] }
+
 func checkGroup(name string) string {
+	switch {
+	case isConfigCheck(name):
+		return "Config"
+	}
 	switch name {
 	case "zsh", "git", "nvim", "tmux":
 		return "Core"
@@ -363,7 +436,7 @@ func (m doctorModel) view(spin string) string {
 		}
 		rows = append(rows, []string{
 			label,
-			stateDot(c.state == checkOK, c.state != checkPending) + " " + c.name,
+			checkDot(c.state) + " " + c.name,
 			where,
 		})
 	}

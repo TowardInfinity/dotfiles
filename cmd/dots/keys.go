@@ -65,10 +65,13 @@ func (m doctorModel) keys() []key.Binding {
 	// Only offer the install key when there is something to install; a key
 	// listed but inert is worse than one that is absent.
 	for _, c := range m.checks {
-		if c.state == checkBad {
+		if c.state == checkBad && !isConfigCheck(c.name) {
 			ks = append(ks, bind("i", "install missing"))
 			break
 		}
+	}
+	if configRepairable(m.checks) {
+		ks = append(ks, bind("c", "repair config"))
 	}
 	return ks
 }

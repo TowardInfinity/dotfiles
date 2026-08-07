@@ -154,6 +154,22 @@ func statRow(key, value string, keyW int) string {
 
 // stateDot encodes state in shape as well as colour, so it still reads on a
 // terminal with a limited palette or for anyone who cannot separate the hues.
+// checkDot renders a doctor row's marker for all four states. stateDot below
+// only knows ok/not-ok, which would paint a warning the same red as a failure
+// and undo the distinction the state exists to make.
+func checkDot(s checkState) string {
+	switch s {
+	case checkPending:
+		return styMuted.Render("○")
+	case checkOK:
+		return styOK.Render("●")
+	case checkWarn:
+		return styPending.Render("●")
+	default:
+		return styBad.Render("●")
+	}
+}
+
 func stateDot(ok, known bool) string {
 	switch {
 	case !known:

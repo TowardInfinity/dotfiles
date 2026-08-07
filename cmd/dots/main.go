@@ -64,7 +64,7 @@ func main() {
 			os.Exit(1)
 		}
 	case "doctor":
-		os.Exit(runDoctorCLI(findRepo()))
+		os.Exit(runDoctorCLI(findRepo(), args[1:]))
 	case "install":
 		os.Exit(runInstallCLI(args[1:]))
 	case "update":
@@ -106,7 +106,8 @@ func usage() {
   dots                 browse interactively
   dots <topic>         print one page
   dots search <term>   search every page
-  dots doctor          check the tools these configs call
+  dots doctor          check the tools these configs call, and the config itself
+                       (--online also compares against the latest release)
   dots install         relink configs; --deps also installs the tools
   dots update          pull the latest configs, then relink
   dots sync            push changes here, then update every other machine

@@ -62,6 +62,21 @@ sha_of() {
   else shasum -a 256 "$1" | awk '{print $1}'; fi
 }
 
+# Octal permission bits, GNU or BSD.
+#
+# Dispatch on the OS rather than chaining `stat -f ... || stat -c ...`. That
+# chain looks portable and is not: GNU's -f is --file-system, so
+# `stat -f '%Lp' file` reads the format string as a second FILENAME, prints
+# filesystem info for the real one, and exits non-zero — so the fallback runs
+# too and the caller gets a filesystem dump with the mode glued on the end.
+# It failed this suite in CI while the code under test was perfectly correct.
+file_mode() {
+  case "$(uname -s)" in
+    Darwin|FreeBSD) stat -f '%Lp' "$1" ;;
+    *)              stat -c '%a' "$1" ;;
+  esac
+}
+
 # Runs dots-resolve.sh against a fresh fixture set. Echoes stdout; stderr in
 # $WORK/err. $1 names the scenario.
 resolve() {
@@ -150,7 +165,7 @@ DST="$WORK/existing.toml"
 printf 'model = "old"\n[projects."/p"]\nk = 1\n' > "$DST"
 chmod 600 "$DST"
 ( umask 002; python3 "$REPO/bin/merge-toml-block.py" --src "$SRC" --dst "$DST" --begin "$BEGIN" --end "$END" >/dev/null )
-mode=$(stat -f '%Lp' "$DST" 2>/dev/null || stat -c '%a' "$DST")
+mode=$(file_mode "$DST")
 [ "$mode" = "600" ] && ok "an existing 0600 config stays 0600 under umask 002" \
                     || bad "an existing 0600 config stays 0600 under umask 002" "mode is $mode"
 
@@ -160,7 +175,7 @@ grep -q 'projects' "$DST" && ok "machine-written tables survive the merge" \
 # A file it creates is private, not umask-default.
 NEW="$WORK/new.toml"
 ( umask 002; python3 "$REPO/bin/merge-toml-block.py" --src "$SRC" --dst "$NEW" --begin "$BEGIN" --end "$END" >/dev/null )
-mode=$(stat -f '%Lp' "$NEW" 2>/dev/null || stat -c '%a' "$NEW")
+mode=$(file_mode "$NEW")
 [ "$mode" = "600" ] && ok "a newly created agent config is 0600" \
                     || bad "a newly created agent config is 0600" "mode is $mode"
 

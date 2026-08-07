@@ -37,7 +37,23 @@ end
 -- One workspace per project, kept in the cache dir. jdtls writes a full
 -- compiled index here — several hundred MB on a large codebase — so it must
 -- not land inside the repo.
-local workspace = vim.fn.stdpath "cache" .. "/jdtls/" .. vim.fn.fnamemodify(root, ":p:h:t")
+--
+-- Keyed on a hash of the resolved root, not its directory name. The name
+-- alone collides: ~/Codes/Projects/api and ~/Codes/Learning/api are different
+-- projects that would have shared one index, and jdtls does not notice — you
+-- get another project's classpath, stale diagnostics, and phantom symbols,
+-- with nothing on screen to say why. The name is kept as a prefix purely so
+-- the cache stays legible to a human deleting things by hand.
+--
+-- resolve() first, so a symlinked checkout and its real path agree.
+local canonical = vim.uv.fs_realpath(root) or vim.fn.fnamemodify(root, ":p")
+local digest = vim.fn.sha256(canonical):sub(1, 12)
+local workspace = string.format(
+  "%s/jdtls/%s-%s",
+  vim.fn.stdpath "cache",
+  vim.fn.fnamemodify(canonical, ":p:h:t"),
+  digest
+)
 
 -- Extension bundles: java-test and java-debug-adapter. These are what make
 -- "run this test" and "debug this method" possible; without them jdtls is

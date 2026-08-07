@@ -671,12 +671,6 @@ type sshHost struct {
 // patterns and anything without a HostName — those aren't reachable targets,
 // they're templates.
 func parseSSHConfig() []sshHost {
-	path := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-
 	var hosts []sshHost
 	var cur *sshHost
 	var skip bool
@@ -689,11 +683,10 @@ func parseSSHConfig() []sshHost {
 		skip = false
 	}
 
-	for _, raw := range strings.Split(string(data), "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+	// Shared with sshHosts() in sync.go via sshConfigLines, so the two cannot
+	// disagree about which machines exist — they already differed on which
+	// wildcard characters disqualify an alias.
+	for _, line := range sshConfigLines() {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

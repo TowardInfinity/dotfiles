@@ -47,8 +47,13 @@ return {
     -- exists only on `master`. Without this, a fresh clone on a new machine
     -- silently gets `main` and every parser fails with:
     --   module 'nvim-treesitter.configs' not found
-    -- lazy-lock.json records the branch too, but only `:Lazy restore` honours
-    -- it; `:Lazy sync` follows the remote default. This makes it deterministic.
+    -- lazy-lock.json records a `branch` field for this plugin, but nothing
+    -- ever acts on it — lazy only runs `git checkout <sha>`, so `:Lazy
+    -- restore` will not put a drifted clone back on master either. This pin
+    -- is the only thing that enforces the branch. (An earlier version of this
+    -- comment claimed restore honoured the lockfile; it does not, and acting
+    -- on that belief is what let base46 drift apart across two machines. The
+    -- note at the top of this file has it right.)
     branch = "master",
     -- NvChad's spec sets `build = ":TSUpdate | TSInstallAll"`, but TSInstallAll
     -- is not a command on the master branch we pin — every fresh install and

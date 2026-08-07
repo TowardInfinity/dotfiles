@@ -115,7 +115,17 @@ have_ssh_auth() {
       -T git@github.com 2>&1 | grep -q "successfully authenticated"
 }
 
-if have_ssh_auth; then
+if $DRY; then
+  # Do not probe. StrictHostKeyChecking=accept-new appends github.com to
+  # known_hosts on first contact, and a run that has just printed "nothing
+  # will change" must not write anything at all.
+  #
+  # Say that it was not checked rather than reporting the https fallback as
+  # though it were the answer — "auth: none" would be a finding we never
+  # actually made, and on a machine that does have a key it would be wrong.
+  AUTH=https
+  say "auth: not probed under --dry — a real run prefers ssh when a key works"
+elif have_ssh_auth; then
   AUTH=ssh
   say "auth: ssh — clone will be pushable"
 else
@@ -506,6 +516,14 @@ install_uv_tools() {
   say "Installing uv tools (jupyterlab)"
   uv tool install --quiet jupyterlab || warn "uv tool install jupyterlab failed"
 }
+
+if $LIGHT && [ "$OS" != linux ]; then
+  # install_light is apt-only. Unguarded on macOS it prompted for a sudo
+  # password, failed with "apt-get: command not found", and still wrote
+  # ~/.config/dots/profile — which makes `dots doctor` suppress genuinely
+  # missing tools from then on. Refuse up front instead.
+  die "--light is a Linux profile (it installs via apt); this machine is $OS. Use --deps, or no flag at all."
+fi
 
 if $LIGHT && $DEPS; then
   warn "--light and --deps both given; --light wins (it is the constrained one)"

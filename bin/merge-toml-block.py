@@ -26,6 +26,7 @@ Exits non-zero with a message on stderr if the merge cannot be done safely.
 import argparse
 import os
 import re
+import stat
 import sys
 
 # A table header at the start of a line: [foo] or [["a.b"]]. Indented headers
@@ -170,9 +171,24 @@ def main():
         return
 
     os.makedirs(os.path.dirname(a.dst) or ".", exist_ok=True)
+
+    # Carry the destination's mode across the replace. os.replace swaps in a
+    # file created at the process umask, which is NOT the mode of the file it
+    # replaces — on Ubuntu (umask 002) that silently turned a private
+    # ~/.codex/config.toml into 0664 on three servers. That file can hold MCP
+    # server credentials, so it must not be widened by a config merge.
+    #
+    # A brand-new file gets 0600 rather than the umask default: this writes
+    # agent configs, and private is the only sane default for one.
+    try:
+        mode = stat.S_IMODE(os.stat(a.dst).st_mode)
+    except FileNotFoundError:
+        mode = 0o600
+
     tmp = a.dst + ".dots-tmp"
     with open(tmp, "w") as fh:
         fh.write(text)
+    os.chmod(tmp, mode)  # before the swap, so the file is never briefly public
     os.replace(tmp, a.dst)  # atomic: never leave a half-written config
     print("merged")
 

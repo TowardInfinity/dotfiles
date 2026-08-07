@@ -94,19 +94,32 @@ sha256_of() {
   fi
 }
 
+# ── Is a cached binary still the file we verified? ────────────
+# $1 the binary, $2 the .sha256 recorded beside it when it was verified.
+# True only when the digest is present, readable, computable and equal — a
+# missing or unreadable digest is "cannot prove", which counts as no.
+#
+# Be clear about what this buys. It catches a truncated or corrupted file —
+# an interrupted write, a full disk, a bad sector — which would otherwise be
+# cached and reused forever, silently. It is NOT a security boundary:
+# anything able to rewrite the binary can rewrite the digest beside it, and
+# could just as easily replace the symlink in ~/.local/bin. Both live in the
+# user's own home directory. Corruption is the realistic failure here.
+#
+# Failing on a *missing* digest is safe because it only ever means "download
+# it again and verify properly", which is tier 2's job.
+cached_digest_ok() {
+  [ -f "$2" ] || return 1
+  want=$(cat "$2" 2>/dev/null) || return 1
+  [ -n "$want" ] || return 1
+  got=$(sha256_of "$1") || return 1
+  [ -n "$got" ] || return 1
+  [ "$want" = "$got" ]
+}
+
 # ── Tier 1: cached release binary ─────────────────────────────
 # `try_download` (tier 2) records the version it verified in
 # $CACHE_DIR/current-version and the digest it verified in dots-<v>.sha256.
-#
-# The digest is re-checked here rather than assuming the cache is still what
-# was written. Be clear about what that does and does not buy: it catches a
-# truncated or corrupted file — an interrupted write, a full disk, a bad
-# sector — which would otherwise be cached and reused forever, silently.
-#
-# It is NOT a security boundary. Anything able to rewrite the binary can
-# rewrite the digest beside it, and could just as easily replace the symlink
-# in ~/.local/bin. Both live in the user's own home directory. Corruption is
-# the realistic failure here, and it is the one this catches.
 try_cached() {
   [ -f "$CACHE_DIR/current-version" ] || return 1
   v=$(cat "$CACHE_DIR/current-version" 2>/dev/null) || return 1
@@ -115,14 +128,10 @@ try_cached() {
   [ -x "$bin" ] || return 1
 
   want_file="$CACHE_DIR/dots-$v.sha256"
-  if [ -f "$want_file" ]; then
-    want=$(cat "$want_file" 2>/dev/null)
-    got=$(sha256_of "$bin")
-    if [ -n "$want" ] && [ -n "$got" ] && [ "$want" != "$got" ]; then
-      log "dots-resolve: cached binary failed its checksum — discarding and refetching"
-      rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
-      return 1
-    fi
+  if ! cached_digest_ok "$bin" "$want_file"; then
+    log "dots-resolve: cached binary is unverified or corrupt — discarding and refetching"
+    rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
+    return 1
   fi
 
   printf '%s\n' "$bin"
@@ -156,13 +165,20 @@ try_download() {
 
   mkdir -p "$CACHE_DIR" 2>/dev/null || { log "dots-resolve: cannot create cache dir $CACHE_DIR — skipping"; return 1; }
 
-  # Already have this exact version cached and verified? Use it as-is instead
-  # of re-downloading — this is what makes tier 1 and tier 2 agree.
+  # Already have this exact version cached? Re-check its digest rather than
+  # trusting that an executable of the right name is the file we verified —
+  # the same check try_cached does, for the same reason (a truncated or
+  # corrupted cache would otherwise be reused forever). If it fails, fall
+  # through and re-download rather than returning a bad binary.
   dest="$CACHE_DIR/dots-$version"
-  if [ -x "$dest" ]; then
+  if [ -x "$dest" ] && cached_digest_ok "$dest" "$CACHE_DIR/dots-$version.sha256"; then
     printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
     printf '%s\n' "$dest"
     return 0
+  fi
+  if [ -x "$dest" ]; then
+    log "dots-resolve: cached $version failed its digest — refetching"
+    rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
   fi
 
   tmp="$CACHE_DIR/.dots-$version.$$"
@@ -173,25 +189,41 @@ try_download() {
     return 1
   fi
 
+  # Verification is mandatory: every path that cannot PROVE the download
+  # matches its published digest discards it and returns 1.
+  #
+  # This tier used to warn and run the binary anyway when checksums.txt was
+  # unreachable, when the asset was absent from it, or when no sha256 tool
+  # existed (that last case assigned actual="$expected", disguising a skip as
+  # a match). The README promised verification unconditionally, so the code
+  # has to mean it.
+  #
+  # Failing closed is cheap here precisely because this is tier 2 of four:
+  # returning 1 falls through to a source build, then to bin/dots, so the
+  # machine still ends up with a working `dots`. Refusing to run an
+  # unverified binary costs a slower tier, not a broken install.
   sums="$CACHE_DIR/.checksums-$version.$$"
-  if curl -fsSL --max-time "$TIMEOUT" -o "$sums" "$sums_url" 2>/dev/null; then
-    expected=$(awk -v f="$asset" '$2==f{print $1; exit}' "$sums" 2>/dev/null)
-    rm -f "$sums"
-    if [ -z "$expected" ]; then
-      log "dots-resolve: warning — $asset not listed in checksums.txt, skipping verification"
-    else
-      actual=$(sha256_of "$tmp") || {
-        log "dots-resolve: warning — no sha256sum/shasum available, skipping checksum verification"
-        actual="$expected"
-      }
-      if [ "$actual" != "$expected" ]; then
-        log "dots-resolve: checksum mismatch for $asset — discarding download"
-        rm -f "$tmp"
-        return 1
-      fi
-    fi
-  else
-    log "dots-resolve: warning — could not fetch checksums.txt, skipping verification"
+  if ! curl -fsSL --max-time "$TIMEOUT" -o "$sums" "$sums_url" 2>/dev/null; then
+    log "dots-resolve: could not fetch checksums.txt — refusing to run an unverified binary"
+    rm -f "$tmp" "$sums"
+    return 1
+  fi
+  expected=$(awk -v f="$asset" '$2==f{print $1; exit}' "$sums" 2>/dev/null)
+  rm -f "$sums"
+  if [ -z "$expected" ]; then
+    log "dots-resolve: $asset is not listed in checksums.txt — refusing to run it unverified"
+    rm -f "$tmp"
+    return 1
+  fi
+  if ! actual=$(sha256_of "$tmp"); then
+    log "dots-resolve: no sha256sum/shasum on this machine — cannot verify, refusing the download"
+    rm -f "$tmp"
+    return 1
+  fi
+  if [ "$actual" != "$expected" ]; then
+    log "dots-resolve: checksum mismatch for $asset — discarding download"
+    rm -f "$tmp"
+    return 1
   fi
 
   chmod +x "$tmp" 2>/dev/null || { log "dots-resolve: could not make $tmp executable"; rm -f "$tmp"; return 1; }

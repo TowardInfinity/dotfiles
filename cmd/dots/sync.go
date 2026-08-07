@@ -230,12 +230,6 @@ func commitsAhead(repo, branch string) int {
 // sshHosts reads Host aliases from ~/.ssh/config, skipping wildcards and any
 // entry with no HostName — the same rule the Machines pane uses.
 func sshHosts() []string {
-	f, err := os.Open(os.Getenv("HOME") + "/.ssh/config")
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-
 	var out []string
 	var pending []string
 	hasHostName := false
@@ -247,12 +241,9 @@ func sshHosts() []string {
 		pending, hasHostName = nil, false
 	}
 
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+	// Reads through sshConfigLines so Include'd files are seen. A host this
+	// misses is a machine sync silently never updates.
+	for _, line := range sshConfigLines() {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue

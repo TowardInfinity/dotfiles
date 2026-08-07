@@ -176,6 +176,17 @@ func findRepo() string {
 			dir = parent
 		}
 	}
+	// The path install.sh recorded. This is what covers a checkout in a
+	// non-default location: when `dots` is a release binary, the symlink above
+	// resolves into ~/.cache/dots/, which has no route back to the repo, and
+	// the two guesses below are both wrong. DOTFILES_DIR only helps while it
+	// is still exported, which is not true of any later shell.
+	//
+	// Deliberately consulted after the walk, not before: if the repo is moved,
+	// the walk is right and this file is stale, and every install rewrites it.
+	if v := recordedRepo(); v != "" && isRepo(v) {
+		return v
+	}
 	for _, c := range []string{
 		filepath.Join(os.Getenv("HOME"), "Codes", "Projects", "dotfiles"),
 		filepath.Join(os.Getenv("HOME"), "Codes", "dotfiles"),
@@ -185,6 +196,21 @@ func findRepo() string {
 		}
 	}
 	return ""
+}
+
+// recordedRepo reads the checkout path install.sh writes to
+// ~/.config/dots/repo. Missing or unreadable is normal, not an error — it
+// only means falling through to the defaults.
+func recordedRepo() string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	b, err := os.ReadFile(filepath.Join(base, "dots", "repo"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func isRepo(dir string) bool {

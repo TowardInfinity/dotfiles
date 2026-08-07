@@ -263,6 +263,22 @@ else
   fi
   printf '  \033[36mdots:\033[0m %s\n' "$(describe_dots_tier "$DOTS_TARGET")"
   link "$DOTS_TARGET" "$HOME/.local/bin/dots"
+
+  # Record where this checkout lives, so `dots` can find it later.
+  #
+  # It normally finds the repo by resolving its own symlink and walking up,
+  # which works when ~/.local/bin/dots points into the checkout. It does not
+  # when a release binary won: that symlink resolves into ~/.cache/dots/, and
+  # a repo at a non-default path (DOTFILES_DIR=...) is then unreachable —
+  # `dots update`, `sync`, `path` and `install` all report "no checkout
+  # found" in any shell where DOTFILES_DIR is no longer exported.
+  #
+  # Rewritten on every install, so moving the repo self-heals. --copy is
+  # excluded on purpose: it deliberately keeps no checkout to point at.
+  if ! $COPY; then
+    mkdir -p "$HOME/.config/dots" 2>/dev/null || true
+    printf '%s\n' "$REPO" > "$HOME/.config/dots/repo" 2>/dev/null || true
+  fi
 fi
 
 # --copy keeps no repo, so `dots` has nothing to read its docs out of — its

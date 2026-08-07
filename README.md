@@ -58,7 +58,10 @@ available, falling through tiers on any failure:
 2. **download a release binary** for this OS/arch from the repo's
    [GitHub Releases](https://github.com/TowardInfinity/dotfiles/releases),
    verifying its `sha256` against the published `checksums.txt` before it's
-   trusted or cached
+   trusted or cached. Verification is mandatory: if `checksums.txt` cannot be
+   fetched, does not list this asset, or no `sha256sum`/`shasum` exists to
+   check it with, the download is discarded and the next tier runs. Refusing
+   costs a slower tier, never a broken install.
 3. **`go build` from source** into `bin/dots-bin`, if a Go toolchain is on
    the machine
 4. **`bin/dots`** — the bash implementation, which needs nothing and always
@@ -139,7 +142,10 @@ sh -c "$(curl -fsSL https://toin.in/install)" -- --copy
 ```
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default
-(`~/Codes/Projects/dotfiles` on macOS, `~/Codes/dotfiles` on Linux).
+(`~/Codes/Projects/dotfiles` on macOS, `~/Codes/dotfiles` on Linux). The
+installer records the path in `~/.config/dots/repo`, so `dots update`, `sync`
+and `path` still find a non-default checkout in a later shell where
+`DOTFILES_DIR` is no longer exported.
 
 **Always safe to re-run.** Existing files are moved to
 `<path>.backup.<timestamp>` rather than overwritten, and links already pointing

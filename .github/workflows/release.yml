@@ -21,11 +21,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # Actions are pinned to commit SHAs, not tags. A tag is a mutable
+      # pointer the action's owner can move at any time, and whatever this
+      # job produces is downloaded and executed automatically by every
+      # machine running install.sh — so "v4" silently becoming different
+      # code is a supply-chain path straight onto four boxes. The version
+      # each SHA corresponds to is in the trailing comment; bump both
+      # together, deliberately.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           # Read from go.mod rather than hardcoding a version here, so bumping
           # the toolchain in one place is enough.
@@ -33,6 +40,12 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      # The shell and Python halves are not covered by `go test`, and both have
+      # shipped a bug to a real machine — an unverified binary path and a
+      # config file whose mode got widened. Runs hermetically (curl is stubbed).
+      - name: Self-test (shell, Python)
+        run: ./bin/selftest.sh -v
 
       - name: Determine version
         id: version
@@ -72,7 +85,7 @@ jobs:
       # having proven the build and tests are green.
       - name: Release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist/dots_darwin_arm64

@@ -65,3 +65,9 @@ with `DOTS_ALLOW_LOW_MEM_BUILD=1` if you disagree.
 
 `--light` and `--deps` together is not an error — `--light` wins, since it is
 the constrained one.
+
+**It is Linux-only, and says so.** The package list is apt, so on macOS the
+flag is rejected up front. It used to be accepted: `sudo apt-get` prompted for
+a password, failed with *command not found*, and the run still recorded a
+`light` profile in `~/.config/dots/profile` — which then made `dots doctor`
+quietly stop reporting tools that really were missing.

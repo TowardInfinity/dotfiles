@@ -5,6 +5,16 @@ There is no official per-model subscription-quota multiplier, so this uses API
 list price as a *proxy* for how much of the allowance each model eats. Treat the
 ratios as directional; the turn counts and context sizes are exact.
 
+Judge the default model by SESSIONS STARTED, not by turns. `"model": "sonnet"`
+only sets what a new session opens on; it cannot retarget one already running,
+so a single long Opus session can read as "100% Opus" while every fresh session
+is correctly starting on Sonnet. Both views are printed; the turn-weighted one
+still shows what the allowance actually paid for.
+
+Validation needs fresh sessions, not elapsed time. Sessions that began before
+POLICY_TS are excluded, and the report says so rather than quietly averaging
+them in.
+
 The context percentiles are the point of this script. Output tokens are a small
 part of the bill — cache reads dominate, because every turn re-reads the whole
 window. A p90 of 800k means most turns are paying ~80k input-equivalent before
@@ -31,6 +41,20 @@ PRICE = {
 }
 DEFAULT_PRICE = (2, 10)
 
+# When the Sonnet-default policy landed: the mtime of the settings.json symlink
+# on 2026-08-05. Sessions that began before this cannot say anything about
+# whether the policy works, so they are reported but excluded from validation.
+#
+# Hardcoded rather than read from the file's mtime, because install.sh re-links
+# settings.json on every `dots update` — the mtime would reset to "just now"
+# and silently exclude everything.
+POLICY_TS = "2026-08-05T01:10"
+
+# A date is the wrong trigger for validation; fresh sessions are. Elapsed days
+# produce no signal on their own — one long pre-policy session can run for a
+# week and contribute nothing but its own turns.
+MIN_FRESH_SESSIONS = 10
+
 # Cache writes bill above the input rate; cache reads far below it.
 CACHE_WRITE_MULT = 1.25
 CACHE_READ_MULT = 0.10
@@ -42,6 +66,9 @@ def main():
     ap.add_argument("--days", type=int, default=0,
                     help="only count turns from the last N days (0 = all)")
     ap.add_argument("--root", default=os.path.expanduser("~/.claude/projects"))
+    ap.add_argument("--policy", default=POLICY_TS, metavar="TS",
+                    help="ISO timestamp the policy landed; sessions that began "
+                         f"earlier are excluded from validation (default {POLICY_TS})")
     args = ap.parse_args()
 
     cutoff = ""
@@ -52,6 +79,9 @@ def main():
     by = collections.defaultdict(collections.Counter)
     ctx = collections.defaultdict(list)
     daily = collections.defaultdict(collections.Counter)
+    # One transcript file is one session.
+    sessions = collections.defaultdict(
+        lambda: {"first_ts": None, "first_model": None, "models": set()})
 
     for path in glob.glob(os.path.join(args.root, "*", "*.jsonl")):
         with open(path, errors="replace") as fh:
@@ -73,6 +103,22 @@ def main():
                     continue
 
                 model = msg.get("model") or rec.get("model") or "?"
+
+                # Which model a session STARTED on is the only thing
+                # `"model": "sonnet"` actually governs — it sets the default for
+                # a new session and cannot retarget one already in flight. So
+                # counting raw turns answers the wrong question: one long Opus
+                # session outvotes a dozen fresh Sonnet ones. Recorded before
+                # the cutoff check, because deciding whether a session BEGAN
+                # inside the window needs its true first turn, not the first
+                # one that survived filtering.
+                ts = rec.get("timestamp") or ""
+                s = sessions[path]
+                if s["first_ts"] is None or ts < s["first_ts"]:
+                    s["first_ts"] = ts
+                    s["first_model"] = model
+                s["models"].add(model)
+
                 inp = usage.get("input_tokens") or 0
                 out = usage.get("output_tokens") or 0
                 cw = usage.get("cache_creation_input_tokens") or 0
@@ -112,6 +158,29 @@ def main():
         print(f"  {model:<26} p50={vals[n // 2] / 1000:>7.0f}k"
               f"  p90={vals[int(n * .9)] / 1000:>7.0f}k"
               f"  max={vals[-1] / 1000:>7.0f}k")
+
+    in_window = [s for s in sessions.values()
+                 if s["first_ts"] and s["first_ts"][:10] >= cutoff]
+    post = [s for s in in_window if s["first_ts"] >= args.policy]
+    pre = len(in_window) - len(post)
+
+    print(f"\nsessions STARTED in window ({len(in_window)}) — "
+          "the real test of the default model:")
+    if pre:
+        print(f"  {pre} began before the policy ({args.policy}) "
+              "— EXCLUDED from validation")
+    if post:
+        started = collections.Counter(s["first_model"] for s in post)
+        for model, n in started.most_common():
+            print(f"  {model:<26}{n:>5}  {n / len(post) * 100:>5.0f}%")
+        switched = sum(1 for s in post if len(s["models"]) > 1)
+        if switched:
+            print(f"  ({switched} later switched model mid-session — "
+                  "a deliberate /model escalation looks like this)")
+    if len(post) < MIN_FRESH_SESSIONS:
+        print(f"  NOT YET VALID: {len(post)}/{MIN_FRESH_SESSIONS} "
+              "post-policy sessions. Waiting longer does not help — "
+              "only starting new sessions does.")
 
     print("\nlast 14 days, output tokens by model:")
     for day in sorted(daily)[-14:]:

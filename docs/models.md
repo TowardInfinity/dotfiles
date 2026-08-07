@@ -272,4 +272,34 @@ context to a cold tool is the expensive part; a spec file makes it nearly free.
 
 `bin/claude-usage.py` parses `~/.claude/projects/*.jsonl` and reports turns,
 tokens and a list-price cost proxy per model, plus context-size percentiles.
-Run it after a week to confirm Fable is at zero and p90 context has come down.
+
+### When the numbers actually mean something
+
+**The trigger is at least 10 sessions started after the policy timestamp
+(`2026-08-05T01:10`) — not a date on the calendar.** Elapsed days produce no
+signal by themselves. The first attempt to measure this ran seven days out and
+was worthless: not one new session had been started in that time, so the whole
+window was a single pre-policy session still running. The script now refuses to
+validate below the threshold and says why.
+
+Sessions that began before the policy landed are reported but **excluded from
+validation** — they cannot say anything about a default they never saw.
+
+Read both views; they answer different questions:
+
+| View | Question it answers |
+|---|---|
+| **turn-weighted** (top table) | what the allowance actually paid for |
+| **sessions started** | whether the configured default is taking effect |
+
+They diverge sharply, and that is not a bug. `"model": "sonnet"` sets what a
+*new* session opens on and cannot retarget one already running, so a single
+long escalated session shows as ~98% Opus by turns while every fresh session
+starts on Sonnet. Judging the default by turns alone reads that as a failure.
+
+Success: **Fable at zero**, Opus under ~15% of *session starts*, p90 context
+down from ~800k toward ~300k. Note the context percentiles lag — they include
+old turns until the pre-policy sessions age out of the window.
+
+The `~$ proxy` column is API list price standing in for quota weight. It is
+directional only; the turn counts and context sizes are exact.

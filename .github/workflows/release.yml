@@ -7,6 +7,23 @@ name: Release
 # tier 2). workflow_dispatch exists so the build+test can be checked by hand
 # without cutting a tag — it does NOT publish a release (no tag to attach one
 # to), it only validates that every target still builds and tests pass.
+#
+# Two jobs, deliberately:
+#
+#   test     runs on Linux AND macOS, because half of what this repo ships is
+#            shell that behaves differently on the two. `stat -f` is
+#            --file-system on GNU and the format flag on BSD, and the version
+#            of bin/selftest.sh that only ever ran on Linux shipped a broken
+#            portability chain to a tagged release. macOS-only checks (the
+#            --light guard) print "skip" on Linux and are otherwise never
+#            exercised at all.
+#   release  stays Linux-only and single. Cross-compilation already produces
+#            all four targets from one runner, so a matrix here would gain
+#            nothing and would race two publishes against the same tag.
+#
+# A macOS failure blocks publication. That is the point of the split, and it is
+# not free: v0.1.9 would have been stopped by it. Stopping it would have been
+# correct.
 
 on:
   push:
@@ -18,8 +35,15 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      # Report both platforms even when one fails. With fail-fast a Linux
+      # error cancels the macOS leg, which hides exactly the divergence this
+      # job exists to catch.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       # Actions are pinned to commit SHAs, not tags. A tag is a mutable
       # pointer the action's owner can move at any time, and whatever this
@@ -46,6 +70,18 @@ jobs:
       # config file whose mode got widened. Runs hermetically (curl is stubbed).
       - name: Self-test (shell, Python)
         run: ./bin/selftest.sh -v
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
 
       - name: Determine version
         id: version

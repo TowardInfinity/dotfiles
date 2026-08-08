@@ -126,10 +126,15 @@ the configuration drifted?
 | `codex mode` | it is anything other than `0600` |
 | `managed block` | the markers are missing, duplicated or out of order, or the block no longer matches `common/codex/config.policy.toml` |
 | `dots binary` | never — it reports the version and where the binary came from |
+| `signing key` | the key this binary trusts differs from the one in the checkout, or the checkout has none |
 | `release` | `--online` only: the installed version is behind Latest |
 
 The mode row exists because that file went `0664` on three servers and nothing
 errored. It can hold MCP credentials, so wider than owner-only is a finding.
+
+The signing-key row prints a fingerprint you can compare by hand. When the
+binary and the checkout disagree, `dots update` is about to start refusing
+releases — see `dots signing`.
 
 ### Three states, and why warnings do not fail
 

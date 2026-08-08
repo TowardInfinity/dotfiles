@@ -119,10 +119,20 @@ jobs:
 
       # Only push a release for an actual tag — workflow_dispatch stops here,
       # having proven the build and tests are green.
-      - name: Release
+      #
+      # DRAFT, deliberately. The signing key is offline (encrypted, on one
+      # machine), so this job cannot sign the checksums.txt it just produced —
+      # and a release that is Latest before it is signed is a window in which
+      # the fleet installs unsigned bytes. Drafts are excluded from
+      # /releases/latest/download: that path always redirects into the newest
+      # PUBLISHED release, and a draft's own asset URL is 404 anonymously
+      # (verified against this repo, not assumed). So nothing reachable exists
+      # until `./bin/sign-release.sh <tag>` signs and publishes it.
+      - name: Release (draft — sign it with bin/sign-release.sh)
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          draft: true
           files: |
             dist/dots_darwin_arm64
             dist/dots_darwin_amd64

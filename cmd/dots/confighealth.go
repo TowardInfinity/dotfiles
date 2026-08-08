@@ -17,6 +17,10 @@ package main
 // to know which one to believe.
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -26,6 +30,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	dotfiles "github.com/TowardInfinity/dotfiles"
 )
 
 // The markers install.sh splices around the managed block. These are duplicated
@@ -95,7 +100,91 @@ func configChecks(repo string) []checkResult {
 
 	out = append(out, codexModeCheck(path))
 	out = append(out, managedBlockCheck(string(data), repo))
-	return append(out, binaryCheck())
+	out = append(out, binaryCheck())
+	return append(out, signingKeyCheck(repo))
+}
+
+// signingKeyCheck reports which release-signing key this binary trusts.
+//
+// It exists to make the root of trust visible. bin/dots-resolve.sh refuses a
+// release whose checksums.txt does not verify against keys/release.pub, and the
+// failure that check produces — "no binary" — looks identical whether the key
+// is wrong, missing, or the release genuinely was not signed. A fingerprint you
+// can read and compare turns that into a one-line answer.
+//
+// The embedded copy and the checkout's copy are compared, not just reported.
+// They can differ: the binary is built from whatever commit was tagged, while
+// the checkout may have pulled a rotation since. That is precisely the state
+// where `dots update` starts refusing releases, and it is worth naming before
+// it strands the machine.
+func signingKeyCheck(repo string) checkResult {
+	const name = "signing key"
+
+	embedded, embErr := dotfiles.KeysFS.ReadFile("keys/release.pub")
+	if embErr != nil {
+		// Not a failure. Until the offline key exists, every release is
+		// unsigned and the resolver's warn mode accepts it by design — saying
+		// "bad" here would mean doctor is red on a correctly working machine.
+		return checkResult{
+			name:  name,
+			state: checkWarn,
+			path:  "none committed — releases are unsigned",
+		}
+	}
+
+	fp, err := keyFingerprint(embedded)
+	if err != nil {
+		return checkResult{name: name, state: checkBad, path: "unreadable: " + err.Error()}
+	}
+
+	if repo != "" {
+		onDisk, err := os.ReadFile(filepath.Join(repo, "keys", "release.pub"))
+		switch {
+		case err != nil:
+			// The checkout has no key but this binary does — a downgrade of
+			// the checkout, or a key deleted by hand. The resolver would fall
+			// back to treating every release as unsigned.
+			return checkResult{
+				name:  name,
+				state: checkBad,
+				path:  fp + " embedded, but the checkout has none",
+			}
+		case !bytes.Equal(normalizeKey(onDisk), normalizeKey(embedded)):
+			diskFP, ferr := keyFingerprint(onDisk)
+			if ferr != nil {
+				diskFP = "unreadable"
+			}
+			return checkResult{
+				name:  name,
+				state: checkBad,
+				path:  "binary trusts " + fp + ", checkout has " + diskFP + " — run dots update",
+			}
+		}
+	}
+
+	return checkResult{name: name, state: checkOK, path: fp}
+}
+
+// keyFingerprint renders a PEM public key the way ssh-keygen -l does: SHA-256
+// of the DER body, base64, unpadded. Chosen because it is the format you can
+// already read at a glance, and because it is reproducible from the shell —
+//
+//	openssl pkey -pubin -in keys/release.pub -outform DER | openssl dgst -sha256 -binary | base64
+//
+// so the number doctor prints can be checked without trusting doctor.
+func keyFingerprint(pemBytes []byte) (string, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return "", fmt.Errorf("not PEM")
+	}
+	sum := sha256.Sum256(block.Bytes)
+	return "SHA256:" + strings.TrimRight(base64.StdEncoding.EncodeToString(sum[:]), "="), nil
+}
+
+// normalizeKey strips whitespace so a trailing newline added by an editor is
+// not reported as a rotated key.
+func normalizeKey(b []byte) []byte {
+	return bytes.Join(bytes.Fields(b), nil)
 }
 
 func codexModeCheck(path string) checkResult {

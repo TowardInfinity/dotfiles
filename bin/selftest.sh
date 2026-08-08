@@ -153,6 +153,141 @@ else
   bad "a corrupted cached binary is re-fetched" "setup failed"
 fi
 
+# ── resolver: release signatures ──────────────────────────────
+# The checksum tests above prove the download is intact. They cannot prove who
+# published it: checksums.txt ships from the same release as the binary, so
+# whatever can replace one can replace the other. These tests cover the part
+# that closes that — a detached Ed25519 signature made by a key that never
+# touches GitHub.
+#
+# Hermetic: an ephemeral keypair is generated here, so a failure means the
+# resolver is wrong, never that the real signing key rotated.
+group "dots-resolve: release signatures"
+
+sig_supported() {
+  command -v openssl >/dev/null 2>&1 || return 1
+  openssl genpkey -algorithm ed25519 -out "$WORK/sigkey.pem" 2>/dev/null || return 1
+  openssl pkey -in "$WORK/sigkey.pem" -pubout -out "$WORK/sigkey.pub" 2>/dev/null || return 1
+  return 0
+}
+
+# Same fixture set as above, plus a signature and a mode. Echoes stdout;
+# stderr in $WORK/err.
+resolve_sig() { # $1 = warn|require
+  rm -rf "$WORK/cache"
+  env PATH="$WORK/bin:$PATH" \
+      XDG_CACHE_HOME="$WORK/cache" \
+      FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" \
+      DOTS_SIGNATURE_MODE="$1" \
+      DOTS_FORCE_FETCH=1 DOTS_NO_BUILD=1 \
+      sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err"
+}
+
+accepted() { # $1 label, $2 what resolve returned
+  case "$2" in
+    "$WORK/cache"/*) ok "$1" ;;
+    *) bad "$1" "not accepted; stderr: $(tail -1 "$WORK/err")" ;;
+  esac
+}
+
+if sig_supported; then
+  # Restore the good fixture set (test 5 above left the cache tampered).
+  printf '#!/bin/sh\necho fake\n' > "$FIXTURES/$ASSET"
+  GOOD_SHA="$(sha_of "$FIXTURES/$ASSET")"
+  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  sign_fixture() {
+    openssl pkeyutl -sign -inkey "$WORK/sigkey.pem" -rawin \
+      -in "$FIXTURES/checksums.txt" -out "$FIXTURES/checksums.txt.sig" 2>/dev/null
+  }
+  sign_fixture
+
+  # 1/2. A correct signature is accepted, and require mode must not be
+  #      stricter than the signature actually being valid.
+  accepted "a validly signed release is accepted (warn)"    "$(resolve_sig warn)"
+  accepted "a validly signed release is accepted (require)" "$(resolve_sig require)"
+
+  # 3. Unsigned: the migration release has to stay installable, so warn mode
+  #    proceeds — but it must say so rather than passing silently.
+  rm -f "$FIXTURES/checksums.txt.sig"
+  got="$(resolve_sig warn)"
+  if grep -q "unsigned" "$WORK/err"; then
+    accepted "an unsigned release is accepted with a warning (warn)" "$got"
+  else
+    bad "an unsigned release is accepted with a warning (warn)" \
+        "no warning logged; stderr: $(tail -1 "$WORK/err")"
+  fi
+
+  # 4. …and require mode refuses it. This is the flip that makes signing
+  #    mandatory, and it is the only difference between the two modes.
+  refused "an unsigned release is refused (require)" "refusing" "$(resolve_sig require)"
+
+  # 5. A signature over different bytes. This is the attack the whole scheme
+  #    exists for: a replaced checksums.txt carrying the old, real signature.
+  sign_fixture
+  printf '%s  %s\n' \
+    "1111111111111111111111111111111111111111111111111111111111111111" "$ASSET" \
+    > "$FIXTURES/checksums.txt"
+  refused "a signature over different bytes is refused (warn)" "FAILS" "$(resolve_sig warn)"
+  refused "a signature over different bytes is refused (require)" "FAILS" "$(resolve_sig require)"
+
+  # 6. Malformed — not 64 bytes, not a signature at all. Must fail closed
+  #    (proven wrong), not open as "could not ask".
+  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  printf 'not a signature' > "$FIXTURES/checksums.txt.sig"
+  refused "a malformed signature is refused (warn)" "FAILS" "$(resolve_sig warn)"
+
+  # 7. Right length, wrong content — a bit-flip, which is what a truncated or
+  #    tampered upload looks like.
+  #    Flip a bit rather than writing a random byte: /dev/urandom can hand back
+  #    the byte that is already there, and a test that passes 255 times in 256
+  #    is worse than no test.
+  sign_fixture
+  python3 - "$FIXTURES/checksums.txt.sig" <<'PY'
+import sys
+p = sys.argv[1]
+b = bytearray(open(p, 'rb').read())
+b[0] ^= 0x01
+open(p, 'wb').write(bytes(b))
+PY
+  refused "an altered signature is refused (warn)" "FAILS" "$(resolve_sig warn)"
+
+  # 8. A wrong-but-valid key: signed correctly, by someone else. Verifying
+  #    against the committed key is the only thing that catches this.
+  openssl genpkey -algorithm ed25519 -out "$WORK/other.pem" 2>/dev/null
+  openssl pkeyutl -sign -inkey "$WORK/other.pem" -rawin \
+    -in "$FIXTURES/checksums.txt" -out "$FIXTURES/checksums.txt.sig" 2>/dev/null
+  refused "a signature from an unknown key is refused" "FAILS" "$(resolve_sig warn)"
+
+  rm -f "$FIXTURES/checksums.txt.sig"
+else
+  $VERBOSE && printf '  \033[90mskip\033[0m  release signatures (no openssl with ed25519)\n'
+fi
+
+# ── sign-release.sh: refuses before it publishes ──────────────
+# Everything this script guards against is unrecoverable once it has run:
+# publishing is not undoable, and a release signed with the wrong key bricks
+# `dots update` on four machines at once. So the checks it makes before
+# touching the network are worth testing without the network.
+group "sign-release.sh: preflight refusals"
+
+bash -n "$REPO/bin/sign-release.sh" 2>/dev/null \
+  && ok "sign-release.sh parses" || bad "sign-release.sh parses"
+
+out=$(bash "$REPO/bin/sign-release.sh" 2>&1); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qi usage \
+  && ok "a missing tag is rejected" \
+  || bad "a missing tag is rejected" "rc=$rc: $out"
+
+# With no public key committed there is nothing to verify against, so signing
+# would be unfalsifiable. It must stop before the passphrase prompt, not after.
+out=$(env HOME="$WORK" DOTS_SIGNING_KEY="$WORK/nope.pem" \
+      bash "$REPO/bin/sign-release.sh" v0.0.0-selftest 2>&1); rc=$?
+[ "$rc" -ne 0 ] \
+  && ok "it refuses when a key is missing" \
+  || bad "it refuses when a key is missing" "it continued: $out"
+
 # ── merge-toml-block.py: file mode ────────────────────────────
 group "merge-toml-block.py: does not widen the file it rewrites"
 

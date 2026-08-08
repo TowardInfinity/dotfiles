@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	dotfiles "github.com/TowardInfinity/dotfiles"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -475,5 +477,83 @@ func TestDoctorViewShowsConfigGroupAndWarnings(t *testing.T) {
 	}
 	if checkDot(checkWarn) == checkDot(checkOK) {
 		t.Error("warnings and passes render identically")
+	}
+}
+
+// ── release signing key ───────────────────────────────────────
+
+// A throwaway key, generated for this test and never used to sign anything.
+// The expected fingerprint below was computed independently by openssl:
+//
+//	openssl pkey -pubin -in k.pub -outform DER | openssl dgst -sha256 -binary | base64
+//
+// so this pins doctor's output to the shell command the docs tell you to
+// cross-check it with, rather than to itself.
+const testPubKey = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAVg8eD4vTJqJk9U9Ld+rGpbIvHVsRZTqVVVGEXEDn9AQ=
+-----END PUBLIC KEY-----
+`
+
+const testPubKeyFP = "SHA256:91D+dAZMScvq41HuImX/2M1KZNjA/rJdTwsD+IL3KK8"
+
+func TestKeyFingerprintMatchesOpenSSL(t *testing.T) {
+	got, err := keyFingerprint([]byte(testPubKey))
+	if err != nil {
+		t.Fatalf("keyFingerprint: %v", err)
+	}
+	if got != testPubKeyFP {
+		t.Errorf("fingerprint = %q, want %q (openssl disagrees with doctor)", got, testPubKeyFP)
+	}
+}
+
+func TestKeyFingerprintRejectsNonPEM(t *testing.T) {
+	for _, in := range []string{"", "not a key", "-----BEGIN PUBLIC KEY-----\n"} {
+		if _, err := keyFingerprint([]byte(in)); err == nil {
+			t.Errorf("keyFingerprint(%q) succeeded; a malformed key must not be reported as trusted", in)
+		}
+	}
+}
+
+// A trailing newline is not a key rotation. Without this, saving the file in an
+// editor would make doctor claim the checkout and the binary disagree.
+func TestNormalizeKeyIgnoresWhitespace(t *testing.T) {
+	a := normalizeKey([]byte(testPubKey))
+	b := normalizeKey([]byte(strings.TrimSpace(testPubKey) + "\n\n"))
+	if !bytes.Equal(a, b) {
+		t.Error("whitespace changed the normalized key")
+	}
+}
+
+// Until the offline key exists every release is unsigned, and the resolver
+// accepts that by design in warn mode. Doctor must say so without going red on
+// a machine that is working exactly as intended.
+func TestSigningKeyCheckWarnsWhenNoKeyCommitted(t *testing.T) {
+	got := signingKeyCheck("")
+	if got.name != "signing key" {
+		t.Fatalf("name = %q", got.name)
+	}
+	if _, err := dotfiles.KeysFS.ReadFile("keys/release.pub"); err != nil {
+		if got.state != checkWarn {
+			t.Errorf("state = %v, want checkWarn while no key is committed", got.state)
+		}
+		if !strings.Contains(got.path, "unsigned") {
+			t.Errorf("path = %q, want it to say releases are unsigned", got.path)
+		}
+		return
+	}
+	// The key has landed: it must now parse and report a fingerprint.
+	if got.state != checkOK || !strings.HasPrefix(got.path, "SHA256:") {
+		t.Errorf("with a key committed, got state=%v path=%q", got.state, got.path)
+	}
+}
+
+// The signing key belongs to the Config group and must never reach the "i"
+// install key — brew install "signing key" is not a thing.
+func TestSigningKeyIsAConfigCheck(t *testing.T) {
+	if !isConfigCheck("signing key") {
+		t.Error(`"signing key" is not grouped as a config check`)
+	}
+	if g := checkGroup("signing key"); g != "Config" {
+		t.Errorf("group = %q, want Config", g)
 	}
 }

@@ -10,3 +10,14 @@ import "embed"
 
 //go:embed docs/*.md
 var DocsFS embed.FS
+
+// KeysFS carries the release-signing public key so `dots doctor` can report
+// which key this binary trusts without needing a checkout.
+//
+// The directory is embedded rather than keys/release.pub itself: go:embed
+// rejects a pattern matching no files, and the key is generated offline after
+// this code. Embedding the directory compiles both before and after it lands.
+// keys/README.md explains the rest.
+//
+//go:embed keys
+var KeysFS embed.FS

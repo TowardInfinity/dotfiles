@@ -379,6 +379,7 @@ var configCheckNames = map[string]bool{
 	"managed block": true,
 	"dots binary":   true,
 	"release":       true,
+	"signing key":   true,
 }
 
 func isConfigCheck(name string) bool { return configCheckNames[name] }

@@ -64,6 +64,54 @@ fi
 
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 
+# ── Release signatures ────────────────────────────────────────
+# checksums.txt is fetched from the SAME release as the binary, so verifying
+# one against the other only proves the download was not corrupted in transit
+# — it proves nothing about who published it. Anything able to replace the
+# binary can replace its checksum line in the same breath.
+#
+# The detached Ed25519 signature closes that: the private key never touches
+# GitHub (it lives encrypted on one machine), so compromising the repo or a
+# token yields a release the fleet will not execute. The public key is
+# committed here, which makes this checkout the root of trust rather than the
+# release page.
+#
+# openssl is the verifier because it is the one tool present on every machine
+# here — the low-memory boxes have no gh, no cosign and no minisign. Verified
+# working on OpenSSL 3.0.2 (Ubuntu) and 3.6.3 (macOS).
+#
+# DOTS_SIGNATURE_MODE:
+#   warn     verify when a signature is present, allow unsigned (the migration
+#            release must be installable by resolvers that predate signing)
+#   require  a valid signature or no binary
+PUBKEY="${DOTS_RELEASE_PUBKEY:-$REPO/keys/release.pub}"
+SIGNATURE_MODE="${DOTS_SIGNATURE_MODE:-warn}"
+
+# verify_signature <file> <sig-url>. Returns 0 when the file is proven, 1 when
+# it is proven WRONG, and 2 when the question could not be asked (no signature
+# published, no openssl, no public key). Callers decide what 2 means; that is
+# the whole difference between warn and require mode.
+verify_signature() {
+  _f="$1"; _sig_url="$2"
+  [ -f "$PUBKEY" ] || { log "dots-resolve: no public key at $PUBKEY"; return 2; }
+  command -v openssl >/dev/null 2>&1 || { log "dots-resolve: openssl not found"; return 2; }
+
+  _sig="$CACHE_DIR/.sig.$$"
+  if ! curl -fsSL --max-time "$TIMEOUT" -o "$_sig" "$_sig_url" 2>/dev/null; then
+    rm -f "$_sig"
+    return 2  # unsigned release, not a bad one
+  fi
+
+  # -rawin is required for Ed25519: it signs the message itself, not a digest.
+  if openssl pkeyutl -verify -pubin -inkey "$PUBKEY" \
+       -rawin -in "$_f" -sigfile "$_sig" >/dev/null 2>&1; then
+    rm -f "$_sig"
+    return 0
+  fi
+  rm -f "$_sig"
+  return 1
+}
+
 # ── uname -> Go names ─────────────────────────────────────────
 go_os() {
   case "$(uname -s)" in
@@ -208,6 +256,28 @@ try_download() {
     rm -f "$tmp" "$sums"
     return 1
   fi
+  # Signature first: checksums.txt is only worth reading once it is known to
+  # be the file that was signed. Verifying the digest against an unverified
+  # checksums.txt would be checking the download against the attacker's own
+  # arithmetic.
+  verify_signature "$sums" "$RELEASE_BASE/checksums.txt.sig"
+  case $? in
+    0) : ;;  # proven
+    1)
+      log "dots-resolve: checksums.txt FAILS its signature — discarding download"
+      rm -f "$tmp" "$sums"
+      return 1
+      ;;
+    2)
+      if [ "$SIGNATURE_MODE" = "require" ]; then
+        log "dots-resolve: no verifiable signature for checksums.txt — refusing (DOTS_SIGNATURE_MODE=require)"
+        rm -f "$tmp" "$sums"
+        return 1
+      fi
+      log "dots-resolve: release is unsigned — continuing on checksum alone"
+      ;;
+  esac
+
   expected=$(awk -v f="$asset" '$2==f{print $1; exit}' "$sums" 2>/dev/null)
   rm -f "$sums"
   if [ -z "$expected" ]; then

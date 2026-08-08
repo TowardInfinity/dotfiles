@@ -39,29 +39,41 @@ execution, which is the cheapest way to get Opus-quality design decisions.
 
 ## The advisor
 
-`advisor()` sends the whole transcript to a second, stronger model for a review
-before you commit to an approach or declare a task done. It is not a per-turn
-cost — it only runs when the agent calls it — so pairing a cheap main model
-with a dear advisor is the opposite of running the whole session at the dear
-tier: occasional 2.5x calls instead of continuous 2.5x.
+The `advisor` tool (server-side, Anthropic API only — not Bedrock, Vertex, or
+Foundry) sends the whole transcript to a second, typically stronger model at
+decision points: before committing to an approach, when an error keeps
+recurring, before declaring a task done. Claude decides when to call it, not a
+fixed schedule.
 
 ```json
 "advisorModel": "opus"
 ```
 
-Persisted in `settings.json` next to `model` and `effortLevel` — confirmed in
-the installed binary's settings schema, not just in the `/advisor` help text.
-`/advisor <model>` writes it there directly (`/advisor off` clears it); editing
-the file by hand works identically.
+Persisted in `settings.json` next to `model` and `effortLevel` — confirmed both
+in the installed binary's settings schema and in the
+[official docs](https://code.claude.com/docs/en/advisor). Three equivalent ways
+to set it: `/advisor opus` (saves it, same as editing the file), `--advisor
+opus` for one session without touching the saved default, or the JSON key
+directly. `/advisor off` clears it; `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` kills
+the tool outright regardless of what's saved.
 
 **Pairing rule, enforced server-side:** the advisor must be at least as capable
-as the session's main model — equals allowed, downgrades rejected. On Sonnet,
-that leaves Opus, Sonnet itself, or Fable as valid picks. Fable is excluded
-anyway — the [Which model](#defaults) rule against it applies here too: 5x
-Sonnet for a review that fires on every substantive step is exactly the kind of
-quiet line item that made Fable the single biggest expense the last time it ran
-unsupervised. Opus is the right pick — same tier already reserved for hard
-design work, just invoked as a second opinion instead of as the main seat.
+as the session's main model — equals allowed, downgrades rejected. On Sonnet
+that admits Opus, Sonnet itself, or Fable. Fable is not the choice here: the
+[Which model](#defaults) policy against it as a *main* model is a spend
+argument, and an advisor that fires unattended on every substantive step is a
+worse fit for that argument than a main model you have to deliberately switch
+to — same 5x, less friction before it runs. Opus is the pick: the tier the
+policy already reserves for hard design work, invoked as a second opinion
+instead of the main seat. (Moot for now regardless — Fable is currently listed
+as an unselectable "temporarily unavailable" row in the `/advisor` picker, per
+a remotely controlled rollout, so `/advisor fable` is rejected either way.)
+
+**Cost:** each call bills at the advisor's rate on top of the main model's
+usage and counts toward the same plan limits shown by `/usage` — this is why
+it's occasional-2.5x rather than continuous-2.5x, not why it's free. Toggling
+`/advisor` mid-session does not invalidate the main model's prompt cache,
+unlike switching `/model` or `/effort`, which do.
 
 ## Resumed sessions ignore all of this
 

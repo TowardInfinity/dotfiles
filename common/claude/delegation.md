@@ -34,9 +34,9 @@ Effort is the reasoning lever (`/effort low|medium|high|xhigh|max`), persisted a
 adaptive reasoning.
 
 **The advisor is set to Opus** (`advisorModel` in `settings.json`), not Fable —
-it only fires on explicit `advisor()` calls, so the 2.5x is occasional, not
-continuous. Never repoint it at Fable for the same reason Fable is never the
-main model.
+Claude decides when to call it, unattended, so it's a worse fit for the
+never-Fable rule than the main model, which needs a deliberate `/model` switch.
+`CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` kills it outright if needed.
 
 ## Context is the real cost
 

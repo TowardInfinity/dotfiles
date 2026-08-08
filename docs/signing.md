@@ -120,24 +120,36 @@ A signed release has **six** assets: four binaries, `checksums.txt`, and
 
 | | |
 |---|---|
-| `warn` (default) | verify when a signature is present; allow unsigned, loudly |
-| `require` | a valid signature or no binary |
+| `require` (default) | a valid signature or no binary |
+| `warn` | verify when a signature is present; allow unsigned, loudly |
 
 The order matters and is not cosmetic. A resolver that does not check
 signatures ignores them, so the *verifying* resolver has to reach every machine
 before signatures become mandatory:
 
-- **v0.1.11** ships `warn` and is itself signed. Machines still running the old
-  resolver install it on checksum alone; that is the point.
-- **v0.1.12** flips the default to `require`. From then on a tampered or
-  unsigned release fails closed — tier 2 declines and the resolver falls through
-  to a local `go build` or the checked-in `bin/dots`.
+- **v0.1.11** shipped `warn` and was itself signed. Machines still running the
+  old resolver installed it on checksum alone; that was the point.
+- **v0.1.12** flips the default to `require`. A tampered or unsigned release now
+  fails closed — tier 2 declines and the resolver falls through to a local
+  `go build` or the checked-in `bin/dots`.
 
-Flipping to `require` before the fleet is on 11 would strand the low-memory
-boxes, which cannot `go build` under their memory guard.
+Flipping before the fleet was on 11 would have stranded the low-memory boxes,
+which cannot `go build` under their memory guard.
 
 A signature that is *present and wrong* is refused in **both** modes. The only
-difference between them is what a missing signature means.
+difference between them is what a **missing** signature means.
+
+### The cache remembers how, not just whether
+
+A cached binary is admitted under `require` only if it carries
+`dots-<v>.sig-ok`, written when its signature verified. `dots-<v>.sha256` is
+computed from the file that landed on disk, so it proves the cache has not
+rotted and nothing more — without the marker, a binary let in on checksum alone
+during the warn window would stay trusted forever, and the flip to `require`
+would have been theatre on every machine with a warm cache.
+
+Expect one extra download per machine the first time `require` runs: the
+v0.1.11 binaries cached during the warn window predate the marker.
 
 ## Recovery
 

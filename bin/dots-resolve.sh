@@ -81,11 +81,19 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 # working on OpenSSL 3.0.2 (Ubuntu) and 3.6.3 (macOS).
 #
 # DOTS_SIGNATURE_MODE:
-#   warn     verify when a signature is present, allow unsigned (the migration
-#            release must be installable by resolvers that predate signing)
-#   require  a valid signature or no binary
+#   require  (default) a valid signature or no binary
+#   warn     verify when a signature is present, allow unsigned — an escape
+#            hatch for the key-loss recovery path in docs/signing.md, not a
+#            normal setting
+#
+# The default was warn for exactly one release, v0.1.11. A resolver that does
+# not check signatures ignores them, so the verifying resolver had to reach all
+# four machines before signatures could be mandatory; flipping first would have
+# stranded the low-memory boxes, which cannot go build under their memory guard.
+# Now that every machine is on a signed release, an unsigned one is a finding
+# rather than a legacy.
 PUBKEY="${DOTS_RELEASE_PUBKEY:-$REPO/keys/release.pub}"
-SIGNATURE_MODE="${DOTS_SIGNATURE_MODE:-warn}"
+SIGNATURE_MODE="${DOTS_SIGNATURE_MODE:-require}"
 
 # verify_signature <file> <sig-url>. Returns 0 when the file is proven, 1 when
 # it is proven WRONG, and 2 when the question could not be asked (no signature

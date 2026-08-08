@@ -85,6 +85,7 @@ resolve() {
       XDG_CACHE_HOME="$WORK/cache" \
       FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
       DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_SIGNATURE_MODE=warn \
       DOTS_FORCE_FETCH=1 DOTS_NO_BUILD=1 \
       sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err"
 }
@@ -145,6 +146,7 @@ if [ -n "$got" ]; then
   again="$(env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
         FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
         DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+        DOTS_SIGNATURE_MODE=warn \
         sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")"
   [ "$(sha_of "$again")" = "$GOOD_SHA" ] \
     && ok "a corrupted cached binary is re-fetched" \

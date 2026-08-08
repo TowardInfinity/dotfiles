@@ -151,6 +151,14 @@ would have been theatre on every machine with a warm cache.
 Expect one extra download per machine the first time `require` runs: the
 v0.1.11 binaries cached during the warn window predate the marker.
 
+The marker holds the **digest of the key that admitted the entry**, not just the
+fact that something verified it. So rotating the key expires the cache by
+construction, rather than by anyone remembering to clear it — and a binary
+admitted under a key later rotated away, after a compromise say, stops being
+trusted at the moment that matters. Re-checking the signature on every cache hit
+would instead cost a network round-trip per invocation of `dots`, which is the
+exact cost tier 1 exists to avoid.
+
 ## Recovery
 
 ### Planned rotation
@@ -181,10 +189,3 @@ installed breaks — the failure is only that no *new* release verifies.
 Dry-run step 3 on one machine before doing it on all four. The failure mode is
 recoverable but tedious: fall back to `DOTS_SIGNATURE_MODE=warn` for one
 update, or run `bin/dots` directly from the checkout.
-
-Rotating the key invalidates every cache entry it admitted: the marker records
-the key's own digest, not just the fact of verification. Re-checking the
-signature on every cache hit would cost a network round-trip per invocation of
-`dots`, which is what tier 1 exists to avoid — but a marker that did not name a
-key would keep trusting binaries admitted under a key that has since been
-rotated away, which is the one moment trust most needs withdrawing.

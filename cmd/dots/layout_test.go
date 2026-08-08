@@ -41,6 +41,22 @@ func TestLayoutBreakpoints(t *testing.T) {
 	}
 }
 
+// The scroll hint on Overview/Dotfiles is appended after windowing to
+// bodyRows() lines, so if that window isn't shrunk by one first, the hint
+// itself is always the line contentColumn's MaxHeight clips off — it would
+// never actually render. Pins the fix at the exact heights where Overview's
+// 11 lines first overflow.
+func TestOverviewScrollHintSurvivesClipping(t *testing.T) {
+	for _, h := range []int{13, 12, 10, 8} {
+		m := manageModel{w: 100, h: h, section: secOverview}
+		m.ovInfo = overviewInfo{host: "mac", osName: "darwin", arch: "arm64", uptimeKnown: true}
+		out := m.view("")
+		if !strings.Contains(out, "more, j/k to scroll") {
+			t.Errorf("h=%d: scroll hint missing from rendered output; got clipped", h)
+		}
+	}
+}
+
 func TestNoDuplicateTitle(t *testing.T) {
 	docs, _ := loadDocs(findRepo())
 	for _, d := range docs {

@@ -171,6 +171,19 @@ func (m manageModel) Init() tea.Cmd {
 
 func (m manageModel) resize(w, h int) manageModel {
 	m.w, m.h = w, h
+	// scrollWindow re-clamps at render either way, so a stale offset never
+	// corrupts anything visible — but leaving it unclamped means a resize
+	// from small to large can leave ovScroll/dfScroll positive after the
+	// content no longer overflows, so the first j/k in the larger pane looks
+	// like a no-op while it silently walks the offset back down to 0.
+	if rows := m.bodyRows(); rows > 0 {
+		if _, off := scrollWindow(m.overviewLines(), m.ovScroll, rows); off != m.ovScroll {
+			m.ovScroll = off
+		}
+		if _, off := scrollWindow(m.dotfilesLines(), m.dfScroll, rows); off != m.dfScroll {
+			m.dfScroll = off
+		}
+	}
 	return m
 }
 
@@ -1102,6 +1115,15 @@ func (m manageModel) viewOverview(spin string) string {
 
 	lines := m.overviewLines()
 	rows := m.bodyRows()
+	// If everything doesn't fit, the hint telling you so needs a row of its
+	// own — appending it after a full-width window pushes the body one line
+	// past the pane's budget, and contentColumn's MaxHeight silently drops
+	// whichever line lands last. That line is always the hint, so it would
+	// never actually render. Reserving the row up front instead means the
+	// window is one line shorter exactly when a hint is going to sit below it.
+	if len(lines) > rows {
+		rows--
+	}
 	win, off := scrollWindow(lines, m.ovScroll, rows)
 	body := strings.Join(win, "\n")
 	if hidden := len(lines) - off - len(win); hidden > 0 {
@@ -1222,6 +1244,11 @@ func (m manageModel) viewDotfiles() string {
 
 	lines := m.dotfilesLines()
 	rows := m.bodyRows()
+	// See viewOverview: reserve a row for the hint before windowing, or the
+	// hint is always the line MaxHeight clips off and never actually shows.
+	if len(lines) > rows {
+		rows--
+	}
 	win, off := scrollWindow(lines, m.dfScroll, rows)
 	body := strings.Join(win, "\n")
 	if hidden := len(lines) - off - len(win); hidden > 0 {

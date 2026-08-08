@@ -78,6 +78,22 @@ func TestEveryPaneRenders(t *testing.T) {
 		tm, _ = tm.Update(fetchProjectsInfo()())
 		tm, _ = tm.Update(fetchMachinesInfo()())
 		tm, _ = tm.Update(fetchDotfilesInfo(findRepo())())
+		// Synthetic rather than a real discoverPackages() — that shells out to
+		// brew's network-hitting `outdated` on every one of the six sizes this
+		// loop runs at. Deliberately pins the worst case rather than whatever
+		// happens to be installed: a long formula name, an advisory line, and
+		// an outdated row, at the same width the advisory block's own line
+		// budget has to share with the table beneath it.
+		tm, _ = tm.Update(packagesFoundMsg{
+			packages: []pkg{
+				{Manager: pmBrew, Name: "font-jetbrains-mono-nerd-font", Version: "3.4.0"},
+				{Manager: pmBrew, Name: "the-unarchiver", Version: "4.3.8,146,1715865652", Latest: "4.4.0"},
+				{Manager: pmNpm, Name: "@earendil-works/pi-coding-agent", Version: "0.84.1", Latest: "0.90.0"},
+				{Manager: pmGo, Name: "staticcheck", Version: "v0.6.1"},
+			},
+			advisories: []advisory{{Text: "3 package(s) on npm global — pnpm is set up and reachable here; `pnpm add -g <name>` moves them over."}},
+			sources:    []string{"brew", "go", "npm"},
+		})
 
 		for _, name := range sectionNames {
 			checkFrame(t, "manage-"+name+" @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)

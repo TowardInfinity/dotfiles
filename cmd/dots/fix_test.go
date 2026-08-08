@@ -41,6 +41,7 @@ func TestTmuxHintNotTruncated(t *testing.T) {
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Packages
 	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Projects
 
 	var cmd tea.Cmd

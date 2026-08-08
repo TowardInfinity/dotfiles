@@ -83,7 +83,7 @@ func (m model) capturingInput() bool {
 	case tabDocs:
 		return m.docs.filtering
 	case tabManage:
-		return m.man.svcFiltering
+		return m.man.svcFiltering || m.man.pkgFiltering
 	}
 	return false
 }
@@ -153,6 +153,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.doc.Init(),
 					fetchDotfilesInfo(m.repo),
 					discoverServices(),
+					discoverPackages(),
 					fetchProjectsInfo(),
 					fetchMachinesInfo(),
 				)

@@ -65,7 +65,7 @@ func (m doctorModel) keys() []key.Binding {
 	// Only offer the install key when there is something to install; a key
 	// listed but inert is worse than one that is absent.
 	for _, c := range m.checks {
-		if c.state == checkBad && !isConfigCheck(c.name) {
+		if c.state == checkBad && !isConfigCheck(c.name) && !isPackageCheck(c.name) {
 			ks = append(ks, bind("i", "install missing"))
 			break
 		}
@@ -95,6 +95,20 @@ func (m manageModel) keys() []key.Binding {
 			bind("s", "start"), bind("x", "stop"), bind("R", "restart"),
 			bind("a", "all/running"), bind("r", "rescan"),
 		}
+	case secPackages:
+		if m.pkgFiltering {
+			return []key.Binding{bind("enter", "keep"), bind("esc", "clear")}
+		}
+		ks := []key.Binding{nav, bind("j/k", "move"), bind("/", "filter"), bind("r", "rescan")}
+		// Same "only advertise a key that can act" rule as below: `u` is
+		// worth listing only once the cursor is actually on a row it can do
+		// something with (pmGo rows have no upgrade action).
+		if vis := m.visiblePackages(); len(vis) > 0 && m.pkgCursor < len(vis) {
+			if _, ok := packageAction(vis[m.pkgCursor]); ok {
+				ks = append(ks, bind("u", "upgrade"))
+			}
+		}
+		return ks
 	// Only advertise a key that can act. A listed key that does nothing is
 	// worse than an absent one — the same rule Doctor's `i` already follows.
 	case secProjects:

@@ -26,12 +26,13 @@ const (
 	secOverview manageSection = iota
 	secDotfiles
 	secServices
+	secPackages
 	secProjects
 	secMachines
 	numSections
 )
 
-var sectionNames = [numSections]string{"Overview", "Dotfiles", "Services", "Projects", "Machines"}
+var sectionNames = [numSections]string{"Overview", "Dotfiles", "Services", "Packages", "Projects", "Machines"}
 
 // ── data shapes ───────────────────────────────────────────────
 
@@ -97,6 +98,16 @@ type manageModel struct {
 	// listing them all by default is honest but not useful.
 	svcRunningOnly bool
 
+	packages     []pkg
+	advisories   []advisory
+	pkgSources   []string
+	pkgLoading   bool
+	pkgMsg       string
+	pkgCursor    int
+	pkgFilter    string
+	pkgFiltering bool
+	pkgTI        textinput.Model
+
 	projects     []projectInfo
 	projLoading  bool
 	projCursor   int
@@ -121,13 +132,23 @@ func newManageModel(repo string) manageModel {
 	ti.PlaceholderStyle = styMuted
 	ti.CharLimit = 40
 
+	pkgTI := textinput.New()
+	pkgTI.Prompt = "/"
+	pkgTI.Placeholder = "filter packages"
+	pkgTI.PromptStyle = styFilter
+	pkgTI.TextStyle = styValue
+	pkgTI.PlaceholderStyle = styMuted
+	pkgTI.CharLimit = 40
+
 	return manageModel{
 		svcTI:        ti,
+		pkgTI:        pkgTI,
 		repo:         repo,
 		ovLoading:    true,
 		dfInfo:       dotfilesInfo{behind: -1},
 		dfLoading:    true,
 		svcLoading:   true,
+		pkgLoading:   true,
 		projLoading:  true,
 		projSelected: -1,
 		machLoading:  true,
@@ -139,6 +160,7 @@ func (m manageModel) Init() tea.Cmd {
 		fetchOverviewInfo(),
 		fetchDotfilesInfo(m.repo),
 		discoverServices(),
+		discoverPackages(),
 		fetchProjectsInfo(),
 		fetchMachinesInfo(),
 	)
@@ -190,6 +212,21 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 			}
 			m.services[i].Probed = true
 			m.services[i].Healthy = msg.ports[m.services[i].Port]
+		}
+		return m, nil
+
+	case packagesFoundMsg:
+		m.packages = msg.packages
+		m.advisories = msg.advisories
+		m.pkgSources = msg.sources
+		m.pkgLoading = false
+		// Same clamp-against-visible reasoning as servicesFoundMsg: a rescan
+		// with an active filter must not strand the cursor past what's shown.
+		if n := len(m.visiblePackages()); m.pkgCursor >= n {
+			m.pkgCursor = n - 1
+		}
+		if m.pkgCursor < 0 {
+			m.pkgCursor = 0
 		}
 		return m, nil
 
@@ -255,6 +292,8 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 			return m.updateDotfilesKey(msg)
 		case secServices:
 			return m.updateServicesKey(msg)
+		case secPackages:
+			return m.updatePackagesKey(msg)
 		case secProjects:
 			return m.updateProjectsKey(msg)
 		case secMachines:
@@ -426,6 +465,69 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	}
 	m.svcMsg = ""
 	return m, func() tea.Msg { return runActionMsg{spec: spec} }
+}
+
+func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+	if m.pkgFiltering {
+		switch msg.String() {
+		case "esc":
+			m.pkgFiltering = false
+			m.pkgTI.Blur()
+			m.pkgTI.SetValue("")
+			m.pkgFilter = ""
+			m.pkgCursor = 0
+			return m, nil
+		case "enter":
+			m.pkgFiltering = false
+			m.pkgTI.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.pkgTI, cmd = m.pkgTI.Update(msg)
+		if v := m.pkgTI.Value(); v != m.pkgFilter {
+			m.pkgFilter = v
+			m.pkgCursor = 0
+		}
+		return m, cmd
+	}
+
+	vis := m.visiblePackages()
+
+	switch msg.String() {
+	case "j", "down":
+		if m.pkgCursor < len(vis)-1 {
+			m.pkgCursor++
+		}
+		return m, nil
+	case "k", "up":
+		if m.pkgCursor > 0 {
+			m.pkgCursor--
+		}
+		return m, nil
+	case "/":
+		m.pkgFiltering = true
+		m.pkgTI.Focus()
+		return m, textinput.Blink
+	case "r":
+		m.pkgLoading = true
+		m.pkgMsg = ""
+		return m, discoverPackages()
+	case "u":
+		if m.pkgCursor >= len(vis) {
+			return m, nil
+		}
+		p := vis[m.pkgCursor]
+		spec, ok := packageAction(p)
+		if !ok {
+			// Saying why is better than a key that appears to do nothing —
+			// same rule Services' s/x/R already follows.
+			m.pkgMsg = "no upgrade action for " + p.Manager.String() + " packages"
+			return m, nil
+		}
+		m.pkgMsg = ""
+		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+	}
+	return m, nil
 }
 
 func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
@@ -780,6 +882,8 @@ func (m manageModel) sectionBody(spin string) (string, string) {
 		return m.viewDotfiles(), m.dotfilesSummary()
 	case secServices:
 		return m.viewServices(spin), m.servicesSummary()
+	case secPackages:
+		return m.viewPackages(spin), m.packagesSummary()
 	case secProjects:
 		return m.viewProjects(), fmt.Sprintf("%d repositories under ~/Codes", len(m.projects))
 	case secMachines:
@@ -834,6 +938,26 @@ func (m manageModel) servicesSummary() string {
 		scope = "running only"
 	}
 	return fmt.Sprintf("%d of %d running  ·  %s  ·  via %s", run, len(m.services), scope, src)
+}
+
+func (m manageModel) packagesSummary() string {
+	if m.pkgLoading {
+		return "checking package managers…"
+	}
+	if len(m.packages) == 0 {
+		return "no package managers found on this machine"
+	}
+	outdated := 0
+	for _, p := range m.packages {
+		if p.Outdated() {
+			outdated++
+		}
+	}
+	src := strings.Join(m.pkgSources, ", ")
+	if src == "" {
+		src = "none"
+	}
+	return fmt.Sprintf("%d packages, %d outdated  ·  via %s", len(m.packages), outdated, src)
 }
 
 // viewOverview is read-only: every field either comes straight from
@@ -1126,6 +1250,113 @@ func (m manageModel) visibleServices() []service {
 			continue
 		}
 		out = append(out, s)
+	}
+	return out
+}
+
+// viewPackages groups rows by manager the way Doctor's checks are grouped —
+// a label in the first column only when the manager changes, not a flat list
+// like Services — since "which manager is this" is the first thing worth
+// knowing about a package row.
+func (m manageModel) viewPackages(spin string) string {
+	measure := measureFor(m.w - railWidth - 1)
+
+	if m.pkgLoading {
+		return "\n  " + spin + styPending.Render(" checking package managers")
+	}
+	if len(m.packages) == 0 {
+		return "\n  " + styMuted.Render(
+			"Nothing found. Looked for brew, pnpm, npm, uv tool, pip and go-installed binaries.")
+	}
+
+	var head string
+	if m.pkgFilter != "" || m.pkgFiltering {
+		m.pkgTI.Width = measure - 4
+		head = "  " + truncate(m.pkgTI.View(), measure) + "\n"
+	}
+
+	vis := m.visiblePackages()
+	if len(vis) == 0 {
+		return head + "  " + styMuted.Render("nothing matches that filter")
+	}
+
+	rows := m.h - 9
+	if rows < 3 {
+		rows = 3
+	}
+	// Advisories are a fixed block above the table, not part of the
+	// scrolling list, so they eat into the row budget up front.
+	if len(m.advisories) > 0 {
+		rows -= len(m.advisories) + 1
+		if rows < 3 {
+			rows = 3
+		}
+	}
+	start := 0
+	if len(vis) > rows {
+		start = m.pkgCursor - rows/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(vis)-rows {
+			start = len(vis) - rows
+		}
+	}
+	end := start + rows
+	if end > len(vis) {
+		end = len(vis)
+	}
+
+	data := make([][]string, 0, end-start)
+	lastManager := ""
+	for i := start; i < end; i++ {
+		p := vis[i]
+		label := ""
+		mgr := p.Manager.String()
+		if mgr != lastManager {
+			label = strings.ToUpper(mgr)
+			lastManager = mgr
+		}
+		mark, latest := "", p.Latest
+		switch {
+		case p.Outdated():
+			mark = styPending.Render("↑")
+		case latest == "":
+			latest = styMuted.Render("—")
+		}
+		data = append(data, []string{label, p.Name, p.Version, mark + " " + latest})
+	}
+
+	var adv strings.Builder
+	for _, a := range m.advisories {
+		adv.WriteString("  " + styPending.Render("! ") + styMuted.Render(truncate(a.Text, measure)) + "\n")
+	}
+
+	body := head + adv.String() + dataTable(
+		[]string{"", "PACKAGE", "VERSION", "LATEST"},
+		data, m.pkgCursor-start, measure)
+
+	if len(vis) > rows {
+		body += "\n  " + styMuted.Render(fmt.Sprintf("… %d more, / to filter", len(vis)-rows))
+	}
+	if m.pkgMsg != "" {
+		body += "\n  " + styMuted.Render(truncate(m.pkgMsg, measure))
+	}
+	return body
+}
+
+// visiblePackages applies the search box. m.packages is already grouped by
+// manager (discoverPackages sorts it that way) and filtering only removes
+// entries, so the grouping survives a filter unchanged.
+func (m manageModel) visiblePackages() []pkg {
+	q := strings.ToLower(m.pkgFilter)
+	out := make([]pkg, 0, len(m.packages))
+	for _, p := range m.packages {
+		if q != "" && !strings.Contains(
+			strings.ToLower(p.Name+" "+p.Manager.String()), q) {
+			continue
+		}
+		out = append(out, p)
 	}
 	return out
 }

@@ -115,26 +115,12 @@ func uvJupyterlabResult(uvToolListOutput string) checkResult {
 	}
 }
 
-// uvToolListHas parses `uv tool list` output:
-//
-//	kaggle v2.2.4
-//	- kaggle
-//	jupyterlab v4.5.0
-//	- jupyter
-//	- jupyter-lab
-//
-// One package line per tool (name, a space, "v" + version), followed by one
-// "- <exposed command>" line per binary it puts on PATH. Only the package
-// lines are matched — skipping "-" lines matters because a tool can expose a
-// command that happens to share a name with another package.
+// uvToolListHas answers "is this tool in `uv tool list`'s output" from the
+// same parse packages.go's fuller inventory uses (parseUvToolList), so the
+// two features' understanding of that output can't drift apart.
 func uvToolListHas(output, name string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "-") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) > 0 && fields[0] == name {
+	for _, e := range parseUvToolList(output) {
+		if e.Name == name {
 			return true
 		}
 	}

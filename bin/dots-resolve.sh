@@ -203,7 +203,7 @@ try_cached() {
   # is where require mode actually bites. Without it the flip would only take
   # effect on machines that happened to have a cold cache.
   if ! cache_provenance_ok "$v"; then
-    log "dots-resolve: cached binary predates signature checking — discarding and refetching"
+    log "dots-resolve: cached binary was not admitted by the current signing key — discarding and refetching"
     rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
     return 1
   fi
@@ -251,7 +251,7 @@ try_download() {
       printf '%s\n' "$dest"
       return 0
     fi
-    log "dots-resolve: cached $version was not signature-verified — refetching to check it"
+    log "dots-resolve: cached $version was not admitted by the current signing key — refetching to check it"
     rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
   fi
   if [ -x "$dest" ]; then

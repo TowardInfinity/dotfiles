@@ -55,6 +55,14 @@ export PATH="$HOME/.antigravity/antigravity/bin:$PATH"
 export PATH="$PATH:$HOME/.lmstudio/bin"
 export PATH="$HOME/.local/bin:$PATH"
 
+# pnpm's global bin dir — `pnpm add -g` installs here, and silently succeeds
+# even when this is missing from PATH; nothing it puts there runs until it's
+# on here too. See docs/gotchas-setup.md. Deliberately not PNPM_HOME: pnpm
+# 11 resolves the global bin dir as "$PNPM_HOME/bin" whenever PNPM_HOME is
+# set, which would point one level too deep — the plain PATH entry is what
+# actually matches where `pnpm add -g` puts things.
+export PATH="$HOME/Library/pnpm/bin:$PATH"
+
 # ──── Aliases ────────────────────────────────────────────────
 # Python
 alias python='python3'

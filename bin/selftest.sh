@@ -697,6 +697,57 @@ rm -f "$QSTATE/claude-quota" "$PANES/9"
 # fix that (nothing can set the model from outside); its whole job is to stop
 # it being silent, so the failure that matters is staying quiet when it should
 # not — and nagging when the session is fine, which trains you to ignore it.
+# ── the policy keys themselves ────────────────────────────────
+#
+# Claude Code ignores a setting it does not recognise AND a setting that is
+# simply absent, both without a word. So a policy key dropped in an edit looks
+# exactly like a policy key being honoured — which is how alwaysThinkingEnabled
+# sat missing from this file for the whole rollout while everything appeared
+# fine. The values are asserted, not just the keys: "model": "opus" would pass
+# a presence check and undo the entire point of the file.
+group "claude: the model policy is actually in the file"
+
+SETTINGS="$REPO/common/claude/settings.json"
+jq -e . "$SETTINGS" >/dev/null 2>&1 \
+  && ok "settings.json is valid JSON" \
+  || bad "settings.json is valid JSON" "Claude Code would fall back to defaults"
+
+policy_key() {  # policy_key <jq path> <expected> <why it matters>
+  got=$(jq -r "$1 | tostring" "$SETTINGS" 2>/dev/null)
+  [ "$got" = "$2" ] \
+    && ok "$1 is $2" \
+    || bad "$1 is $2" "got [$got] — $3"
+}
+policy_key '.model' sonnet \
+  "the default would go back to the dearer tier on every new session"
+policy_key '.effortLevel' high \
+  "effort is the only reasoning lever left on Opus 5 and Sonnet 5"
+policy_key '.alwaysThinkingEnabled' false \
+  "forcing extended thinking on every turn is spend the model did not ask for"
+policy_key '.fallbackModel[0]' haiku \
+  "without it an overloaded Sonnet escalates instead of falling back cheap"
+policy_key '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' 250000 \
+  "contexts drift back toward 800k, and every turn re-reads the whole window"
+
+# CLAUDE_CODE_SUBAGENT_MODEL is a hard override that beats both the per-call
+# model parameter and an agent's frontmatter, collapsing the whole tiering onto
+# one model. Agent teams run ~7x a normal session. Neither belongs in a file
+# that is symlinked onto four machines.
+for forbidden in CLAUDE_CODE_SUBAGENT_MODEL CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS; do
+  grep -q "$forbidden" "$SETTINGS" \
+    && bad "$forbidden is not set" "it would override the per-call model tiering" \
+    || ok "$forbidden is not set"
+done
+
+# Shared with a1/v1/v2, so anything naming this Mac breaks there. The Obsidian
+# Stop hook made this mistake once with a baked-in /Users/... path.
+if grep -q '/Users/towardinfinity' "$SETTINGS"; then
+  bad "no machine-specific paths in the shared settings" \
+      "a /Users/... path does not exist on the Linux boxes"
+else
+  ok "no machine-specific paths in the shared settings"
+fi
+
 group "claude: resumed sessions off policy"
 
 HOOK_SH="$REPO/common/claude/session-start.sh"

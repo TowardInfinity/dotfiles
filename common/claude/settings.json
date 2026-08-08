@@ -1,6 +1,7 @@
 {
   "model": "sonnet",
   "effortLevel": "high",
+  "alwaysThinkingEnabled": false,
   "fallbackModel": [
     "haiku"
   ],

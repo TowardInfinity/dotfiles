@@ -81,6 +81,19 @@ git tag v0.1.11 && git push origin v0.1.11   # CI builds a draft
 dots sync                                     # roll it out
 ```
 
+**Run the signing step from a real terminal**, not from an agent shell or
+anything else without a TTY. OpenSSL reads the passphrase straight from the
+terminal, and without one it fails with
+
+```
+UI routines:UI_process:processing error ... while reading strings
+```
+
+which looks like a broken key and is not — the prompt printed, the read failed.
+Do not work around it with `-passin pass:…` or a pipe: that puts the passphrase
+into shell history or a file, and the whole point of keeping it in the password
+manager is that the media and the passphrase never sit together.
+
 `sign-release.sh` downloads **CI's own** `checksums.txt` rather than rebuilding
 locally — Go output is not guaranteed bit-identical across machines, and signing
 a local rebuild would sign bytes nobody tested. It then verifies its own

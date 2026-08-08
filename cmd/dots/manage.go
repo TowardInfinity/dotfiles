@@ -110,6 +110,7 @@ type manageModel struct {
 	pkgFiltering bool
 	pkgTI        textinput.Model
 	pkgSortMode  pkgSortMode // zero value = pkgSortOutdated, today's order
+	pkgMgrFilter pkgManager  // zero value = pkgManagerAll, every group shown
 
 	projects     []projectInfo
 	projLoading  bool
@@ -584,6 +585,13 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		}
 		m.pkgCursor = 0
 		return m, nil
+	case "m":
+		// Cycles All → Pnpm → Npm → Uv Tool → Pip → Go → Brew → All, the same
+		// order the table already groups by — so one press always lands on
+		// whichever group currently follows the one you're looking at.
+		m.pkgMgrFilter = (m.pkgMgrFilter + 1) % numPkgManagers
+		m.pkgCursor = 0
+		return m, nil
 	case "u":
 		if m.pkgCursor >= len(vis) {
 			return m, nil
@@ -933,8 +941,17 @@ func (m manageModel) view(spin string) string {
 		contentW = m.w - railWidth - 1 // -1: the rail border sits outside Width
 	}
 
+	// Packages' manager filter gets its own breadcrumb segment rather than
+	// living only in the summary line — "Packages › Brew" reads as the inner
+	// section it behaves like, the same idea as the outer Manage rail one
+	// level up, just without a second rail's width to spend on it.
+	title := sectionNames[m.section]
+	if m.section == secPackages && m.pkgMgrFilter != pkgManagerAll {
+		title += " › " + m.pkgMgrFilter.managerTitle()
+	}
+
 	content := contentColumn(contentW, m.h,
-		paneHeader("Manage", sectionNames[m.section], summary, measureFor(contentW)),
+		paneHeader("Manage", title, summary, measureFor(contentW)),
 		body)
 
 	if !showRail {
@@ -1029,8 +1046,15 @@ func (m manageModel) packagesSummary() string {
 	if src == "" {
 		src = "none"
 	}
-	return fmt.Sprintf("%d packages, %d outdated  ·  via %s  ·  sorted by %s",
+	// Counts stay whole-machine even when a manager filter narrows the table
+	// beneath them — same call as the Outdated block: this line answers "what
+	// does the machine look like," not "what's currently on screen."
+	s := fmt.Sprintf("%d packages, %d outdated  ·  via %s  ·  sorted by %s",
 		len(m.packages), outdated, src, m.pkgSortMode)
+	if m.pkgMgrFilter != pkgManagerAll {
+		s += "  ·  showing " + m.pkgMgrFilter.String() + " only"
+	}
+	return s
 }
 
 // overviewLines is the content Overview shows, one stat per line. Split out
@@ -1502,15 +1526,18 @@ func (m manageModel) viewPackages(spin string) string {
 	return body
 }
 
-// visiblePackages applies the search box, then the active sort mode.
-// m.packages is already grouped by manager (discoverPackages sorts it that
-// way) and filtering only removes entries, so the grouping survives a
-// filter unchanged; sortPackagesFor re-sorts within each group without
+// visiblePackages applies the manager filter, then the search box, then the
+// active sort mode. m.packages is already grouped by manager (discoverPackages
+// sorts it that way) and both filters only remove entries, so the grouping
+// survives unchanged; sortPackagesFor re-sorts within each group without
 // touching that outer order.
 func (m manageModel) visiblePackages() []pkg {
 	q := strings.ToLower(m.pkgFilter)
 	out := make([]pkg, 0, len(m.packages))
 	for _, p := range m.packages {
+		if m.pkgMgrFilter != pkgManagerAll && p.Manager != m.pkgMgrFilter {
+			continue
+		}
 		if q != "" && !strings.Contains(
 			strings.ToLower(p.Name+" "+p.Manager.String()), q) {
 			continue

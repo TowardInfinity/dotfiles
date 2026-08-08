@@ -35,17 +35,29 @@ type pkgManager int
 // decides which manager's group renders first. Brew goes last on purpose —
 // it typically outnumbers every other manager combined, so putting it first
 // pushed the shorter, often more interesting groups below the fold.
+//
+// pkgManagerAll leads the block as a sentinel rather than a real manager —
+// no pkg ever carries it, only manageModel.pkgMgrFilter does, to mean "no
+// filter, show every group." Giving it value 0 means a manageModel's zero
+// value already starts unfiltered with no explicit initializer, the same
+// trick pkgSortMode's zero value already relies on. numPkgManagers closes
+// the block so the manager-filter cycle key can wrap with `% numPkgManagers`
+// instead of a hand-maintained count that drifts if a manager is added.
 const (
-	pmPnpm pkgManager = iota
+	pkgManagerAll pkgManager = iota
+	pmPnpm
 	pmNpm
 	pmUvTool
 	pmPip
 	pmGo
 	pmBrew
+	numPkgManagers
 )
 
 func (m pkgManager) String() string {
 	switch m {
+	case pkgManagerAll:
+		return "all"
 	case pmPnpm:
 		return "pnpm"
 	case pmNpm:
@@ -58,6 +70,30 @@ func (m pkgManager) String() string {
 		return "go"
 	case pmBrew:
 		return "brew"
+	}
+	return "?"
+}
+
+// managerTitle is the capitalized form used in the Packages breadcrumb, to
+// match sectionNames' style ("Overview", "Dotfiles", …) rather than
+// String()'s all-lowercase form used everywhere else (search text, the
+// summary line, upgrade confirmations). strings.Title is deprecated and
+// this covers exactly six known values, so a plain switch beats pulling in
+// golang.org/x/text/cases for one label.
+func (m pkgManager) managerTitle() string {
+	switch m {
+	case pmPnpm:
+		return "Pnpm"
+	case pmNpm:
+		return "Npm"
+	case pmUvTool:
+		return "Uv Tool"
+	case pmPip:
+		return "Pip"
+	case pmGo:
+		return "Go"
+	case pmBrew:
+		return "Brew"
 	}
 	return "?"
 }

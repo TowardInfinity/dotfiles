@@ -77,6 +77,26 @@ cursor is on a row that actually has an upgrade path; pressing it runs the
 command through the same confirm-then-stream overlay every other Manage
 action (services, dotfiles updates, machine doctor) already uses.
 
+Groups are shown in a fixed order — pnpm, npm, uv tool, pip, go, then brew
+last. Brew typically outnumbers every other manager's packages combined, so
+putting it first pushed the shorter, often more interesting groups below the
+fold; this way they're what you see without scrolling.
+
+Two keys work on top of that grouping without changing it:
+
+- **`s`** toggles the secondary sort within each group — outdated-first
+  (default) or alphabetical by name. The group order above never moves; only
+  what comes within one group does.
+- **`m`** cycles a manager filter — All → pnpm → npm → uv tool → pip → go →
+  brew → All — narrowing the table to one group at a time instead of
+  scrolling past the others to reach it. The breadcrumb names the active one
+  (`Packages › Brew`), same as the outer rail names the current section.
+
+An **Outdated overview** block sits above the table, capped at five rows with
+a "+N more" line past that. It always summarizes every manager regardless of
+the `m` filter or the `/` text filter beneath it — it answers "what does the
+machine look like," not "what's currently on screen."
+
 **Consolidation advisories**, computed after discovery and shown above the
 table, are read-only — a suggested command, never a command run for you:
 

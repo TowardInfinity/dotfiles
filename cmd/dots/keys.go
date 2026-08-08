@@ -125,7 +125,7 @@ func (m manageModel) keys() []key.Binding {
 		if m.pkgFiltering {
 			return []key.Binding{bind("enter", "keep"), bind("esc", "clear")}
 		}
-		ks := []key.Binding{nav, bind("j/k", "move"), bind("/", "filter"), bind("r", "rescan"), bind("s", "sort")}
+		ks := []key.Binding{nav, bind("j/k", "move"), bind("/", "filter"), bind("r", "rescan"), bind("s", "sort"), bind("m", "manager")}
 		// Same "only advertise a key that can act" rule as below: `u` is
 		// worth listing only once the cursor is actually on a row it can do
 		// something with (pmGo rows have no upgrade action).

@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // ── brew ──────────────────────────────────────────────────────
 
@@ -358,6 +363,98 @@ func TestOutdatedOverviewUnderCap(t *testing.T) {
 	shown, more := outdatedOverview(pkgs, 5)
 	if len(shown) != 1 || more != 0 {
 		t.Errorf("shown=%v more=%d, want 1 shown, 0 more", shown, more)
+	}
+}
+
+// ── manager filter ───────────────────────────────────────────
+
+// pkgManagerAll (visiblePackages' default) shows every group; a real
+// manager value narrows the table to just that group, same as the text
+// filter narrows it by name — both apply before sortPackagesFor runs.
+func TestVisiblePackagesManagerFilter(t *testing.T) {
+	m := manageModel{packages: []pkg{
+		{Manager: pmBrew, Name: "git", Version: "1.0"},
+		{Manager: pmNpm, Name: "typescript", Version: "1.0"},
+		{Manager: pmBrew, Name: "jq", Version: "1.0"},
+	}}
+
+	if got := len(m.visiblePackages()); got != 3 {
+		t.Fatalf("unfiltered: got %d packages, want 3", got)
+	}
+
+	m.pkgMgrFilter = pmBrew
+	vis := m.visiblePackages()
+	if len(vis) != 2 {
+		t.Fatalf("brew filter: got %d packages, want 2", len(vis))
+	}
+	for _, p := range vis {
+		if p.Manager != pmBrew {
+			t.Errorf("brew filter: got a %v package (%s)", p.Manager, p.Name)
+		}
+	}
+
+	m.pkgMgrFilter = pmPip
+	if got := len(m.visiblePackages()); got != 0 {
+		t.Errorf("pip filter (no pip packages): got %d, want 0", got)
+	}
+}
+
+// "m" cycles pkgMgrFilter through every manager in display order and back to
+// All, resetting the cursor each time since the visible set's size changes.
+func TestPackagesManagerCycleKey(t *testing.T) {
+	m := manageModel{
+		packages:  []pkg{{Manager: pmBrew, Name: "git", Version: "1.0"}},
+		pkgCursor: 3,
+	}
+	want := []pkgManager{pmPnpm, pmNpm, pmUvTool, pmPip, pmGo, pmBrew, pkgManagerAll}
+	for i, w := range want {
+		var cmd tea.Cmd
+		m, cmd = m.updatePackagesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		if cmd != nil {
+			t.Errorf("press %d: expected no cmd, got one", i)
+		}
+		if m.pkgMgrFilter != w {
+			t.Errorf("press %d: filter = %v, want %v", i, m.pkgMgrFilter, w)
+		}
+		if m.pkgCursor != 0 {
+			t.Errorf("press %d: cursor = %d, want 0 after filter change", i, m.pkgCursor)
+		}
+		m.pkgCursor = 3 // so the next press's reset-to-0 check is meaningful too
+	}
+}
+
+// While the filter box is focused, "m" must be typed into it like any other
+// letter, not interpreted as the manager-cycle key — same contract as
+// TestFilterCapturesSectionKeys covers for h/l.
+func TestFilterCapturesManagerCycleKey(t *testing.T) {
+	m := newManageModel("")
+	m.pkgFiltering = true
+	m.pkgTI.Focus()
+	m, _ = m.updatePackagesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	if m.pkgMgrFilter != pkgManagerAll {
+		t.Errorf("filter = %v, want pkgManagerAll (unchanged)", m.pkgMgrFilter)
+	}
+	if got := m.pkgTI.Value(); got != "m" {
+		t.Errorf("filter text = %q, want %q", got, "m")
+	}
+}
+
+// The breadcrumb names the active manager filter, the same way the outer
+// Manage rail names the active section — "Packages › Brew" reads as the
+// inner section it behaves like.
+func TestPackagesBreadcrumbShowsManagerFilter(t *testing.T) {
+	m := manageModel{
+		w: 120, h: 34, section: secPackages,
+		packages: []pkg{{Manager: pmBrew, Name: "git", Version: "1.0"}},
+	}
+	if out := m.view(""); strings.Contains(out, "› Brew") {
+		t.Error("unfiltered view should not show a manager breadcrumb segment")
+	}
+
+	m.pkgMgrFilter = pmBrew
+	out := m.view("")
+	if !strings.Contains(out, "Packages") || !strings.Contains(out, "Brew") {
+		t.Errorf("filtered view missing breadcrumb; got:\n%s", out)
 	}
 }
 

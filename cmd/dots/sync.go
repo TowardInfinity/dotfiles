@@ -173,7 +173,7 @@ func syncRemotes(assumeYes bool) int {
 		cmd := exec.CommandContext(ctx, "ssh",
 			"-o", "BatchMode=yes",
 			"-o", "ConnectTimeout=8",
-			h, "$HOME/.local/bin/dots update")
+			h, remoteDots("update"))
 		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 		err := cmd.Run()
 		cancel()
@@ -266,6 +266,25 @@ func sshHosts() []string {
 	}
 	flush()
 	return out
+}
+
+// remoteDots builds the command string for running dots on another machine.
+//
+// `ssh host dots doctor` fails with "dots: command not found" even when dots is
+// installed and working. A non-interactive ssh command runs a shell that reads
+// neither .zshrc nor .profile, so ~/.local/bin — where install.sh puts the
+// symlink — is not on PATH. The machine is fine; only the lookup is broken, and
+// the error points squarely at the wrong thing.
+//
+// Prepending to PATH rather than spelling out ~/.local/bin/dots: the explicit
+// path is what sync used, and it silently assumes an install location. This
+// finds dots there if it is there, and still finds it if it moved to
+// /usr/local/bin or is already on the remote PATH.
+//
+// Single-quoted for the LOCAL shell to leave alone; $HOME expands on the far
+// side, which is what we want — the remote home is not necessarily ours.
+func remoteDots(args ...string) string {
+	return `PATH="$HOME/.local/bin:$PATH" dots ` + strings.Join(args, " ")
 }
 
 func reachable(host string) bool {

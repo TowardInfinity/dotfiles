@@ -96,3 +96,51 @@ func TestLaunchdRestartQuotesItsArguments(t *testing.T) {
 		t.Errorf("an ID with a space breaks the script: %v\n%s", err, out)
 	}
 }
+
+// ── remote invocation ─────────────────────────────────────────
+
+// `ssh host dots doctor` fails with "dots: command not found" on a machine
+// where dots is installed and working: a non-interactive ssh shell reads
+// neither .zshrc nor .profile, so ~/.local/bin is not on PATH. sync.go had
+// already worked around this and the Manage pane had not, which is exactly the
+// kind of divergence a shared helper exists to prevent.
+func TestRemoteDotsCarriesLocalBinOnPath(t *testing.T) {
+	got := remoteDots("doctor")
+	if !strings.Contains(got, ".local/bin") {
+		t.Errorf("remote command does not add ~/.local/bin to PATH: %s", got)
+	}
+	if !strings.Contains(got, "dots doctor") {
+		t.Errorf("remote command lost its arguments: %s", got)
+	}
+	// $HOME must reach the far side unexpanded — the remote home is not ours.
+	if strings.Contains(got, os.Getenv("HOME")) {
+		t.Errorf("the local HOME was baked in; it must expand remotely: %s", got)
+	}
+	if !strings.Contains(got, "$HOME") {
+		t.Errorf("expected $HOME to be passed through literally: %s", got)
+	}
+}
+
+func TestRemoteDotsJoinsMultipleArgs(t *testing.T) {
+	if got := remoteDots("doctor", "--online"); !strings.HasSuffix(got, "dots doctor --online") {
+		t.Errorf("got %q", got)
+	}
+}
+
+// Both remote entry points must go through the helper, or one of them drifts
+// back to a bare `dots` and fails only on a machine nobody is looking at.
+func TestRemoteDotsIsUsedByBothCallSites(t *testing.T) {
+	for _, f := range []string{"manage.go", "sync.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		src := string(b)
+		if strings.Contains(src, `"$HOME/.local/bin/dots`) {
+			t.Errorf("%s spells out the install path instead of using remoteDots", f)
+		}
+		if strings.Contains(src, `alias, "dots",`) || strings.Contains(src, `h, "dots `) {
+			t.Errorf("%s invokes a bare `dots` over ssh; it will not be on PATH", f)
+		}
+	}
+}

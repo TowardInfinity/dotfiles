@@ -315,6 +315,41 @@ PY
     *) ok "a rotated key invalidates the cache it admitted" ;;
   esac
 
+  # 12. Declining a cache entry must not DESTROY it. install.sh points
+  #     ~/.local/bin/dots straight at this file, so deleting it before a
+  #     replacement exists leaves the machine with no dots command at all —
+  #     on a box whose next download is precisely the one being refused.
+  #     This bricked v2 for real, via a rotated key and no valid release.
+  sign_fixture
+  got="$(resolve_sig require)"
+  openssl genpkey -algorithm ed25519 -out "$WORK/rot2.pem" 2>/dev/null
+  openssl pkey -in "$WORK/rot2.pem" -pubout -out "$WORK/rot2.pub" 2>/dev/null
+  rm -f "$FIXTURES/checksums.txt.sig"     # and nothing valid to replace it with
+  env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+      FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_RELEASE_PUBKEY="$WORK/rot2.pub" DOTS_SIGNATURE_MODE=require \
+      DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" >/dev/null 2>"$WORK/err"
+  [ -x "$got" ] \
+    && ok "a declined cache entry survives, so the symlink does not dangle" \
+    || bad "a declined cache entry survives, so the symlink does not dangle" \
+          "$got was deleted — ~/.local/bin/dots would now point at nothing"
+
+  # 13. A CORRUPT entry is still deleted. Declining and discarding are
+  #     different judgements: these bytes changed after being verified, and
+  #     leaving them reachable through the symlink means running them.
+  sign_fixture
+  got="$(resolve_sig require)"
+  printf 'tampered' >> "$got"
+  env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+      FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" DOTS_SIGNATURE_MODE=require \
+      DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" >/dev/null 2>"$WORK/err"
+  [ "$(sha_of "$got" 2>/dev/null)" = "$GOOD_SHA" ] \
+    && ok "a corrupted cache entry is replaced, not kept" \
+    || bad "a corrupted cache entry is replaced, not kept" "digest still wrong"
+
   rm -f "$FIXTURES/checksums.txt.sig"
 else
   $VERBOSE && printf '  \033[90mskip\033[0m  release signatures (no openssl with ed25519)\n'

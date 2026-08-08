@@ -194,8 +194,13 @@ try_cached() {
 
   want_file="$CACHE_DIR/dots-$v.sha256"
   if ! cached_digest_ok "$bin" "$want_file"; then
+    # Deletion IS right here, unlike the provenance check below: this file's
+    # bytes changed after we verified them. Leaving it reachable through
+    # ~/.local/bin/dots would mean running whatever it became, and a dangling
+    # symlink is the better of the two failures.
     log "dots-resolve: cached binary is unverified or corrupt — discarding and refetching"
-    rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
+    rm -f "$bin" "$want_file" "$CACHE_DIR/dots-$v.sig-ok" \
+          "$CACHE_DIR/current-version" 2>/dev/null || true
     return 1
   fi
 
@@ -203,8 +208,15 @@ try_cached() {
   # is where require mode actually bites. Without it the flip would only take
   # effect on machines that happened to have a cold cache.
   if ! cache_provenance_ok "$v"; then
-    log "dots-resolve: cached binary was not admitted by the current signing key — discarding and refetching"
-    rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
+    # DECLINE, do not delete. install.sh points ~/.local/bin/dots straight at
+    # this file, so removing it before a replacement exists dangles the symlink
+    # and `dots` stops being a command at all — on a machine that may have no
+    # network, or whose next download is exactly the one being refused. Tier 2
+    # overwrites it on success anyway.
+    #
+    # Refusing to RUN an unverified binary and destroying the only working one
+    # are different things, and only the first is this function's job.
+    log "dots-resolve: cached binary was not admitted by the current signing key — refetching"
     return 1
   fi
 
@@ -244,19 +256,33 @@ try_download() {
   # the same check try_cached does, for the same reason (a truncated or
   # corrupted cache would otherwise be reused forever). If it fails, fall
   # through and re-download rather than returning a bad binary.
+  # Three outcomes, and they are deliberately not the same:
+  #
+  #   good + admitted   use it
+  #   good + declined   leave it alone and refetch. The bytes are fine; only
+  #                     the key that vouched for them is no longer in force.
+  #                     ~/.local/bin/dots is a symlink pointing AT this file,
+  #                     so deleting it before a replacement exists leaves the
+  #                     machine with no dots command at all — which is exactly
+  #                     what happened to v2. $tmp/mv below overwrites it on
+  #                     success, so there is nothing to clean up first.
+  #   bad digest        delete it. These bytes changed after being verified,
+  #                     and leaving them reachable through the symlink means
+  #                     running whatever they became.
   dest="$CACHE_DIR/dots-$version"
-  if [ -x "$dest" ] && cached_digest_ok "$dest" "$CACHE_DIR/dots-$version.sha256"; then
-    if cache_provenance_ok "$version"; then
-      printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
-      printf '%s\n' "$dest"
-      return 0
-    fi
-    log "dots-resolve: cached $version was not admitted by the current signing key — refetching to check it"
-    rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
-  fi
   if [ -x "$dest" ]; then
-    log "dots-resolve: cached $version failed its digest — refetching"
-    rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
+    if cached_digest_ok "$dest" "$CACHE_DIR/dots-$version.sha256"; then
+      if cache_provenance_ok "$version"; then
+        printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
+        printf '%s\n' "$dest"
+        return 0
+      fi
+      log "dots-resolve: cached $version was not admitted by the current signing key — refetching to check it"
+    else
+      log "dots-resolve: cached $version failed its digest — discarding and refetching"
+      rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" \
+            "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
+    fi
   fi
 
   tmp="$CACHE_DIR/.dots-$version.$$"

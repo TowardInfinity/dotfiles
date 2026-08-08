@@ -509,7 +509,7 @@ func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 				Title: "Remote doctor: " + alias,
 				Argv: []string{"ssh",
 					"-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
-					alias, "dots", "doctor"},
+					alias, remoteDots("doctor")},
 				// Read-only, but it still opens a connection to another
 				// machine. Every other key in this app asks first, and a
 				// keystroke that reaches out over the network without asking

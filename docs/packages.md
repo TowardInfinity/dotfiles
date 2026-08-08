@@ -69,7 +69,7 @@ follows for launchd/systemd/docker:
 | uv tool | `uv tool list` | not offered — no offline query | `uv tool upgrade <name>` |
 | pip (`--user`) | `pip3 list --user --format=json` | `pip3 list --user --outdated --format=json` | `pip3 install --user --upgrade <name>` |
 | go (`~/go/bin`) | `go version -m <binary>` per file | not offered — needs a network call per binary | not offered — `go install <mod>@latest` re-fetches rather than upgrading in place |
-| installer (claude, opencode) | `<bin> --version` | not offered — no offline query | re-runs the same `curl \| bash` install script bootstrap.sh used, which is self-updating |
+| installer (claude, opencode) | presence only (`have()` check) — no version query | not offered — no offline query | re-runs the same `curl \| bash` install script bootstrap.sh used, which is self-updating |
 
 A blank `LATEST` column means "not knowable offline for this manager", never
 a guessed "up to date" — the same principle the doctor checks above already
@@ -77,6 +77,20 @@ follow with `checkWarn`. The `u` key only appears in the footer when the
 cursor is on a row that actually has an upgrade path; pressing it runs the
 command through the same confirm-then-stream overlay every other Manage
 action (services, dotfiles updates, machine doctor) already uses.
+
+The installer group's `VERSION` column is blank the same way — presence
+only, deliberately. Parsing each tool's own `--version` output doesn't
+scale as more tools get added to `installerCLIs`, so this manager tracks
+"is it here" and nothing else. The curated list is still just claude and
+opencode: fnm looked like an obvious third entry but isn't a real
+candidate — `bootstrap.sh` installs it via `brew` on macOS and only falls
+back to a web install script on Linux, so this backend (which can't tell
+which OS installed a given binary) would show it twice, once correctly
+under Brew and once spuriously under Installer, and offer to re-run the
+Linux installer over a brew install. A real addition here has to be a
+single binary installed the same `curl | bash` way on every OS, with no
+other install path anywhere in `bootstrap.sh` — claude and opencode are the
+only two that currently qualify.
 
 Groups are shown in a fixed order — pnpm, npm, uv tool, pip, go, installer,
 then brew last. Brew typically outnumbers every other manager's packages

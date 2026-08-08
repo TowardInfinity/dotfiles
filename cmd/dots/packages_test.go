@@ -200,28 +200,16 @@ func TestParseGoVersionMNoModLine(t *testing.T) {
 
 // ── installer (claude, opencode) ────────────────────────────────
 
-func TestParseInstallerVersion(t *testing.T) {
-	cases := map[string]string{
-		"2.1.226 (Claude Code)\n": "2.1.226",
-		"1.18.7\n":                "1.18.7",
-		"":                        "",
-		"   \n":                   "",
+func TestInstallerCmdFor(t *testing.T) {
+	cmd, ok := installerCmdFor("claude")
+	if !ok || !strings.Contains(cmd, "claude.ai/install.sh") || !strings.Contains(cmd, "| bash") {
+		t.Errorf("claude: cmd=%q ok=%v, want a claude.ai install.sh command piped to bash", cmd, ok)
 	}
-	for out, want := range cases {
-		if got := parseInstallerVersion(out); got != want {
-			t.Errorf("parseInstallerVersion(%q) = %q, want %q", out, got, want)
-		}
+	cmd, ok = installerCmdFor("opencode")
+	if !ok || !strings.Contains(cmd, "opencode.ai/install") || !strings.Contains(cmd, "| bash") {
+		t.Errorf("opencode: cmd=%q ok=%v, want an opencode.ai install command piped to bash", cmd, ok)
 	}
-}
-
-func TestInstallerURLFor(t *testing.T) {
-	if url, ok := installerURLFor("claude"); !ok || url != "https://claude.ai/install.sh" {
-		t.Errorf("claude: url=%q ok=%v, want https://claude.ai/install.sh, true", url, ok)
-	}
-	if url, ok := installerURLFor("opencode"); !ok || url != "https://opencode.ai/install" {
-		t.Errorf("opencode: url=%q ok=%v, want https://opencode.ai/install, true", url, ok)
-	}
-	if _, ok := installerURLFor("something-else"); ok {
+	if _, ok := installerCmdFor("something-else"); ok {
 		t.Error("unknown name: expected ok=false")
 	}
 }
@@ -515,7 +503,9 @@ func TestPackageActionKnownManagers(t *testing.T) {
 // wouldn't be caught by "does len(Argv) look reasonable."
 func TestPackageActionInstaller(t *testing.T) {
 	for _, name := range []string{"claude", "opencode"} {
-		p := pkg{Manager: pmInstaller, Name: name, Version: "1.0"}
+		// Version is always blank for this manager now (presence only) —
+		// build the pkg the same way real discovery does.
+		p := pkg{Manager: pmInstaller, Name: name}
 		spec, ok := packageAction(p)
 		if !ok {
 			t.Fatalf("%s: expected an action", name)
@@ -523,18 +513,18 @@ func TestPackageActionInstaller(t *testing.T) {
 		if len(spec.Argv) != 3 || spec.Argv[0] != "sh" || spec.Argv[1] != "-c" {
 			t.Errorf("%s: Argv = %v, want [sh -c <pipe>]", name, spec.Argv)
 		}
-		url, _ := installerURLFor(name)
-		if !strings.Contains(spec.Argv[2], url) || !strings.Contains(spec.Argv[2], "| bash") {
-			t.Errorf("%s: Argv[2] = %q, want it to curl %q and pipe to bash", name, spec.Argv[2], url)
+		cmd, _ := installerCmdFor(name)
+		if spec.Argv[2] != cmd {
+			t.Errorf("%s: Argv[2] = %q, want %q", name, spec.Argv[2], cmd)
 		}
 		if spec.Confirm == "" {
 			t.Errorf("%s: empty Confirm", name)
 		}
 	}
 
-	// A name that isn't claude or opencode has no known install URL, so
+	// A name that isn't claude or opencode has no known install command, so
 	// there's nothing packageAction could safely run.
-	if _, ok := packageAction(pkg{Manager: pmInstaller, Name: "unknown-tool", Version: "1.0"}); ok {
+	if _, ok := packageAction(pkg{Manager: pmInstaller, Name: "unknown-tool"}); ok {
 		t.Error("unknown installer name: expected no action")
 	}
 }

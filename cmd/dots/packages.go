@@ -50,7 +50,7 @@ const (
 	pmUvTool
 	pmPip
 	pmGo
-	pmInstaller // claude, opencode — see discoverInstallerCLIs
+	pmInstaller // claude, opencode — see installerCLIs; presence only, no version
 	pmBrew
 	numPkgManagers
 )
@@ -626,54 +626,52 @@ func parseGoVersionM(binName, output string) (pkg, bool) {
 // installerCLIs lists tools bootstrap.sh installs via a vendor's own web
 // install script (`curl -fsSL <url> | bash`) rather than through any package
 // manager above — brew, pnpm, npm, uv tool, pip and go all have no way to
-// see these, since none of them did the installing. install.sh is also how
-// each one upgrades: re-running it just fetches whatever's current, the
-// same self-updating shape `uv`/`pnpm`/`fnm`'s own installers already have.
+// see these, since none of them did the installing. The second field is the
+// full ready-to-run shell command (not just a URL), since some installers
+// take extra flags after the pipe.
+//
+// Deliberately just these two: every other bootstrap.sh candidate fails for
+// its own reason. fnm looked like an obvious third entry but isn't — it's
+// `brew install`ed on macOS and only falls back to curl|bash on Linux, so
+// discoverInstallerCLIs (which can't tell which OS installed a binary) would
+// duplicate it against its own pmBrew row and offer to re-run the Linux
+// installer over a brew install. oh-my-zsh/SDKMAN install a directory, not a
+// binary — already covered by dedicated `dots doctor` checks. codex goes
+// through pnpm/npm, an already-tracked manager. A real third candidate has
+// to be a single binary, installed the same curl|bash way on every OS this
+// runs on, with no other install path anywhere in bootstrap.sh.
 var installerCLIs = []struct {
-	bin, install string
+	bin, cmd string
 }{
-	{"claude", "https://claude.ai/install.sh"},
-	{"opencode", "https://opencode.ai/install"},
+	{"claude", "curl -fsSL https://claude.ai/install.sh | bash"},
+	{"opencode", "curl -fsSL https://opencode.ai/install | bash"},
 }
 
+// discoverInstallerCLIs only checks presence via have() — no per-tool
+// --version parsing. Maintaining a version-output parser for every tool
+// added here doesn't scale, so this manager tracks "is it here" only, the
+// same way Latest is left blank everywhere else "not knowable offline"
+// applies.
 func discoverInstallerCLIs(ctx context.Context) ([]pkg, bool) {
 	var pkgs []pkg
 	ran := false
 	for _, c := range installerCLIs {
-		p, ok := have(c.bin)
-		if !ok {
+		if _, ok := have(c.bin); !ok {
 			continue // not installed here — not every machine runs --ai
 		}
 		ran = true
-		out, err := exec.CommandContext(ctx, p, "--version").Output()
-		if err != nil {
-			continue
-		}
-		if v := parseInstallerVersion(string(out)); v != "" {
-			pkgs = append(pkgs, pkg{Manager: pmInstaller, Name: c.bin, Version: v})
-		}
+		pkgs = append(pkgs, pkg{Manager: pmInstaller, Name: c.bin})
 	}
 	return pkgs, ran
 }
 
-// parseInstallerVersion takes just the first field: claude prints
-// "2.1.226 (Claude Code)", opencode prints a bare "1.18.7" — both leave a
-// clean version number as the first whitespace-separated token.
-func parseInstallerVersion(out string) string {
-	fields := strings.Fields(out)
-	if len(fields) == 0 {
-		return ""
-	}
-	return fields[0]
-}
-
-// installerURLFor looks up the install command for a pmInstaller package by
+// installerCmdFor looks up the install command for a pmInstaller package by
 // name — Manager alone doesn't say which one, since claude and opencode
 // share it the same way multiple names share pmUvTool or pmGo.
-func installerURLFor(name string) (string, bool) {
+func installerCmdFor(name string) (string, bool) {
 	for _, c := range installerCLIs {
 		if c.bin == name {
-			return c.install, true
+			return c.cmd, true
 		}
 	}
 	return "", false
@@ -727,7 +725,7 @@ func packageAction(p pkg) (actionSpec, bool) {
 			Timeout: 3 * time.Minute,
 		}, true
 	case pmInstaller:
-		url, ok := installerURLFor(p.Name)
+		cmd, ok := installerCmdFor(p.Name)
 		if !ok {
 			return actionSpec{}, false
 		}
@@ -736,8 +734,8 @@ func packageAction(p pkg) (actionSpec, bool) {
 		// same as bootstrap.sh runs it, so there's no argv form without one.
 		return actionSpec{
 			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"sh", "-c", "curl -fsSL " + url + " | bash"},
-			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) by re-running its install script?", p.Name, p.Version, target),
+			Argv:    []string{"sh", "-c", cmd},
+			Confirm: fmt.Sprintf("Upgrade %s by re-running its install script?", p.Name),
 			Timeout: 5 * time.Minute,
 		}, true
 	default:

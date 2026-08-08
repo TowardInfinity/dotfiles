@@ -22,12 +22,15 @@ Relative cost per token: **Fable 5× · Opus 2.5× · Sonnet 1× · Haiku 0.5×*
   while planning, automatic switch to Sonnet for execution. Plain `/model opus`
   only when a whole session is architecture.
 - **Haiku** for mechanical work; it is the configured fallback.
-- **Never Fable for engineering.** It is 5× Sonnet and is never a default —
-  it only runs if something selects it. It once silently became the single
-  largest line item on this account (4,256 main-session turns). Creative and
-  narrative work only.
+- **Never Fable for engineering.** It is 5× Sonnet and is never a default. It
+  once silently became the single largest line item on this account (4,256
+  main-session turns) — so `availableModels` in `settings.json` now hard-blocks
+  it: `/model fable` is rejected server-side, not just discouraged. Wanting it
+  back for creative/narrative work means editing that key first.
 - **Never enable agent teams** (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`) — ~7×
-  a normal session.
+  a normal session. `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS=3` and
+  `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` cap the same shape short of the
+  feature flag — normal single-level delegation still works.
 
 Effort is the reasoning lever (`/effort low|medium|high|xhigh|max`), persisted at
 `high`. `MAX_THINKING_TOKENS` does nothing on Opus 5 / Sonnet 5 — they use

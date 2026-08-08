@@ -730,6 +730,14 @@ policy_key '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' 250000 \
   "contexts drift back toward 800k, and every turn re-reads the whole window"
 policy_key '.advisorModel' opus \
   "fable is 5x sonnet and would turn every advisor() call into the same mistake"
+policy_key '.availableModels | contains(["fable"])' false \
+  "fable was 46% of spend as a deliberate main-model pick — this is what stops a repeat, not just the prose rule"
+policy_key '.fastModePerSessionOptIn' true \
+  "fast mode runs Opus; without this a /fast toggle can persist as the default for sessions after the one that needed it"
+policy_key '.env.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS' 3 \
+  "the unset default is 20 concurrent subagents, effectively no cap at all"
+policy_key '.env.CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH' 1 \
+  "the unset default is 3 — subagents spawning subagents spawning subagents, the cost shape agent teams warns about"
 
 # CLAUDE_CODE_SUBAGENT_MODEL is a hard override that beats both the per-call
 # model parameter and an agent's frontmatter, collapsing the whole tiering onto

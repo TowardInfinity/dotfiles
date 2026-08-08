@@ -75,6 +75,55 @@ it's occasional-2.5x rather than continuous-2.5x, not why it's free. Toggling
 `/advisor` mid-session does not invalidate the main model's prompt cache,
 unlike switching `/model` or `/effort`, which do.
 
+## Enforcement, not just prose
+
+Everything above this line is Claude *deciding* to follow policy — a resumed
+session, an advisor pick, a `/model` typo can still land on the wrong tier.
+Four keys close specific gaps instead of just documenting them. All four were
+confirmed live in the installed binary's settings schema, not assumed from
+docs, the same way `advisorModel` was.
+
+```json
+"availableModels": ["opus", "sonnet", "haiku"],
+"fastModePerSessionOptIn": true,
+"env": {
+  "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "3",
+  "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
+}
+```
+
+**`availableModels`** is a correction to an earlier version of this doc, which
+said no setting could pin Fable off. Wrong: it's a real allowlist, checked
+server-side by the same code path `/model` calls to validate a switch. Fable
+outside the list means `/model fable` is rejected outright —
+`"Model 'fable' is not available. Your organization restricts model
+selection."` — and the same check gates subagent, skill, and teammate model
+resolution. The docs call it "typically set in managed settings by enterprise
+administrators"; that's a description of who usually bothers, not a
+restriction on where it's read from — the merge order
+(`userSettings → projectSettings → localSettings → flagSettings →
+policySettings`) treats plain `~/.claude/settings.json` as a normal layer.
+Fable is excluded on purpose: it was 46% of spend as a deliberate main-model
+pick, not an accident a prose rule would have caught anyway. The tradeoff,
+accepted knowingly: the documented "creative and narrative work only"
+exception is no longer reachable without editing this file first. If that
+exception is ever wanted again, it's a one-line settings.json edit and a
+`policy_key` update, not a policy violation.
+
+**`fastModePerSessionOptIn`** — Fast mode runs Opus. Without this key, turning
+it on with `/fast` can persist as the saved default for sessions after the one
+that needed it, the same silent-drift shape as a resumed session staying on
+the wrong model. `true` scopes it to the session that opted in.
+
+**`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`** (unset default: 20) and
+**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`** (unset default: 3) give
+`delegation.md`'s "never enable agent teams" line a floor under it. Agent
+teams are the extreme case of many concurrent, nested agents; an unset default
+of 20 concurrent and 3 levels deep is most of the way there without the
+feature flag. 3 concurrent still allows a real Explore/Plan fan-out; depth 1
+still allows a normal single-level `Agent` call, it just stops that subagent
+from spawning one of its own.
+
 ## Resumed sessions ignore all of this
 
 `"model"` in `settings.json` is the default for a **new** session. Resume an old
@@ -202,10 +251,11 @@ is visible there too, in the same colours.
 
 Codex 5-hour message allowance on Plus: Sol 15–90 · Terra 20–110 · Luna 50–280.
 
-**Never use Fable for engineering.** It is never a default and only runs if
-something selects it. On this account it silently became the single largest
-line item — 4,256 main-session turns, ~46% of all spend — while doing work
-Sonnet would have done at a fifth the price.
+**Never use Fable for engineering.** It is never a default, and as of
+`availableModels` (see [Enforcement, not just prose](#enforcement-not-just-prose))
+it cannot be selected at all without a settings.json edit. On this account it
+silently became the single largest line item — 4,256 main-session turns, ~46%
+of all spend — while doing work Sonnet would have done at a fifth the price.
 
 The honest caveat: Fable 5 does lead **SWE-Bench Pro at 80%** (vs Sol's 64.6%),
 so it is genuinely the strongest repo-level coder in the table. It is still the

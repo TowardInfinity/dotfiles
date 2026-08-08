@@ -1,7 +1,9 @@
 {
   "cleanupPeriodDays": 99999,
   "env": {
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000",
+    "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "3",
+    "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
   "permissions": {
     "allow": [
@@ -32,6 +34,11 @@
   },
   "model": "sonnet",
   "fallbackModel": [
+    "haiku"
+  ],
+  "availableModels": [
+    "opus",
+    "sonnet",
     "haiku"
   ],
   "skillOverrides": {
@@ -79,5 +86,6 @@
   },
   "alwaysThinkingEnabled": false,
   "effortLevel": "high",
-  "advisorModel": "opus"
+  "advisorModel": "opus",
+  "fastModePerSessionOptIn": true
 }

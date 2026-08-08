@@ -39,7 +39,9 @@ call — if `.zshrc` references a tool, it is here.
 
 Version managers rather than languages — **fnm** for Node, **uv** for Python,
 **SDKMAN** for Java — so versions stay per-project. `--deps` installs the
-manager and a default JDK; `sdk install java <version>` gets you others.
+manager and a default JDK; `sdk install java <version>` gets you others. `dots
+version-managers` has the actual install/list/switch/remove commands for all
+three.
 
 ## AI CLIs — opt in with `--ai`
 

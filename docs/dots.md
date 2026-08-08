@@ -1,14 +1,17 @@
 ---
-title: dots
-group: Start
-order: 5
-summary: The command you are already running — panes, keys and every subcommand
+title: Subcommands
+group: dots
+order: 10
+summary: The command you are already running — every subcommand and what it's for
 ---
 
-# dots
+# Subcommands
 
 Every other page here documents a tool. This one documents the thing you are
-reading them in.
+reading them in — split across a few pages now that it covers this much: this
+one is the CLI surface, `dots dots-panes` is the TUI, `dots dots-doctor` is
+what health checks it runs, `dots dots-pages` is how a page like this one gets
+written.
 
 `dots` is two programs wearing one name. With no arguments it opens a
 full-screen browser, which is what you want when you are looking *for*
@@ -21,66 +24,6 @@ dots              # browse
 dots tmux         # print the tmux page
 dots search copy  # find which page mentions it
 ```
-
-## The three panes
-
-`1` `2` `3` jump straight to one; `tab` cycles.
-
-| | Pane | What it is for |
-|---|---|---|
-| `1` | **Docs** | These pages. `/` filters, `j`/`k` moves, `d`/`u` scrolls by half a screen, the wheel scrolls. |
-| `2` | **Doctor** | Whether the tools these configs actually call are installed. `r` re-checks, `i` installs what is missing. |
-| `3` | **Manage** | Everything stateful. `h`/`l` moves between its six sections. |
-
-`q` quits from anywhere.
-
-### The arrow keys
-
-All four work, everywhere something can move. The status bar shows the letter
-form because it is shorter, but the arrows are always aliases for it:
-
-| | Moves the rail | Moves within the section |
-|---|---|---|
-| **Docs** | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
-| **Manage** | `←` `→` · `h` `l` | `↑` `↓` · `j` `k` |
-
-Manage's rail and its section content never share a key: `←`/`→` always
-switches sections, `↑`/`↓` always acts within whichever section is showing —
-a row cursor where there's a list (Services, Packages, Projects, Machines), a
-scroll offset where there's just text (Overview, Dotfiles). Where a section
-has nothing to move, `↑`/`↓` does nothing rather than falling back to a
-second meaning — an earlier version had `↑`/`↓` move the rail in the two
-sections with no list, which meant the same keys meant two different things
-depending on where you were; landing on Services mid-scroll and having
-`↑`/`↓` suddenly mean something else was the actual bug report that got it
-removed.
-
-While a filter box is open (Services' or Packages' `/`), every key including
-`h`/`j`/`k`/`l` goes into the filter text instead — none of the above fires
-until you `enter`/`esc` out of it.
-
-Doctor has neither a rail nor a list, so the arrows have nothing to move there.
-
-Nothing scrolls sideways anywhere: the body is wrapped to the reading measure,
-which is why `←`/`→` were free to mean "move the rail" in the first place.
-
-### Manage's sections
-
-**Overview** · **Dotfiles** · **Services** · **Projects** · **Machines**
-
-| Key | Where | Does |
-|---|---|---|
-| `u` | Dotfiles | update — pull, then relink |
-| `L` | Dotfiles | relink only |
-| `p` `t` `D` | Dotfiles | nvim plugins · TPM · dependencies |
-| `s` `x` `R` | Services | start · stop · restart |
-| `a` | Services | toggle all / running only |
-| `enter` | Projects | open a tmux session there |
-| `d` | Machines | run doctor on that machine over SSH |
-| `r` | most | rescan |
-
-The status bar always shows the keys for whatever is in front of you, so this
-table is a reference, not something to memorise.
 
 ## Subcommands
 
@@ -117,81 +60,3 @@ Colour and word-wrapping are dropped when stdout is not a terminal, so
 `dots tmux | grep prefix` reads like a text file rather than a screenshot.
 `dots doctor` exits non-zero when something is missing, so it works as a CI or
 script step. `dots search` exits non-zero on no match.
-
-## What doctor checks
-
-Two different questions, in two groups.
-
-**Tools** — Core, Tools and Frameworks — answer *can the configs run at all*: is
-nvim here, is tpm cloned. A `--light` box is checked against the shorter list it
-actually asked for, not the full one.
-
-**Config** answers something quieter and worse: everything is installed, but has
-the configuration drifted?
-
-| Row | Fails when |
-|---|---|
-| `codex config` | `~/.codex/config.toml` is missing or does not parse as TOML |
-| `codex mode` | it is anything other than `0600` |
-| `managed block` | the markers are missing, duplicated or out of order, or the block no longer matches `common/codex/config.policy.toml` |
-| `dots binary` | never — it reports the version and where the binary came from |
-| `signing key` | the key this binary trusts differs from the one in the checkout, or the checkout has none |
-| `release` | `--online` only: the installed version is behind Latest |
-
-The mode row exists because that file went `0664` on three servers and nothing
-errored. It can hold MCP credentials, so wider than owner-only is a finding.
-
-The signing-key row prints a fingerprint you can compare by hand. When the
-binary and the checkout disagree, `dots update` is about to start refusing
-releases — see `dots signing`.
-
-### Three states, and why warnings do not fail
-
-`✓` passed · `✗` failed · `!` could not be answered.
-
-A `!` never changes the exit status. Being offline, or running a `--copy`
-install with no checkout to compare the policy against, is not an unhealthy
-machine — and an exit code that cannot tell *unreachable* from *broken* is one
-you stop trusting. Missing, malformed, insecure and stale all stay `✗`.
-
-### Two repair keys, deliberately
-
-In the pane, `i` installs missing packages and `c` repairs configuration by
-re-running `install.sh`. They are separate because they fix disjoint problems:
-folding them together would let a missing brew formula block a config repair.
-`i` is never offered for a Config row — none of them names a package.
-
-`--online` is CLI-only. The pane's pass stays offline so opening it never
-stalls on a slow link for a check nobody asked for.
-
-## Where the pages come from
-
-`docs/*.md` in the repo. Each has front matter that decides where it lands:
-
-```markdown
----
-title: dots
-group: Start
-order: 5
-summary: One line, shown in `dots topics`
----
-```
-
-`group` is the section in the Docs pane, `order` sorts within it. Add a file,
-and it appears — there is no index to update. `dots edit <topic>` opens one in
-`$EDITOR`; `dots path` tells you where they live.
-
-Pages are read from the checkout when there is one, so an edit shows up
-immediately. A `--copy` install has no checkout, and the binary falls back to
-the copy baked into it at build time.
-
-## When it says you are ahead
-
-```
-  !  repo           1 uncommitted file, 2 unpushed commits
-     run `dots sync` to push and update the other machines
-```
-
-The badge in the status bar and that row in `dots doctor` mean this machine's
-configs have moved on and the others have not. Neither pushes anything — see
-`dots docs update` for what `dots sync` does and why it asks twice.

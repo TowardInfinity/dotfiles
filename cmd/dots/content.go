@@ -25,11 +25,13 @@ type doc struct {
 // Neovim and Start last, which is nobody's reading order.
 var groupOrder = map[string]int{
 	"Start":     0,
-	"tmux":      1,
-	"zsh":       2,
-	"Neovim":    3,
-	"Reference": 4,
-	"Maintain":  5,
+	"dots":      1,
+	"tmux":      2,
+	"zsh":       3,
+	"Neovim":    4,
+	"Reference": 5,
+	"Models":    6,
+	"Maintain":  7,
 }
 
 // loadDocs prefers docs on disk and falls back to the embedded copy.

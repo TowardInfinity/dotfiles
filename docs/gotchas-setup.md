@@ -37,6 +37,19 @@ movement into fake keystrokes — `zsh: command not found: 35`. The macOS
 
 *Source: macos/zsh/.zshrc*
 
+## `pnpm add -g` can succeed and still install somewhere nothing can run
+
+pnpm has its own configured global bin directory, separate from wherever
+`pnpm` itself lives, and `pnpm add -g` does not check whether that directory
+is on `PATH` before it installs there. A fresh pnpm setup that never ran
+`pnpm setup` (or added the directory to `.zshrc` by hand) will report every
+global install as successful while nothing it puts there actually runs.
+`dots doctor`'s "pnpm global bin" check catches it by asking `pnpm bin -g`
+the same question — it refuses to print a directory it can't reach, and its
+exit code is the check. Fix with `pnpm setup`, then restart the shell.
+
+*Source: cmd/dots/packagehealth.go*
+
 ## Jupyter comes from `uv tool`, never brew or apt
 
 Those builds ship their own externally-managed Python, so the single

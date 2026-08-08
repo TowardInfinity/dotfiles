@@ -5,10 +5,10 @@ import (
 	"os"
 )
 
-// runDoctorCLI is `dots doctor` outside the TUI, sharing checkNames/evalCheck
-// and configChecks with the pane so the two can never disagree about what
-// "installed" or "healthy" means — that distinction has already caused one
-// round of confusion.
+// runDoctorCLI is `dots doctor` outside the TUI, sharing checkNames/evalCheck,
+// configChecks, and packageChecks with the pane so the two can never disagree
+// about what "installed" or "healthy" means — that distinction has already
+// caused one round of confusion.
 //
 // Exits non-zero when something is missing or drifted, so it is usable in a
 // script or a CI step, not only by eye. Warnings never affect the exit status:
@@ -45,6 +45,7 @@ Warnings (offline, no checkout to compare against) do not affect the exit code.
 		results = append(results, evalCheck(n))
 	}
 	results = append(results, configChecks(repo)...)
+	results = append(results, packageChecks()...)
 	if online {
 		results = append(results, onlineCheck())
 	}
@@ -100,7 +101,7 @@ Warnings (offline, no checkout to compare against) do not affect the exit code.
 
 	fmt.Printf("  %s %v\n", styPending.Render(fmt.Sprintf("%d failing:", len(failed))), failed)
 
-	// Two different repairs, and offering the wrong one wastes a --deps run
+	// Three different repairs, and offering the wrong one wastes a --deps run
 	// that installs nothing. Split the advice the same way the TUI splits the
 	// keys.
 	if anyConfigFailed(failed) {
@@ -109,6 +110,14 @@ Warnings (offline, no checkout to compare against) do not affect the exit code.
 	if anyToolFailed(failed) {
 		fmt.Printf("  Install missing tools with:\n    %s\n",
 			styValue.Render(`sh -c "$(curl -fsSL https://toin.in/install)" -- --deps`))
+	}
+	if anyPackageFailed(failed) {
+		// No single command covers this group — a PATH fix and a missing
+		// `uv tool install` aren't the same repair, so there is nothing to
+		// hand `styValue` the way the two blocks above do. Point back at the
+		// row instead of guessing which one applies.
+		fmt.Printf("  Package fixes are per-row above — %s\n",
+			styMuted.Render("--deps installs nothing new here"))
 	}
 	fmt.Println()
 	_ = os.Stdout.Sync()
@@ -143,7 +152,16 @@ func anyConfigFailed(names []string) bool {
 
 func anyToolFailed(names []string) bool {
 	for _, n := range names {
-		if !isConfigCheck(n) {
+		if !isConfigCheck(n) && !isPackageCheck(n) {
+			return true
+		}
+	}
+	return false
+}
+
+func anyPackageFailed(names []string) bool {
+	for _, n := range names {
+		if isPackageCheck(n) {
 			return true
 		}
 	}

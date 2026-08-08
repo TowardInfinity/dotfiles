@@ -128,11 +128,12 @@ func runDoctorChecks() tea.Msg {
 	for i, n := range names {
 		out[i] = evalCheck(n)
 	}
-	// Config health is appended, never interleaved, so the Config group stays
-	// contiguous under its heading. Offline only: the TUI's pass must not
-	// reach the network, or opening the pane would stall on a slow link for a
-	// check nobody asked for. `dots doctor --online` is the opt-in.
-	return doctorMsg{results: append(out, configChecks(findRepo())...)}
+	// Config and Package health are appended, never interleaved, so each group
+	// stays contiguous under its own heading. Offline only: the TUI's pass
+	// must not reach the network, or opening the pane would stall on a slow
+	// link for a check nobody asked for. `dots doctor --online` is the opt-in.
+	out = append(out, configChecks(findRepo())...)
+	return doctorMsg{results: append(out, packageChecks()...)}
 }
 
 func evalCheck(name string) checkResult {
@@ -284,10 +285,12 @@ func brewFormula(check string) string {
 func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 	var missing []string
 	for _, c := range m.checks {
-		// Config rows are deliberately skipped: none of them names a package,
-		// so letting them through would put `brew install "managed block"` in
-		// the generated command. They have their own repair action.
-		if c.state == checkBad && !isConfigCheck(c.name) {
+		// Config and Package rows are deliberately skipped: none of them names
+		// a package, so letting them through would put
+		// `brew install "managed block"` — or `brew install "pnpm global bin"`,
+		// which is a PATH problem, not a formula — in the generated command.
+		// They have their own repair action, or none at all.
+		if c.state == checkBad && !isConfigCheck(c.name) && !isPackageCheck(c.name) {
 			missing = append(missing, c.name)
 		}
 	}
@@ -388,6 +391,8 @@ func checkGroup(name string) string {
 	switch {
 	case isConfigCheck(name):
 		return "Config"
+	case isPackageCheck(name):
+		return "Packages"
 	}
 	switch name {
 	case "zsh", "git", "nvim", "tmux":

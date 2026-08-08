@@ -526,8 +526,9 @@ esac
 # statusline.sh must report the *running* model. settings.json only holds the
 # default for new sessions, so reading it would miss every /model switch —
 # exactly the case worth catching.
-sl_marker() {
-  printf '{"model":{"id":"%s","display_name":"D"},"workspace":{"current_dir":"/tmp/x"}}' "$1" \
+sl_marker() {   # sl_marker <model id> [effort level]
+  printf '{"model":{"id":"%s","display_name":"D"},"effort":{"level":"%s"},"workspace":{"current_dir":"/tmp/x"}}' \
+    "$1" "${2:-}" \
     | env DOTS_PANE_DIR="$PANES" TMUX_PANE='%9' sh "$STATUS_SH" >/dev/null 2>&1
   cat "$PANES/9" 2>/dev/null
 }
@@ -542,6 +543,36 @@ esac
 [ "$(sl_marker claude-sonnet-5 | awk -F'\t' '{print NF}')" = 3 ] \
   && ok "the marker has the three fields model.sh reads" \
   || bad "the marker has the three fields model.sh reads"
+
+# Effort is the reasoning lever on Opus 5 / Sonnet 5, so the same model at max
+# and at low are quite different amounts of spend and the bar should say which.
+case "$(sl_marker claude-opus-5 xhigh)" in
+  *opus/xh) ok "effort rides along with the claude model" ;;
+  *) bad "effort rides along with the claude model" "$(sl_marker claude-opus-5 xhigh)" ;;
+esac
+# The label goes through statusline first so this tests the real string, but
+# the owner has to be re-stamped: sl_marker runs inside a command substitution,
+# so the pid it recorded is already gone and model.sh would rightly drop it.
+printf 'claude\t%s\t%s\n' "$$" "$(sl_marker claude-opus-5 xhigh | cut -f3)" > "$PANES/9"
+case "$(model_seg zsh)" in
+  *'#f7768e'*opus/xh*) ok "an effort suffix does not defeat the tier colour" ;;
+  *) bad "an effort suffix does not defeat the tier colour" "$(model_seg zsh)" ;;
+esac
+
+# @tsv plus `IFS=<tab> read a b c d` collapses a run of tabs, because tab is IFS
+# whitespace — so one empty field shifts every later field left. With no effort
+# set that put the working directory into the effort slot and rendered
+# "opus//t". Empty fields are the normal case here, not an edge one.
+case "$(sl_marker claude-opus-5 '')" in
+  *"$(printf '\t')"opus) ok "an absent effort leaves the model alone" ;;
+  *) bad "an absent effort leaves the model alone" "$(sl_marker claude-opus-5 '')" ;;
+esac
+out=$(printf '{"model":{"id":"claude-haiku-4-5","display_name":""},"effort":{"level":"low"},"workspace":{"current_dir":"/tmp/x"}}' \
+        | env DOTS_PANE_DIR="$PANES" TMUX_PANE='%9' sh "$STATUS_SH" 2>/dev/null; cat "$PANES/9")
+case "$out" in
+  *haiku/lo) ok "an empty earlier field does not shift effort" ;;
+  *) bad "an empty earlier field does not shift effort" "$out" ;;
+esac
 
 # settings.json is shared with a1/v1/v2, and a baked-in /Users/... path is the
 # mistake the Obsidian hook already made once.

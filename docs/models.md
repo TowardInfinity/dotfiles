@@ -45,24 +45,28 @@ you cannot see is a policy you find out about at the end of the month. The tmux
 status bar names the model of whatever agent is in the current pane:
 
 ```
-󰚩 opus     … red    — opus · fable · sol   2.5x to 5x the default
-󰚩 sonnet   … green  — sonnet · terra       on policy
-󰚩 luna/md  … cyan   — haiku · luna         cheap
+󰚩 opus/xh   … red    — opus · fable · sol   2.5x to 5x the default
+󰚩 sonnet/hi … green  — sonnet · terra       on policy
+󰚩 luna/md   … cyan   — haiku · luna         cheap
 ```
 
-Nothing renders when the pane is not running an agent. Codex carries its
-reasoning effort too (`/lo /md /hi /xh /mx`); Claude Code does not report effort
-to the status line, so it shows the model alone.
+Nothing renders when the pane is not running an agent.
+
+The suffix is the reasoning effort — `lo md hi xh mx` — and it is there because
+effort is the *only* reasoning lever on Opus 5 and Sonnet 5 (`MAX_THINKING_TOKENS`
+does nothing on them), so the same model at `max` and at `low` are quite
+different amounts of spend. Both sides use the same abbreviations, so one glance
+reads the same either way.
 
 **How each side reports itself.** Neither tool answers questions from outside,
 and the model is not visible in `ps` — `claude` started on Sonnet and switched
 to Opus looks identical. So each writes a marker into
 `~/.cache/dots/panes/<pane>` and `common/tmux/model.sh` reads it:
 
-| | Reports via | Catches a mid-session switch |
-|---|---|---|
-| Claude Code | `statusLine` hook (`common/claude/statusline.sh`) | yes — it runs on every UI refresh |
-| Codex | zsh `codex` wrapper, refreshed from the session rollout | yes — rollouts log model+effort per turn |
+| | Reports via | Carries model + effort from | Catches a mid-session switch |
+|---|---|---|---|
+| Claude Code | `statusLine` hook (`common/claude/statusline.sh`) | the payload's `model.id` and `effort.level` | yes — it runs on every UI refresh |
+| Codex | zsh `codex` wrapper, refreshed from the session rollout | the last `turn_context` record | yes — rollouts log model+effort per turn |
 
 Codex needs the wrapper because its only hook, `notify`, is already taken by the
 Computer Use app. A pane running `codex` with no marker at all — started before

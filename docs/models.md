@@ -37,6 +37,44 @@ overwrites it. You should rarely need to override either default.
 execution, which is the cheapest way to get Opus-quality design decisions.
 `codex -p sol` layers `~/.codex/sol.config.toml` on top of the base config.
 
+## Resumed sessions ignore all of this
+
+`"model"` in `settings.json` is the default for a **new** session. Resume an old
+one and it keeps whatever model it was already on — silently, indefinitely.
+Verified, not assumed: a session started on Haiku and resumed with no `--model`
+came back on Haiku, not on the configured Sonnet.
+
+So every session you started before a policy change goes on ignoring that change
+for as long as you keep resuming it. The long-lived sessions are the expensive
+ones, which is the wrong way round.
+
+Nothing can fix this from outside — no hook can set a session's model, and
+`/model` is yours to run. What the `SessionStart` hook
+(`common/claude/session-start.sh`) does is stop the drift being invisible: on
+resume it compares the transcript's last turn against the policy and, when they
+disagree, says so twice — once to you in the UI, once into the session so it
+mentions it rather than quietly spending the dearer tier.
+
+```
+Resumed on model opus — 2.5x sonnet; policy is sonnet.
+Switch with /model sonnet, or carry on if it is deliberate.
+```
+
+It names the multiplier only where one is true: `opus` is a fact, `2.5x` is a
+reason, and claiming one for Sonnet would just train you to skip the line.
+Effort counts too — the right model at the wrong effort is still off policy.
+
+**It is quiet when the session is on policy** — no message, no injected context,
+no cost. `opusplan` accepts a session on either Opus or Sonnet, since that is
+what it does. A fresh start is never second-guessed: it already obeyed
+`settings.json`, and `claude --model opus` is a deliberate choice.
+
+To start a resume on the right model without switching afterwards:
+
+```sh
+claude --resume <id> --model sonnet
+```
+
 ## Seeing which model you are on
 
 The defaults above only apply to *new* sessions. `/model opus` or `codex -p sol`

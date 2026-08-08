@@ -1,7 +1,9 @@
 {
   "model": "sonnet",
   "effortLevel": "high",
-  "fallbackModel": ["haiku"],
+  "fallbackModel": [
+    "haiku"
+  ],
   "cleanupPeriodDays": 99999,
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"
@@ -57,6 +59,17 @@
             "command": "f=\"$HOME/.claude/hooks/save_to_obsidian.py\"; [ -f \"$f\" ] || exit 0; exec python3 \"$f\"",
             "timeout": 360,
             "async": true
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/session-start.sh",
+            "timeout": 10
           }
         ]
       }

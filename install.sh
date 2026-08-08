@@ -305,6 +305,7 @@ link common/claude/delegation.md "$HOME/.claude/delegation.md"
 # file works on every box — the Obsidian hook's baked-in /Users/... path is the
 # mistake this avoids repeating.
 link common/claude/statusline.sh "$HOME/.claude/statusline.sh"
+link common/claude/session-start.sh "$HOME/.claude/session-start.sh"
 
 # ── Codex CLI ─────────────────────────────────────────────────
 # ~/.codex/config.toml cannot be a symlink: Codex writes machine-specific

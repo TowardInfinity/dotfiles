@@ -687,6 +687,108 @@ printf '{"model":{"id":"claude-opus-5"},"effort":{"level":"high"}}' \
   || bad "a payload without rate_limits leaves the last reading alone"
 rm -f "$QSTATE/claude-quota" "$PANES/9"
 
+# ── resumed sessions ignore the policy ────────────────────────
+#
+# settings.json's "model" applies to a NEW session only. Resume one and it
+# keeps whatever it was already on — verified: a haiku session resumed with no
+# --model came back on haiku, not on the configured sonnet. So a session
+# started before a policy change goes on ignoring it for as long as you keep
+# resuming, and the long-lived sessions are the expensive ones. The hook cannot
+# fix that (nothing can set the model from outside); its whole job is to stop
+# it being silent, so the failure that matters is staying quiet when it should
+# not — and nagging when the session is fine, which trains you to ignore it.
+group "claude: resumed sessions off policy"
+
+HOOK_SH="$REPO/common/claude/session-start.sh"
+HCFG="$WORK/hookcfg"; mkdir -p "$HCFG"
+HT="$WORK/hook-transcript.jsonl"
+
+hpolicy() { printf '{"model":"%s","effortLevel":"%s"}\n' "$1" "$2" > "$HCFG/settings.json"; }
+hturn()   { printf '{"type":"assistant","effort":"%s","message":{"model":"%s","role":"assistant"}}\n' \
+                   "$2" "$1" > "$HT"; }
+hrun()    { printf '{"source":"%s","transcript_path":"%s","hook_event_name":"SessionStart"}' \
+                   "${1:-resume}" "$HT" \
+              | env CLAUDE_CONFIG_DIR="$HCFG" sh "$HOOK_SH" 2>/dev/null; }
+
+hpolicy sonnet high
+
+hturn claude-opus-5 high
+case "$(hrun | jq -r '.systemMessage // ""' 2>/dev/null)" in
+  *opus*sonnet*) ok "an off-policy resume says so" ;;
+  *) bad "an off-policy resume says so" "$(hrun)" ;;
+esac
+# The multiplier is the part that changes behaviour: "opus" is a fact, "2.5x"
+# is a reason. Claimed for sonnet it would just train you to skip the line.
+case "$(hrun)" in
+  *2.5x*) ok "the expensive tier is named with its multiplier" ;;
+  *) bad "the expensive tier is named with its multiplier" "$(hrun)" ;;
+esac
+
+hturn claude-sonnet-5 high
+[ -z "$(hrun)" ] \
+  && ok "a resume that is already on policy stays quiet" \
+  || bad "a resume that is already on policy stays quiet" "$(hrun)"
+
+hturn claude-opus-5 high
+[ -z "$(hrun startup)" ] \
+  && ok "a fresh start is not second-guessed" \
+  || bad "a fresh start is not second-guessed" "a new session already obeys settings.json"
+
+# opusplan is Opus while planning and Sonnet while executing, so a session on
+# either is obeying it.
+hpolicy opusplan high
+for m in claude-opus-5 claude-sonnet-5; do
+  hturn "$m" high
+  [ -z "$(hrun)" ] \
+    && ok "opusplan accepts ${m#claude-}" \
+    || bad "opusplan accepts ${m#claude-}" "$(hrun)"
+done
+hturn claude-fable-5 high
+[ -n "$(hrun)" ] \
+  && ok "opusplan still rejects fable" \
+  || bad "opusplan still rejects fable"
+
+# Effort is the only reasoning lever left on these models, so the right model
+# at the wrong effort is still off policy.
+hpolicy sonnet high
+hturn claude-sonnet-5 low
+case "$(hrun | jq -r '.systemMessage // ""' 2>/dev/null)" in
+  *effort*low*high*) ok "the right model at the wrong effort is caught" ;;
+  *) bad "the right model at the wrong effort is caught" "$(hrun)" ;;
+esac
+
+# A hook that errors breaks starting Claude at all, which is far worse than a
+# missed warning. Every path has to exit 0 and print nothing rather than junk.
+for bad_in in 'not json' '' '{"source":"resume","transcript_path":"/nonexistent"}'; do
+  out=$(printf '%s' "$bad_in" | env CLAUDE_CONFIG_DIR="$HCFG" sh "$HOOK_SH" 2>/dev/null)
+  rc=$?
+  [ "$rc" = 0 ] && [ -z "$out" ] \
+    && ok "malformed input [${bad_in:-<empty>}] is survived silently" \
+    || bad "malformed input [${bad_in:-<empty>}] is survived silently" "rc=$rc out=$out"
+done
+printf 'not json at all\n' > "$HT"
+[ -z "$(hrun)" ] \
+  && ok "an unparseable transcript is survived silently" \
+  || bad "an unparseable transcript is survived silently" "$(hrun)"
+
+# The output is injected into the session, so malformed JSON would be a broken
+# hook on every resume. jq builds it precisely so a quote cannot do that.
+hturn claude-opus-5 high
+hrun | jq -e '.hookSpecificOutput.hookEventName == "SessionStart"' >/dev/null 2>&1 \
+  && ok "the hook emits well-formed SessionStart output" \
+  || bad "the hook emits well-formed SessionStart output" "$(hrun)"
+
+if grep -q '"\$HOME/.claude/session-start.sh"' "$REPO/common/claude/settings.json"; then
+  ok "the SessionStart hook is \$HOME-relative"
+else
+  bad "the SessionStart hook is \$HOME-relative" \
+      "an absolute path would break on the Linux boxes"
+fi
+grep -q 'link common/claude/session-start.sh' "$REPO/install.sh" \
+  && ok "install.sh links the SessionStart hook" \
+  || bad "install.sh links the SessionStart hook"
+
+group "tmux: model indicator (cont.)"
 for c in macos linux; do
   grep -q 'tmux-model' "$REPO/$c/tmux/tmux.conf" \
     && ok "$c tmux.conf calls tmux-model" \
@@ -702,7 +804,8 @@ grep -q 'link common/claude/statusline.sh' "$REPO/install.sh" \
 # ── syntax ────────────────────────────────────────────────────
 group "syntax"
 for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
-         common/tmux/model.sh common/claude/statusline.sh; do
+         common/tmux/model.sh common/claude/statusline.sh \
+         common/claude/session-start.sh; do
   if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi
   $sh_bin -n "$REPO/$f" 2>/dev/null && ok "$f parses" || bad "$f parses"
 done

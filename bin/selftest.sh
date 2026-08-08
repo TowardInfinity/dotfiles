@@ -260,6 +260,40 @@ PY
     -in "$FIXTURES/checksums.txt" -out "$FIXTURES/checksums.txt.sig" 2>/dev/null
   refused "a signature from an unknown key is refused" "FAILS" "$(resolve_sig warn)"
 
+  # 9. The cache must not launder provenance. A binary admitted on checksum
+  #    alone during the warn window is byte-identical to a signed one once it
+  #    is sitting in the cache, so require mode has to re-examine it — or the
+  #    flip to require changes nothing on exactly the machines it protects.
+  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  rm -f "$FIXTURES/checksums.txt.sig"
+  got="$(resolve_sig warn)"                 # cached with NO signature
+  if [ -n "$got" ] && [ -f "$got" ]; then
+    # Same cache, now under require. The unsigned entry must not be reused.
+    out="$(env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+          FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+          DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+          DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" DOTS_SIGNATURE_MODE=require \
+          DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")"
+    case "$out" in
+      "$WORK/cache"/*) bad "an unsigned cached binary is not reused in require mode" \
+                           "it was handed back: $out" ;;
+      *) ok "an unsigned cached binary is not reused in require mode" ;;
+    esac
+  else
+    bad "an unsigned cached binary is not reused in require mode" "setup failed"
+  fi
+
+  # 10. …and the same cache under warn mode is still fine. Re-verifying is not
+  #     a licence to throw away a good cache on every run.
+  sign_fixture
+  got="$(resolve_sig require)"              # cached WITH a signature
+  out="$(env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+        FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+        DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+        DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" DOTS_SIGNATURE_MODE=require \
+        DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")"
+  accepted "a signature-verified cached binary is reused in require mode" "$out"
+
   rm -f "$FIXTURES/checksums.txt.sig"
 else
   $VERBOSE && printf '  \033[90mskip\033[0m  release signatures (no openssl with ed25519)\n'

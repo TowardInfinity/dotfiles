@@ -182,6 +182,15 @@ try_cached() {
     return 1
   fi
 
+  # Tier 1 is the path that runs on every single invocation of dots, so this
+  # is where require mode actually bites. Without it the flip would only take
+  # effect on machines that happened to have a cold cache.
+  if ! cache_provenance_ok "$v"; then
+    log "dots-resolve: cached binary predates signature checking — discarding and refetching"
+    rm -f "$bin" "$want_file" "$CACHE_DIR/current-version" 2>/dev/null || true
+    return 1
+  fi
+
   printf '%s\n' "$bin"
 }
 
@@ -220,9 +229,13 @@ try_download() {
   # through and re-download rather than returning a bad binary.
   dest="$CACHE_DIR/dots-$version"
   if [ -x "$dest" ] && cached_digest_ok "$dest" "$CACHE_DIR/dots-$version.sha256"; then
-    printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
-    printf '%s\n' "$dest"
-    return 0
+    if cache_provenance_ok "$version"; then
+      printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
+      printf '%s\n' "$dest"
+      return 0
+    fi
+    log "dots-resolve: cached $version was not signature-verified — refetching to check it"
+    rm -f "$dest" "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
   fi
   if [ -x "$dest" ]; then
     log "dots-resolve: cached $version failed its digest — refetching"
@@ -262,7 +275,7 @@ try_download() {
   # arithmetic.
   verify_signature "$sums" "$RELEASE_BASE/checksums.txt.sig"
   case $? in
-    0) : ;;  # proven
+    0) sig_verified=1 ;;  # proven
     1)
       log "dots-resolve: checksums.txt FAILS its signature — discarding download"
       rm -f "$tmp" "$sums"
@@ -275,6 +288,7 @@ try_download() {
         return 1
       fi
       log "dots-resolve: release is unsigned — continuing on checksum alone"
+      sig_verified=0
       ;;
   esac
 
@@ -301,8 +315,25 @@ try_download() {
   # Record the digest of what actually landed on disk, so tier 1 can tell a
   # corrupted cache from a good one on the next run.
   sha256_of "$dest" > "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
+  # Record HOW it was verified, not just that it was. dots-<v>.sha256 is
+  # computed from the file that landed here, so it proves the cache has not
+  # rotted — it says nothing about provenance, and a binary admitted on
+  # checksum alone during the warn window is indistinguishable from a signed
+  # one once cached. This marker is what lets require mode tell them apart.
+  rm -f "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
+  [ "${sig_verified:-0}" = "1" ] && : > "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null
   printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
   printf '%s\n' "$dest"
+}
+
+# cache_provenance_ok <version>. In require mode a cached binary counts only if
+# it was admitted on a verified signature. Anything else is re-downloaded and
+# re-checked, which is the whole point: flipping to require has to re-examine
+# what warn mode already let in, or the flip changes nothing on exactly the
+# machines it was meant to protect.
+cache_provenance_ok() {
+  [ "$SIGNATURE_MODE" != "require" ] && return 0
+  [ -f "$CACHE_DIR/dots-$1.sig-ok" ]
 }
 
 # ── Tier 3: build from source ──────────────────────────────────

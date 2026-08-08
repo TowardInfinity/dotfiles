@@ -124,6 +124,21 @@ feature flag. 3 concurrent still allows a real Explore/Plan fan-out; depth 1
 still allows a normal single-level `Agent` call, it just stops that subagent
 from spawning one of its own.
 
+Not hypothetical: this is Anthropic's own back-and-forth, not a guess about
+what could go wrong. `v2.1.217` (Jul 21 '26) shipped depth 1 as the default —
+no nesting — specifically to stop unbounded fan-out, alongside the 20-concurrent
+cap ("so one message can't fan out unbounded background agents," per their own
+release notes) and a fix so `--max-budget-usd` actually halted background
+subagents instead of spending past it silently. Three days later, `v2.1.219`
+walked the depth back up to 3 to "reinstate nesting." [Issue
+#68110](https://github.com/anthropics/claude-code/issues/68110) — opened
+before either release, still open — is what depth 1 was protecting against
+and depth 3 reopened: a single "research X" delegation recursively spawned 48+
+background agents, burned 1.5M+ tokens, with duplicate agents redoing the same
+sub-task (four separate agents independently researching the same API). Pinning
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "1"` here just keeps the fix Anthropic
+itself shipped and then reverted three days later, for a bug that's still open.
+
 ## Resumed sessions ignore all of this
 
 `"model"` in `settings.json` is the default for a **new** session. Resume an old

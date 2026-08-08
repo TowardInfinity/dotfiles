@@ -30,19 +30,22 @@ import (
 
 type pkgManager int
 
+// Declaration order is display order: sortPackagesFor and discoverPackages
+// both group by raw Manager value, so this list is the one place that
+// decides which manager's group renders first. Brew goes last on purpose —
+// it typically outnumbers every other manager combined, so putting it first
+// pushed the shorter, often more interesting groups below the fold.
 const (
-	pmBrew pkgManager = iota
-	pmPnpm
+	pmPnpm pkgManager = iota
 	pmNpm
 	pmUvTool
 	pmPip
 	pmGo
+	pmBrew
 )
 
 func (m pkgManager) String() string {
 	switch m {
-	case pmBrew:
-		return "brew"
 	case pmPnpm:
 		return "pnpm"
 	case pmNpm:
@@ -53,6 +56,8 @@ func (m pkgManager) String() string {
 		return "pip"
 	case pmGo:
 		return "go"
+	case pmBrew:
+		return "brew"
 	}
 	return "?"
 }

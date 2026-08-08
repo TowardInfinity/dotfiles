@@ -29,12 +29,23 @@ machine here — the low-memory boxes have no `gh`, no `cosign`, no `minisign`.
 |---|---|
 | Private key | `~/.config/dots/release-key.pem` on the Mac, encrypted (AES-256) |
 | Passphrase | password manager, nowhere else |
-| Backup | two encrypted copies on separate removable media, in different places |
+| Backup | **none yet** — see below |
 | Public key | `keys/release.pub`, committed, embedded in the binary |
 
-Neither store can sign on its own: the media hold ciphertext, the password
-manager holds a passphrase with nothing to open. Losing either one is
-survivable. Losing both is the recovery path below.
+The design is two stores, neither able to sign alone: media hold ciphertext, the
+password manager holds a passphrase with nothing to open. Compromising one is
+survivable.
+
+**The key currently exists on exactly one Mac.** That is a deliberate, accepted
+risk rather than an oversight: if the machine dies, the "Key loss" path below
+recovers in a rotation and a careful `dots update` ordering across four machines
+you own. Annoying, not fatal — which is why it was not worth blocking the first
+signed release on finding a USB stick.
+
+The intended backup is two encrypted copies on separate removable media, kept
+apart. iCloud is an acceptable substitute for one of them **only if** the
+passphrase does not live in iCloud Keychain — ciphertext and passphrase behind
+one Apple ID is one compromise, not two, and collapses the whole split.
 
 ## Generating it (once)
 

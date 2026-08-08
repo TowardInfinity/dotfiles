@@ -728,6 +728,8 @@ policy_key '.fallbackModel[0]' haiku \
   "without it an overloaded Sonnet escalates instead of falling back cheap"
 policy_key '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' 250000 \
   "contexts drift back toward 800k, and every turn re-reads the whole window"
+policy_key '.advisorModel' opus \
+  "fable is 5x sonnet and would turn every advisor() call into the same mistake"
 
 # CLAUDE_CODE_SUBAGENT_MODEL is a hard override that beats both the per-call
 # model parameter and an agent's frontmatter, collapsing the whole tiering onto

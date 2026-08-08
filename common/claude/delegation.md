@@ -33,6 +33,11 @@ Effort is the reasoning lever (`/effort low|medium|high|xhigh|max`), persisted a
 `high`. `MAX_THINKING_TOKENS` does nothing on Opus 5 / Sonnet 5 — they use
 adaptive reasoning.
 
+**The advisor is set to Opus** (`advisorModel` in `settings.json`), not Fable —
+it only fires on explicit `advisor()` calls, so the 2.5x is occasional, not
+continuous. Never repoint it at Fable for the same reason Fable is never the
+main model.
+
 ## Context is the real cost
 
 Every turn re-reads the whole context window, so a 800k-token session pays ~80k

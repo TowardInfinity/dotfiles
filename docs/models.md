@@ -37,6 +37,32 @@ overwrites it. You should rarely need to override either default.
 execution, which is the cheapest way to get Opus-quality design decisions.
 `codex -p sol` layers `~/.codex/sol.config.toml` on top of the base config.
 
+## The advisor
+
+`advisor()` sends the whole transcript to a second, stronger model for a review
+before you commit to an approach or declare a task done. It is not a per-turn
+cost — it only runs when the agent calls it — so pairing a cheap main model
+with a dear advisor is the opposite of running the whole session at the dear
+tier: occasional 2.5x calls instead of continuous 2.5x.
+
+```json
+"advisorModel": "opus"
+```
+
+Persisted in `settings.json` next to `model` and `effortLevel` — confirmed in
+the installed binary's settings schema, not just in the `/advisor` help text.
+`/advisor <model>` writes it there directly (`/advisor off` clears it); editing
+the file by hand works identically.
+
+**Pairing rule, enforced server-side:** the advisor must be at least as capable
+as the session's main model — equals allowed, downgrades rejected. On Sonnet,
+that leaves Opus, Sonnet itself, or Fable as valid picks. Fable is excluded
+anyway — the [Which model](#defaults) rule against it applies here too: 5x
+Sonnet for a review that fires on every substantive step is exactly the kind of
+quiet line item that made Fable the single biggest expense the last time it ran
+unsupervised. Opus is the right pick — same tier already reserved for hard
+design work, just invoked as a second opinion instead of as the main seat.
+
 ## Resumed sessions ignore all of this
 
 `"model"` in `settings.json` is the default for a **new** session. Resume an old

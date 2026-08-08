@@ -1,17 +1,7 @@
 {
-  "model": "sonnet",
-  "effortLevel": "high",
-  "alwaysThinkingEnabled": false,
-  "fallbackModel": [
-    "haiku"
-  ],
   "cleanupPeriodDays": 99999,
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "$HOME/.claude/statusline.sh"
   },
   "permissions": {
     "allow": [
@@ -40,6 +30,10 @@
       "mcp__kite__delete_gtt_order"
     ]
   },
+  "model": "sonnet",
+  "fallbackModel": [
+    "haiku"
+  ],
   "skillOverrides": {
     "agents-sdk": "off",
     "cloudflare-email-service": "off",
@@ -76,7 +70,14 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "$HOME/.claude/statusline.sh"
+  },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true
-  }
+  },
+  "alwaysThinkingEnabled": false,
+  "effortLevel": "high",
+  "advisorModel": "opus"
 }

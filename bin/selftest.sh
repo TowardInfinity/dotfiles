@@ -426,9 +426,148 @@ else
   $VERBOSE && printf '  \033[90mskip\033[0m  --light macOS guard (not on Darwin)\n'
 fi
 
+# ── tmux model indicator ──────────────────────────────────────
+#
+# The point of this segment is to make an expensive model impossible to miss,
+# so the failures that matter are the quiet ones: showing a model for a pane
+# whose agent has exited, or showing the *configured* model when the session
+# has since been switched to a dearer one. Both look completely normal.
+group "tmux: model indicator"
+
+MODEL_SH="$REPO/common/tmux/model.sh"
+STATUS_SH="$REPO/common/claude/statusline.sh"
+PANES="$WORK/panes"; mkdir -p "$PANES"
+FAKE_CODEX="$WORK/codex"; mkdir -p "$FAKE_CODEX/sessions/2026/08/08"
+printf 'model = "gpt-5.6-terra"\n' > "$FAKE_CODEX/config.toml"
+
+model_seg() {   # model_seg <pane_current_command>
+  env DOTS_PANE_DIR="$PANES" CODEX_HOME="$FAKE_CODEX" \
+    sh "$MODEL_SH" '%9' "$1" 2>/dev/null
+}
+
+rm -f "$PANES/9"
+[ -z "$(model_seg zsh)" ] \
+  && ok "an ordinary pane gets no segment" \
+  || bad "an ordinary pane gets no segment" "it printed something"
+
+printf 'claude\t%s\topus\n' "$$" > "$PANES/9"
+case "$(model_seg zsh)" in
+  *opus*) ok "a live claude pane names its model" ;;
+  *) bad "a live claude pane names its model" "$(model_seg zsh)" ;;
+esac
+
+# The alarm colour is the feature, not decoration — a grey "opus" is what the
+# quota was already being spent on unnoticed.
+case "$(model_seg zsh)" in
+  *'#f7768e'*) ok "opus is coloured as an expensive tier" ;;
+  *) bad "opus is coloured as an expensive tier" "$(model_seg zsh)" ;;
+esac
+printf 'claude\t%s\tsonnet\n' "$$" > "$PANES/9"
+case "$(model_seg zsh)" in
+  *'#9ece6a'*) ok "sonnet is coloured as on-policy" ;;
+  *) bad "sonnet is coloured as on-policy" "$(model_seg zsh)" ;;
+esac
+
+# pid 999999 is not running; a marker outliving its session must not keep
+# claiming the pane, or the bar reports a model nothing is being billed for.
+printf 'claude\t999999\topus\n' > "$PANES/9"
+out=$(model_seg zsh)
+if [ -z "$out" ] && [ ! -f "$PANES/9" ]; then
+  ok "a claude marker whose process died is dropped"
+else
+  bad "a claude marker whose process died is dropped" "printed [$out], marker present: $([ -f "$PANES/9" ] && echo yes || echo no)"
+fi
+
+# The codex wrapper cleans up on exit, but a killed terminal never gets to.
+# tmux's own view of the pane is the authority.
+printf 'codex\t%s\tgpt-5.6-sol\n' "$$" > "$PANES/9"
+out=$(model_seg zsh)
+[ -z "$out" ] && [ ! -f "$PANES/9" ] \
+  && ok "a codex marker is dropped once the pane stops running codex" \
+  || bad "a codex marker is dropped once the pane stops running codex" "printed [$out]"
+
+# codex started without the wrapper still deserves a segment.
+rm -f "$PANES/9"
+case "$(model_seg codex)" in
+  *terra*) ok "an unwrapped codex pane falls back to the configured model" ;;
+  *) bad "an unwrapped codex pane falls back to the configured model" "$(model_seg codex)" ;;
+esac
+
+# The whole reason codex reads the rollout: /model mid-session changes what is
+# being billed and changes nothing the launch-time marker can see.
+ROLL="$FAKE_CODEX/sessions/2026/08/08/rollout-2026-08-08T10-00-00-abc.jsonl"
+printf '%s\n' '{"type":"session_meta","payload":{"model_provider":"openai"}}' > "$ROLL"
+printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-terra","model_reasoning_effort":"low","effort":"medium"}}' >> "$ROLL"
+printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-sol","model_reasoning_effort":"low","effort":"high"}}' >> "$ROLL"
+printf 'codex\t%s\tgpt-5.6-terra\n' "$$" > "$PANES/9"
+out=$(model_seg codex)
+case "$out" in
+  *sol*) ok "a mid-session codex /model beats the launch marker" ;;
+  *) bad "a mid-session codex /model beats the launch marker" "$out" ;;
+esac
+case "$out" in
+  *'/hi'*) ok "codex effort rides along with the model" ;;
+  *) bad "codex effort rides along with the model" "$out" ;;
+esac
+# "model_reasoning_effort" also ends in effort":" — anchoring on it would report
+# the config value instead of the live one.
+case "$out" in
+  *'/lo'*) bad "effort is read from the live turn, not model_reasoning_effort" "$out" ;;
+  *) ok "effort is read from the live turn, not model_reasoning_effort" ;;
+esac
+
+# A rollout from a session that ended hours ago must not colonise a fresh pane.
+touch -t 202601010100 "$ROLL"
+case "$(model_seg codex)" in
+  *terra*) ok "a stale rollout is ignored in favour of the launch marker" ;;
+  *) bad "a stale rollout is ignored in favour of the launch marker" "$(model_seg codex)" ;;
+esac
+
+# statusline.sh must report the *running* model. settings.json only holds the
+# default for new sessions, so reading it would miss every /model switch —
+# exactly the case worth catching.
+sl_marker() {
+  printf '{"model":{"id":"%s","display_name":"D"},"workspace":{"current_dir":"/tmp/x"}}' "$1" \
+    | env DOTS_PANE_DIR="$PANES" TMUX_PANE='%9' sh "$STATUS_SH" >/dev/null 2>&1
+  cat "$PANES/9" 2>/dev/null
+}
+case "$(sl_marker claude-opus-5)" in
+  claude*opus) ok "statusline records the model from its payload" ;;
+  *) bad "statusline records the model from its payload" "$(sl_marker claude-opus-5)" ;;
+esac
+case "$(sl_marker claude-haiku-4-5-20251001)" in
+  claude*haiku) ok "a dated model id still reduces to its family" ;;
+  *) bad "a dated model id still reduces to its family" "$(sl_marker claude-haiku-4-5-20251001)" ;;
+esac
+[ "$(sl_marker claude-sonnet-5 | awk -F'\t' '{print NF}')" = 3 ] \
+  && ok "the marker has the three fields model.sh reads" \
+  || bad "the marker has the three fields model.sh reads"
+
+# settings.json is shared with a1/v1/v2, and a baked-in /Users/... path is the
+# mistake the Obsidian hook already made once.
+if grep -q '"\$HOME/.claude/statusline.sh"' "$REPO/common/claude/settings.json"; then
+  ok "the statusLine command is \$HOME-relative"
+else
+  bad "the statusLine command is \$HOME-relative" \
+      "a machine-specific path would break on the Linux boxes"
+fi
+
+for c in macos linux; do
+  grep -q 'tmux-model' "$REPO/$c/tmux/tmux.conf" \
+    && ok "$c tmux.conf calls tmux-model" \
+    || bad "$c tmux.conf calls tmux-model"
+done
+grep -q 'link common/tmux/model.sh' "$REPO/install.sh" \
+  && ok "install.sh puts tmux-model on PATH" \
+  || bad "install.sh puts tmux-model on PATH"
+grep -q 'link common/claude/statusline.sh' "$REPO/install.sh" \
+  && ok "install.sh links statusline.sh" \
+  || bad "install.sh links statusline.sh"
+
 # ── syntax ────────────────────────────────────────────────────
 group "syntax"
-for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh; do
+for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
+         common/tmux/model.sh common/claude/statusline.sh; do
   if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi
   $sh_bin -n "$REPO/$f" 2>/dev/null && ok "$f parses" || bad "$f parses"
 done

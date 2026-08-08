@@ -140,6 +140,42 @@ alias shortcuts="grep -E '^alias ' ~/.zshrc | sed 's/^alias //' | sort"   # list
 # So the Mac opts in here rather than via "defaultMode" in the shared file.
 alias claude='claude --permission-mode auto'
 
+# ──── Codex: tell tmux which model this pane is on (added 2026-08-08) ────
+# Claude Code has a statusLine hook that reports its own model on every refresh
+# (common/claude/statusline.sh). Codex has no equivalent — its only hook, the
+# `notify` key, is already taken by the Computer Use app — so the pane marker
+# has to be written from the shell instead.
+#
+# The marker holds the launch model; tmux-model then refreshes it from the
+# session rollout, which records model and effort on every turn, so a
+# mid-session /model still shows up. `-p sol` / `-m <model>` are read here
+# because the rollout does not exist yet at launch and the first seconds of an
+# escalated session are exactly when you want to see that it is escalated.
+codex() {
+  local mark="" model="" i
+  if [[ -n $TMUX_PANE ]]; then
+    local dir="${DOTS_PANE_DIR:-$HOME/.cache/dots/panes}"
+    mkdir -p "$dir" 2>/dev/null && mark="$dir/${TMUX_PANE#\%}"
+  fi
+  if [[ -n $mark ]]; then
+    for (( i = 1; i <= $#; i++ )); do
+      case ${@[i]} in
+        -m|--model)   model=${@[i+1]} ;;
+        -p|--profile) model=$(sed -n 's/^model *= *"\([^"]*\)".*/\1/p' \
+                                "${CODEX_HOME:-$HOME/.codex}/${@[i+1]}.config.toml" \
+                                2>/dev/null | head -1) ;;
+      esac
+    done
+    [[ -n $model ]] || model=$(sed -n 's/^model *= *"\([^"]*\)".*/\1/p' \
+                                 "${CODEX_HOME:-$HOME/.codex}/config.toml" 2>/dev/null | head -1)
+    printf 'codex\t%s\t%s\n' "$$" "$model" > "$mark" 2>/dev/null
+  fi
+  command codex "$@"
+  local rc=$?
+  [[ -n $mark ]] && rm -f "$mark" 2>/dev/null
+  return $rc
+}
+
 # ──── tmux (added 2026-07-26) ────────────────────────────────
 # Config lives at ~/.config/tmux/tmux.conf. Prefix is Ctrl-a.
 alias t='tmux'

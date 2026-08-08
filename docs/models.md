@@ -37,6 +37,47 @@ overwrites it. You should rarely need to override either default.
 execution, which is the cheapest way to get Opus-quality design decisions.
 `codex -p sol` layers `~/.codex/sol.config.toml` on top of the base config.
 
+## Seeing which model you are on
+
+The defaults above only apply to *new* sessions. `/model opus` or `codex -p sol`
+changes what you are being billed for and changes nothing on disk, so a policy
+you cannot see is a policy you find out about at the end of the month. The tmux
+status bar names the model of whatever agent is in the current pane:
+
+```
+󰚩 opus     … red    — opus · fable · sol   2.5x to 5x the default
+󰚩 sonnet   … green  — sonnet · terra       on policy
+󰚩 luna/md  … cyan   — haiku · luna         cheap
+```
+
+Nothing renders when the pane is not running an agent. Codex carries its
+reasoning effort too (`/lo /md /hi /xh /mx`); Claude Code does not report effort
+to the status line, so it shows the model alone.
+
+**How each side reports itself.** Neither tool answers questions from outside,
+and the model is not visible in `ps` — `claude` started on Sonnet and switched
+to Opus looks identical. So each writes a marker into
+`~/.cache/dots/panes/<pane>` and `common/tmux/model.sh` reads it:
+
+| | Reports via | Catches a mid-session switch |
+|---|---|---|
+| Claude Code | `statusLine` hook (`common/claude/statusline.sh`) | yes — it runs on every UI refresh |
+| Codex | zsh `codex` wrapper, refreshed from the session rollout | yes — rollouts log model+effort per turn |
+
+Codex needs the wrapper because its only hook, `notify`, is already taken by the
+Computer Use app. A pane running `codex` with no marker at all — started before
+the wrapper existed, or via `command codex` — still gets a segment, from the
+configured default.
+
+**Staleness is handled by asking someone who knows**, not by a timeout.
+`statusline.sh` records its `$PPID`, which is the Claude process itself, so a
+marker whose owner has exited is dropped on sight. Codex markers are checked
+against tmux's own `pane_current_command`, which is authoritative even when a
+killed terminal never ran the wrapper's cleanup.
+
+The same script drives Claude Code's own in-session status line, so the model
+is visible there too, in the same colours.
+
 ## Relative cost per token
 
 | Claude | | Codex | |

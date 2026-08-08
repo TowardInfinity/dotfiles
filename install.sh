@@ -301,6 +301,10 @@ fi
 # permission grants) belongs in the untracked ~/.claude/settings.local.json.
 link common/claude/settings.json "$HOME/.claude/settings.json"
 link common/claude/delegation.md "$HOME/.claude/delegation.md"
+# settings.json names this by $HOME rather than an absolute path, so the shared
+# file works on every box — the Obsidian hook's baked-in /Users/... path is the
+# mistake this avoids repeating.
+link common/claude/statusline.sh "$HOME/.claude/statusline.sh"
 
 # ── Codex CLI ─────────────────────────────────────────────────
 # ~/.codex/config.toml cannot be a symlink: Codex writes machine-specific
@@ -317,6 +321,11 @@ merge_toml common/codex/config.policy.toml "$HOME/.codex/config.toml"
 # resurrect snapshots keep living in ~/.config/tmux untracked.
 mkdir -p "$HOME/.config/tmux"
 link "$OS/tmux/tmux.conf" "$HOME/.config/tmux/tmux.conf"
+# The status bar's model segment. On PATH rather than referenced into the repo:
+# tmux status jobs run under /bin/sh with the tmux server's environment, which
+# is whatever it was when the server started — not necessarily one that can find
+# the checkout.
+link common/tmux/model.sh "$HOME/.local/bin/tmux-model"
 
 # ── Shell ─────────────────────────────────────────────────────
 link "$OS/zsh/.zshrc" "$HOME/.zshrc"

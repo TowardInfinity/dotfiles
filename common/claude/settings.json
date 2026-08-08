@@ -6,6 +6,10 @@
   "env": {
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000"
   },
+  "statusLine": {
+    "type": "command",
+    "command": "$HOME/.claude/statusline.sh"
+  },
   "permissions": {
     "allow": [
       "Bash(npm run typecheck *)",

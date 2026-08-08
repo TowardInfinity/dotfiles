@@ -10,12 +10,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// sidebar rows are either a group label or a page. Flattening the tree into one
-// list keeps cursor movement trivial — j/k just skips the labels.
+// sidebar rows are a group label, a page, or a blank spacer between groups.
+// Flattening the tree into one list keeps cursor movement trivial — j/k just
+// skips the labels — and, just as importantly, keeps the scroll window
+// honest: the spacer used to be an extra "\n" tacked on outside this list
+// during rendering, so the row count viewNav windowed against undercounted
+// the lines it was actually about to print. A window near the bottom of a
+// list spanning several small groups would then render taller than the box,
+// pushing the last rows off the bottom of the terminal with no scroll state
+// that could reach them. Making the spacer a real row fixes that: one row,
+// one rendered line, no exceptions.
 type row struct {
-	group  string
-	doc    *doc
-	isHead bool
+	group   string
+	doc     *doc
+	isHead  bool
+	isBlank bool
 }
 
 type docsModel struct {
@@ -69,6 +78,9 @@ func (m *docsModel) rebuild() {
 			}
 		}
 		if d.Group != lastGroup {
+			if lastGroup != "" {
+				m.rows = append(m.rows, row{isBlank: true})
+			}
 			m.rows = append(m.rows, row{group: d.Group, isHead: true})
 			lastGroup = d.Group
 		}
@@ -84,14 +96,14 @@ func (m *docsModel) rebuild() {
 	m.snapToDoc(+1)
 }
 
-// snapToDoc moves off a group label onto a real page.
+// snapToDoc moves off a group label or spacer onto a real page.
 func (m *docsModel) snapToDoc(dir int) {
-	for m.cur >= 0 && m.cur < len(m.rows) && m.rows[m.cur].isHead {
+	for m.cur >= 0 && m.cur < len(m.rows) && (m.rows[m.cur].isHead || m.rows[m.cur].isBlank) {
 		m.cur += dir
 	}
 	if m.cur < 0 || m.cur >= len(m.rows) {
 		for i := range m.rows {
-			if !m.rows[i].isHead {
+			if !m.rows[i].isHead && !m.rows[i].isBlank {
 				m.cur = i
 				return
 			}
@@ -104,7 +116,7 @@ func (m *docsModel) move(delta int) {
 		return
 	}
 	n := m.cur + delta
-	for n >= 0 && n < len(m.rows) && m.rows[n].isHead {
+	for n >= 0 && n < len(m.rows) && (m.rows[n].isHead || m.rows[n].isBlank) {
 		n += delta
 	}
 	if n < 0 || n >= len(m.rows) {
@@ -347,6 +359,11 @@ func (m docsModel) viewNav() string {
 		if start > len(m.rows)-visible {
 			start = len(m.rows) - visible
 		}
+		// A spacer landing on the box's own top row just wastes a line —
+		// skip it forward onto the head it was separating groups from.
+		if m.rows[start].isBlank {
+			start++
+		}
 	}
 	end := start + visible
 	if end > len(m.rows) {
@@ -355,12 +372,13 @@ func (m docsModel) viewNav() string {
 
 	for i := start; i < end; i++ {
 		r := m.rows[i]
-		if r.isHead {
+		if r.isBlank {
 			// Groups sit one column in, pages three. They were both at two,
 			// which is how the whole rail ended up reading as one flat list.
-			if i > start {
-				b.WriteString("\n")
-			}
+			b.WriteString("\n")
+			continue
+		}
+		if r.isHead {
 			b.WriteString(" " + styGroup.Render(truncate(strings.ToUpper(r.group), inner)) + "\n")
 			continue
 		}

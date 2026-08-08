@@ -31,12 +31,20 @@ payload=$(cat)
   IFS= read -r model_name
   IFS= read -r effort
   IFS= read -r dir
+  IFS= read -r five_pct
+  IFS= read -r five_reset
+  IFS= read -r seven_pct
+  IFS= read -r seven_reset
 } <<EOF
 $(printf '%s' "$payload" | jq -r '
     (.model.id // ""),
     (.model.display_name // ""),
     (.effort.level // ""),
-    (.workspace.current_dir // .cwd // "")' 2>/dev/null)
+    (.workspace.current_dir // .cwd // ""),
+    (.rate_limits.five_hour.used_percentage  | if type == "number" then round else "" end),
+    (.rate_limits.five_hour.resets_at // ""),
+    (.rate_limits.seven_day.used_percentage  | if type == "number" then round else "" end),
+    (.rate_limits.seven_day.resets_at // "")' 2>/dev/null)
 EOF
 
 # claude-opus-5 → opus; claude-haiku-4-5-20251001 → haiku. The family is the
@@ -93,7 +101,50 @@ if [ -n "${TMUX_PANE:-}" ]; then
   fi
 fi
 
+# ── the quota gauge ───────────────────────────────────────────
+#
+# rate_limits is the number the whole model policy is trying to move, and this
+# is the only place it is readable without spending a turn on /usage.
+#
+# It goes in a file of its own rather than into the pane marker, because it is
+# an account-wide fact, not a per-pane one: written here by whichever Claude
+# session happens to be running, read by the status bar for every pane, so the
+# burn stays on screen from a plain shell too. tmux-model ages it out — a stale
+# reading presented as current is worse than no reading.
+if [ -n "$five_pct" ]; then
+  state="${DOTS_STATE_DIR:-$HOME/.cache/dots}"
+  if mkdir -p "$state" 2>/dev/null; then
+    tmp="$state/.quota.$$"
+    if printf '%s\n%s\n%s\n%s\n%s\n' \
+         "$(date +%s)" "$five_pct" "$five_reset" "$seven_pct" "$seven_reset" \
+         > "$tmp" 2>/dev/null; then
+      mv -f "$tmp" "$state/claude-quota" 2>/dev/null || rm -f "$tmp"
+    else
+      rm -f "$tmp" 2>/dev/null
+    fi
+  fi
+fi
+
 # ── the line Claude Code shows ────────────────────────────────
 printf '%s%s%s' "$colour" "$tag" "$reset"
 [ -n "$dir" ] && printf ' %s%s%s' "$dim" "$(basename "$dir")" "$reset"
+
+# Whichever window is closer to capping is the one that will actually stop you,
+# so show that one and name it rather than showing both and making you compare.
+#
+# The percentages arrive as floats — a real payload carried 28.999999999999996
+# — which is why jq rounds them above. Everything downstream compares them with
+# `test -ge`, and that treats a float as a syntax error, not as a number.
+win=""; pct=""
+if [ -n "$five_pct" ] || [ -n "$seven_pct" ]; then
+  win=5h; pct="${five_pct:-0}"
+  [ "${seven_pct:-0}" -gt "$pct" ] 2>/dev/null && { win=7d; pct="$seven_pct"; }
+fi
+if [ -n "$pct" ]; then
+  if   [ "$pct" -ge 85 ] 2>/dev/null; then qc=$(printf '\033[38;2;247;118;142m')
+  elif [ "$pct" -ge 60 ] 2>/dev/null; then qc=$(printf '\033[38;2;224;175;104m')
+  else                                     qc="$dim"
+  fi
+  printf ' %s%s %s%%%s' "$qc" "$win" "$pct" "$reset"
+fi
 printf '\n'

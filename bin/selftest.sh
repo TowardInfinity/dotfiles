@@ -440,9 +440,18 @@ PANES="$WORK/panes"; mkdir -p "$PANES"
 FAKE_CODEX="$WORK/codex"; mkdir -p "$FAKE_CODEX/sessions/2026/08/08"
 printf 'model = "gpt-5.6-terra"\n' > "$FAKE_CODEX/config.toml"
 
+QSTATE="$WORK/state"; mkdir -p "$QSTATE"
+
 model_seg() {   # model_seg <pane_current_command>
-  env DOTS_PANE_DIR="$PANES" CODEX_HOME="$FAKE_CODEX" \
+  env DOTS_PANE_DIR="$PANES" CODEX_HOME="$FAKE_CODEX" DOTS_STATE_DIR="$QSTATE" \
     sh "$MODEL_SH" '%9' "$1" 2>/dev/null
+}
+# write_quota <5h pct> <5h secs away> <7d pct> <7d secs away> [age secs]
+write_quota() {
+  now=$(date +%s)
+  printf '%s\n%s\n%s\n%s\n%s\n' \
+    "$((now - ${5:-0}))" "$1" "$((now + $2))" "$3" "$((now + $4))" \
+    > "$QSTATE/claude-quota"
 }
 
 rm -f "$PANES/9"
@@ -582,6 +591,101 @@ else
   bad "the statusLine command is \$HOME-relative" \
       "a machine-specific path would break on the Linux boxes"
 fi
+
+# ── quota gauge ───────────────────────────────────────────────
+#
+# This is the number the whole model policy exists to move, so the failure that
+# matters most is a comfortable-looking figure that is no longer true.
+rm -f "$PANES/9"
+
+write_quota 23 4200 5 500000
+case "$(model_seg zsh)" in
+  *'5h 23%'*) ok "quota shows on a pane with no agent in it" ;;
+  *) bad "quota shows on a pane with no agent in it" "$(model_seg zsh)" ;;
+esac
+
+# The binding constraint is whichever window caps first, not whichever is
+# checked first — a 7-day at 88% stops you while the 5-hour reads a calm 12%.
+write_quota 12 4200 88 259200
+case "$(model_seg zsh)" in
+  *'7d 88%'*) ok "the window closer to capping is the one shown" ;;
+  *) bad "the window closer to capping is the one shown" "$(model_seg zsh)" ;;
+esac
+
+write_quota 91 720 5 500000
+out=$(model_seg zsh)
+case "$out" in
+  *'#f7768e'*'91%'*) ok "a nearly-spent window is coloured as an alarm" ;;
+  *) bad "a nearly-spent window is coloured as an alarm" "$out" ;;
+esac
+case "$out" in
+  *'12m'*) ok "time to reset appears once the number matters" ;;
+  *) bad "time to reset appears once the number matters" "$out" ;;
+esac
+write_quota 23 4200 5 500000
+case "$(model_seg zsh)" in
+  *m*|*'23% '*) bad "a comfortable window stays quiet" "$(model_seg zsh)" ;;
+  *'#565f89'*'23%'*) ok "a comfortable window stays quiet" ;;
+  *) bad "a comfortable window stays quiet" "$(model_seg zsh)" ;;
+esac
+
+# Stale is worse than absent: a 20-minute-old reading presented as live is how
+# you talk yourself into one more Opus session.
+write_quota 91 720 5 500000 1200
+[ -z "$(model_seg zsh)" ] \
+  && ok "a stale quota reading is dropped, not shown" \
+  || bad "a stale quota reading is dropped, not shown" "$(model_seg zsh)"
+
+printf 'garbage\n' > "$QSTATE/claude-quota"
+[ -z "$(model_seg zsh)" ] \
+  && ok "a corrupt quota file prints nothing rather than junk" \
+  || bad "a corrupt quota file prints nothing rather than junk" "$(model_seg zsh)"
+rm -f "$QSTATE/claude-quota"
+[ -z "$(model_seg zsh)" ] \
+  && ok "no quota file means no segment" \
+  || bad "no quota file means no segment" "$(model_seg zsh)"
+
+# statusline.sh is the only writer; if it stops recording the burn the gauge
+# goes quietly blank rather than wrong, which is easy not to notice.
+printf '{"model":{"id":"claude-opus-5"},"effort":{"level":"high"},"rate_limits":{"five_hour":{"used_percentage":44,"resets_at":1900000000},"seven_day":{"used_percentage":7,"resets_at":1900000000}}}' \
+  | env DOTS_PANE_DIR="$PANES" DOTS_STATE_DIR="$QSTATE" TMUX_PANE='%9' \
+        sh "$STATUS_SH" >/dev/null 2>&1
+[ "$(sed -n 2p "$QSTATE/claude-quota" 2>/dev/null)" = 44 ] \
+  && ok "statusline records the quota it was handed" \
+  || bad "statusline records the quota it was handed" \
+         "$(cat "$QSTATE/claude-quota" 2>/dev/null | tr '\n' ' ')"
+
+# A real payload carried 28.999999999999996. `test -ge` calls a float a syntax
+# error, and the sanitiser that catches that read it as 0 — showing a nearly
+# spent window as empty, which is the worst direction for this to be wrong in.
+printf '{"model":{"id":"claude-opus-5"},"rate_limits":{"five_hour":{"used_percentage":28.999999999999996,"resets_at":1900000000},"seven_day":{"used_percentage":6.0,"resets_at":1900000000}}}' \
+  | env DOTS_PANE_DIR="$PANES" DOTS_STATE_DIR="$QSTATE" TMUX_PANE='%9' \
+        sh "$STATUS_SH" >/dev/null 2>&1
+[ "$(sed -n 2p "$QSTATE/claude-quota" 2>/dev/null)" = 29 ] \
+  && ok "a fractional percentage is rounded, not discarded" \
+  || bad "a fractional percentage is rounded, not discarded" \
+         "got [$(sed -n 2p "$QSTATE/claude-quota" 2>/dev/null)]"
+# And a file left behind by an older statusline must still read as a number.
+now=$(date +%s)
+printf '%s\n28.999999999999996\n%s\n6\n%s\n' "$now" "$((now + 4200))" "$((now + 500000))" \
+  > "$QSTATE/claude-quota"
+case "$(model_seg zsh)" in
+  *'5h 28%'*) ok "an unrounded quota file is still read as a number" ;;
+  *) bad "an unrounded quota file is still read as a number" "$(model_seg zsh)" ;;
+esac
+
+# A payload with no rate_limits at all must not blank an existing reading —
+# the last true number beats no number until it ages out on its own.
+now=$(date +%s)
+printf '%s\n44\n%s\n7\n%s\n' "$now" "$((now + 4200))" "$((now + 500000))" \
+  > "$QSTATE/claude-quota"
+printf '{"model":{"id":"claude-opus-5"},"effort":{"level":"high"}}' \
+  | env DOTS_PANE_DIR="$PANES" DOTS_STATE_DIR="$QSTATE" TMUX_PANE='%9' \
+        sh "$STATUS_SH" >/dev/null 2>&1
+[ "$(sed -n 2p "$QSTATE/claude-quota" 2>/dev/null)" = 44 ] \
+  && ok "a payload without rate_limits leaves the last reading alone" \
+  || bad "a payload without rate_limits leaves the last reading alone"
+rm -f "$QSTATE/claude-quota" "$PANES/9"
 
 for c in macos linux; do
   grep -q 'tmux-model' "$REPO/$c/tmux/tmux.conf" \

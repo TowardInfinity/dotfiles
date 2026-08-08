@@ -22,6 +22,9 @@
 #
 # Prints nothing at all when the pane is not running one of them: a status bar
 # segment that is empty when it has nothing to say costs no width.
+#
+# It also prints the account's quota burn, which is not a per-pane fact and so
+# shows on every pane — see quota_segment at the bottom.
 
 set -u
 
@@ -31,6 +34,10 @@ pane_cmd="${2:-}"
 
 MARKS="${DOTS_PANE_DIR:-$HOME/.cache/dots/panes}"
 mark="$MARKS/${pane_id#%}"
+
+# In a function so the many "nothing to show" exits stay simple `return`s: the
+# quota segment below has to print whether or not this pane has an agent in it.
+model_segment() {
 
 tool=""; owner=""; label=""
 if [ -f "$mark" ]; then
@@ -69,7 +76,7 @@ if [ -z "$tool" ] && [ "$pane_cmd" = "codex" ]; then
   label=""
 fi
 
-[ -n "$tool" ] || exit 0
+[ -n "$tool" ] || return 0
 
 # ── codex: refresh from the live session rollout ──────────────
 if [ "$tool" = codex ]; then
@@ -119,7 +126,7 @@ fi
 
 # gpt-5.6-terra → terra. The family name is the part that maps to a price tier.
 tag=$(printf '%s' "$label" | sed -e 's|^gpt-[0-9.]*-||' -e 's/^claude-//')
-[ -n "$tag" ] || exit 0
+[ -n "$tag" ] || return 0
 
 # ── colour by price tier ──────────────────────────────────────
 #
@@ -134,3 +141,76 @@ case "$tag" in
 esac
 
 printf '#[fg=%s]󰚩 %s#[default] ' "$fg" "$tag"
+}
+
+# ── the quota gauge ───────────────────────────────────────────
+#
+# Written by common/claude/statusline.sh from the statusLine payload, which is
+# the only place the live 5-hour and 7-day burn is readable without spending a
+# turn on /usage. It is an account fact rather than a pane fact, so it renders
+# on every pane — the point is to see the number from a plain shell, not only
+# while staring at a Claude session.
+#
+# Codex contributes nothing here: its rollouts carry no quota figures, and its
+# allowance is a separate bucket on a separate subscription anyway.
+quota_segment() {
+  q="${DOTS_STATE_DIR:-$HOME/.cache/dots}/claude-quota"
+  [ -f "$q" ] || return 0
+
+  written=""; five=""; five_at=""; seven=""; seven_at=""
+  {
+    IFS= read -r written
+    IFS= read -r five
+    IFS= read -r five_at
+    IFS= read -r seven
+    IFS= read -r seven_at
+  } < "$q" 2>/dev/null || return 0
+
+  now=$(date +%s 2>/dev/null) || return 0
+  case "$written" in ''|*[!0-9]*) return 0 ;; esac
+
+  # Age out rather than show a stale number as current. Fifteen minutes is
+  # long enough to survive a quiet spell between turns and short enough that
+  # the figure is still true — quota moves in minutes, not hours.
+  [ $((now - written)) -le 900 ] || return 0
+
+  # Whichever window is closer to capping is the one that will actually stop
+  # you. Showing both and leaving you to compare them is the version of this
+  # that gets ignored.
+  # Truncate a decimal tail before anything compares these. statusline.sh
+  # rounds them at write time — the payload really does carry values like
+  # 28.999999999999996 — but a file written by an older copy would otherwise be
+  # rejected as non-numeric and silently read as 0, which shows a busy quota as
+  # empty. Wrong in the reassuring direction is the worst way for this to fail.
+  win=5h; pct="${five%%.*}"
+  case "$pct" in ''|*[!0-9]*) pct=0 ;; esac
+  s="${seven%%.*}"; case "$s" in ''|*[!0-9]*) s=0 ;; esac
+  resets="$five_at"
+  [ "$s" -gt "$pct" ] && { win=7d; pct="$s"; resets="$seven_at"; }
+  [ "$pct" -gt 0 ] || return 0
+
+  if   [ "$pct" -ge 85 ]; then fg='#f7768e'
+  elif [ "$pct" -ge 60 ]; then fg='#e0af68'
+  else                         fg='#565f89'   # fine: say so quietly
+  fi
+
+  # Time to reset only once it matters. Below 60% the answer to "how long until
+  # this clears" is "you do not care", and the width is better spent elsewhere.
+  left=""
+  if [ "$pct" -ge 60 ]; then
+    case "$resets" in
+      ''|*[!0-9]*) ;;
+      *) d=$((resets - now))
+         if   [ "$d" -le 0 ];    then left=" now"
+         elif [ "$d" -lt 3600 ]; then left=" $((d / 60))m"
+         elif [ "$d" -lt 86400 ];then left=" $((d / 3600))h"
+         else                         left=" $((d / 86400))d"
+         fi ;;
+    esac
+  fi
+
+  printf '#[fg=%s]%s %s%%%s#[default] ' "$fg" "$win" "$pct" "$left"
+}
+
+model_segment
+quota_segment

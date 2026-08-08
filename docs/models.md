@@ -73,6 +73,39 @@ Computer Use app. A pane running `codex` with no marker at all — started befor
 the wrapper existed, or via `command codex` — still gets a segment, from the
 configured default.
 
+### The quota gauge
+
+After the model comes the burn itself — the number every other line on this page
+is trying to move:
+
+```
+5h 30%      dim    — under 60%, nothing to think about
+7d 66% 1h   amber  — 60-84%, with time to reset
+5h 91% 12m  red    — 85%+, this is what will stop you
+```
+
+Only one window shows: **whichever is closer to capping**. A 7-day at 88% stops
+you while the 5-hour still reads a calm 12%, so showing both and leaving you to
+compare them is the version of this that gets ignored. Time to reset appears
+only from amber up, because below that the answer to "how long until this
+clears" is "you do not care".
+
+It comes from `rate_limits` in the statusLine payload, which is the only place
+the live figure is readable without spending a turn on `/usage`. Unlike the
+model, it is an **account** fact rather than a pane fact, so it lives in
+`~/.cache/dots/claude-quota` and renders on *every* pane — the point is to see
+the burn from a plain shell, not only while looking at a Claude session.
+
+Whichever Claude session is running keeps the file current. With none running it
+goes stale, and after 15 minutes the gauge disappears rather than showing an old
+reading as though it were live. Codex contributes nothing here: its rollouts
+carry no quota figures, and its allowance is a separate bucket on a separate
+subscription anyway.
+
+Two things this gauge is not: it is not Codex's usage, and it is not a
+substitute for `./bin/claude-usage.py`, which is where the *per-model* breakdown
+lives. This is a live fuel gauge; that is the logbook.
+
 **Staleness is handled by asking someone who knows**, not by a timeout.
 `statusline.sh` records its `$PPID`, which is the Claude process itself, so a
 marker whose owner has exited is dropped on sight. Codex markers are checked

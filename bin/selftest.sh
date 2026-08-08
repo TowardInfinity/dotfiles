@@ -296,6 +296,25 @@ PY
         DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")"
   accepted "a signature-verified cached binary is reused in require mode" "$out"
 
+  # 11. Rotating the key invalidates what the old one admitted. Without this
+  #     the marker would say "verified" forever, including by a key that has
+  #     since been rotated away — which is the one moment trust most needs
+  #     withdrawing, and the only moment a stale cache is dangerous.
+  sign_fixture
+  got="$(resolve_sig require)"              # cached, verified by sigkey
+  openssl genpkey -algorithm ed25519 -out "$WORK/rot.pem" 2>/dev/null
+  openssl pkey -in "$WORK/rot.pem" -pubout -out "$WORK/rot.pub" 2>/dev/null
+  out="$(env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+        FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+        DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+        DOTS_RELEASE_PUBKEY="$WORK/rot.pub" DOTS_SIGNATURE_MODE=require \
+        DOTS_NO_BUILD=1 sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")"
+  case "$out" in
+    "$WORK/cache"/*) bad "a rotated key invalidates the cache it admitted" \
+                         "the old entry was reused: $out" ;;
+    *) ok "a rotated key invalidates the cache it admitted" ;;
+  esac
+
   rm -f "$FIXTURES/checksums.txt.sig"
 else
   $VERBOSE && printf '  \033[90mskip\033[0m  release signatures (no openssl with ed25519)\n'

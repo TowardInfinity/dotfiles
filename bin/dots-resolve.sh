@@ -95,6 +95,15 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 PUBKEY="${DOTS_RELEASE_PUBKEY:-$REPO/keys/release.pub}"
 SIGNATURE_MODE="${DOTS_SIGNATURE_MODE:-require}"
 
+# key_id_of <pubkey-file>. A stable identifier for "which key is this". The
+# digest of the PEM file is enough — any change to the key changes the file —
+# and it reuses the sha256 helper the resolver already depends on rather than
+# adding a second way to fail on a machine with an unusual openssl.
+key_id_of() {
+  [ -f "$1" ] || return 1
+  sha256_of "$1"
+}
+
 # verify_signature <file> <sig-url>. Returns 0 when the file is proven, 1 when
 # it is proven WRONG, and 2 when the question could not be asked (no signature
 # published, no openssl, no public key). Callers decide what 2 means; that is
@@ -329,7 +338,15 @@ try_download() {
   # checksum alone during the warn window is indistinguishable from a signed
   # one once cached. This marker is what lets require mode tell them apart.
   rm -f "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
-  [ "${sig_verified:-0}" = "1" ] && : > "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null
+  if [ "${sig_verified:-0}" = "1" ]; then
+    # Record WHICH key verified it, not merely that something did. Re-checking
+    # the signature on every cache hit would cost a network round-trip per
+    # invocation of dots, which is the exact cost tier 1 exists to avoid — but
+    # a marker that does not name a key would keep trusting binaries admitted
+    # under a key that has since been rotated away, which is the one moment
+    # that trust most needs withdrawing.
+    key_id_of "$PUBKEY" > "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
+  fi
   printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
   printf '%s\n' "$dest"
 }
@@ -341,7 +358,14 @@ try_download() {
 # machines it was meant to protect.
 cache_provenance_ok() {
   [ "$SIGNATURE_MODE" != "require" ] && return 0
-  [ -f "$CACHE_DIR/dots-$1.sig-ok" ]
+  _m="$CACHE_DIR/dots-$1.sig-ok"
+  [ -f "$_m" ] || return 1
+  # Rotating the key invalidates every entry it admitted. A missing or
+  # unreadable key yields no id, which matches nothing — so the entry is
+  # refetched and then refused by verify_signature. Fail closed either way.
+  _want=$(key_id_of "$PUBKEY") || return 1
+  [ -n "$_want" ] || return 1
+  [ "$(cat "$_m" 2>/dev/null)" = "$_want" ]
 }
 
 # ── Tier 3: build from source ──────────────────────────────────

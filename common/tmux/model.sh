@@ -3,7 +3,7 @@
 #
 # Called from status-right as
 #
-#   #(~/.local/bin/tmux-model '#{pane_id}' '#{pane_current_command}')
+#   #(~/.local/bin/tmux-model '#{pane_id}' '#{pane_current_command}' '#{pane_current_path}')
 #
 # and re-run every status-interval, so it must be fast and must never block:
 # a status-line job that hangs freezes the whole bar.
@@ -30,6 +30,7 @@ set -u
 
 pane_id="${1:-${TMUX_PANE:-}}"
 pane_cmd="${2:-}"
+pane_cwd="${3:-}"
 [ -n "$pane_id" ] || exit 0
 
 MARKS="${DOTS_PANE_DIR:-$HOME/.cache/dots/panes}"
@@ -88,9 +89,36 @@ if [ "$tool" = codex ]; then
     # where that would have failed silently.
     cands=$(find "$sessions" -name 'rollout-*.jsonl' -type f -mmin -5 2>/dev/null)
     pick=""
-    if [ -n "$cands" ]; then
-      # Newest by mtime, not by name: a resumed session keeps its original
-      # timestamp in the filename but is the one actually being written to.
+    if [ -n "$cands" ] && [ -n "$pane_cwd" ]; then
+      # Two codex panes touched within the last five minutes both pass the
+      # mtime filter above, and picking the single newest across all of them
+      # means a busy pane elsewhere silently overwrites the model shown for
+      # *this* one. Codex records its launch directory once, in the
+      # session_meta line near the top of the file, and that never changes
+      # for the life of the rollout — so it is the one fact that actually
+      # ties a rollout back to a specific pane. head, not tail: session_meta
+      # is the first line, and grepping the whole file on every tick would
+      # cost more the longer a session runs.
+      matches=""
+      for f in $cands; do
+        c=$(head -c 4096 "$f" 2>/dev/null | grep -o '"cwd":"[^"]*"' | head -1)
+        if [ "$c" = "\"cwd\":\"$pane_cwd\"" ]; then
+          matches="$matches
+$f"
+        fi
+      done
+      matches=$(printf '%s' "$matches" | sed '/^$/d')
+      # A resumed session can still be mid-write to more than one candidate
+      # sharing this cwd (rare, but two panes in the same directory are not
+      # impossible) — newest of the matches is still the right tiebreak.
+      [ -n "$matches" ] && pick=$(printf '%s\n' "$matches" | tr '\n' '\0' \
+               | xargs -0 ls -t 2>/dev/null | head -1)
+    fi
+    if [ -z "$pick" ] && [ -n "$cands" ]; then
+      # No cwd to match against (older tmux.conf, or nothing matched): fall
+      # back to newest by mtime, not by name — a resumed session keeps its
+      # original timestamp in the filename but is the one actually being
+      # written to.
       pick=$(printf '%s\n' "$cands" | tr '\n' '\0' \
                | xargs -0 ls -t 2>/dev/null | head -1)
     fi

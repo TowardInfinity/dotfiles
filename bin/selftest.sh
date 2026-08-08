@@ -442,9 +442,9 @@ printf 'model = "gpt-5.6-terra"\n' > "$FAKE_CODEX/config.toml"
 
 QSTATE="$WORK/state"; mkdir -p "$QSTATE"
 
-model_seg() {   # model_seg <pane_current_command>
+model_seg() {   # model_seg <pane_current_command> [pane_cwd]
   env DOTS_PANE_DIR="$PANES" CODEX_HOME="$FAKE_CODEX" DOTS_STATE_DIR="$QSTATE" \
-    sh "$MODEL_SH" '%9' "$1" 2>/dev/null
+    sh "$MODEL_SH" '%9' "$1" "${2:-}" 2>/dev/null
 }
 # write_quota <5h pct> <5h secs away> <7d pct> <7d secs away> [age secs]
 write_quota() {
@@ -531,6 +531,34 @@ case "$(model_seg codex)" in
   *terra*) ok "a stale rollout is ignored in favour of the launch marker" ;;
   *) bad "a stale rollout is ignored in favour of the launch marker" "$(model_seg codex)" ;;
 esac
+
+# Two codex panes can both touch a rollout inside the same five-minute
+# window — picking the single newest one across the whole machine means a
+# busy pane elsewhere silently overwrites the model shown for this one. The
+# pane's own cwd, matched against each rollout's recorded launch directory,
+# is what should break the tie instead.
+ROLL_MINE="$FAKE_CODEX/sessions/2026/08/08/rollout-2026-08-08T11-00-00-mine.jsonl"
+ROLL_OTHER="$FAKE_CODEX/sessions/2026/08/08/rollout-2026-08-08T11-00-05-other.jsonl"
+printf '%s\n' '{"type":"session_meta","payload":{"cwd":"/tmp/mine"}}' > "$ROLL_MINE"
+printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-terra","effort":"medium"}}' >> "$ROLL_MINE"
+sleep 1   # ROLL_OTHER must land with a strictly newer mtime, by mtime alone
+printf '%s\n' '{"type":"session_meta","payload":{"cwd":"/tmp/other"}}' > "$ROLL_OTHER"
+printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"high"}}' >> "$ROLL_OTHER"
+printf 'codex\t%s\tgpt-5.6-terra\n' "$$" > "$PANES/9"
+out=$(model_seg codex /tmp/mine)
+case "$out" in
+  *terra*) ok "a pane's own cwd wins over a fresher rollout from elsewhere" ;;
+  *) bad "a pane's own cwd wins over a fresher rollout from elsewhere" "$out" ;;
+esac
+
+# No cwd match (or no cwd passed at all — an older tmux.conf) falls back to
+# the previous behaviour: newest by mtime, rather than showing nothing.
+out=$(model_seg codex /tmp/nowhere)
+case "$out" in
+  *sol*) ok "an unmatched cwd falls back to the newest rollout" ;;
+  *) bad "an unmatched cwd falls back to the newest rollout" "$out" ;;
+esac
+rm -f "$ROLL_MINE" "$ROLL_OTHER"
 
 # statusline.sh must report the *running* model. settings.json only holds the
 # default for new sessions, so reading it would miss every /model switch —

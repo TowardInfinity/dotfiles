@@ -81,6 +81,62 @@ type packagesFoundMsg struct {
 	sources    []string
 }
 
+// pkgSortMode is the secondary sort key within a manager group — manager
+// grouping itself is never reordered, only what comes within one. "Sort by
+// used" was considered and dropped: no manager here tracks install/usage
+// frequency, so there is nothing real to sort by.
+type pkgSortMode int
+
+const (
+	pkgSortOutdated pkgSortMode = iota // outdated rows first, default
+	pkgSortName                        // alphabetical
+)
+
+func (s pkgSortMode) String() string {
+	switch s {
+	case pkgSortOutdated:
+		return "outdated"
+	case pkgSortName:
+		return "name"
+	}
+	return "?"
+}
+
+// sortPackagesFor sorts in place. Manager is always the primary key — the
+// manager groups stay exactly where they already are, since the redesign
+// keeps them as label headers rather than reorderable sections — and mode
+// picks the secondary key within each group.
+func sortPackagesFor(pkgs []pkg, mode pkgSortMode) {
+	sort.SliceStable(pkgs, func(i, j int) bool {
+		if pkgs[i].Manager != pkgs[j].Manager {
+			return pkgs[i].Manager < pkgs[j].Manager
+		}
+		if mode == pkgSortOutdated && pkgs[i].Outdated() != pkgs[j].Outdated() {
+			return pkgs[i].Outdated()
+		}
+		return pkgs[i].Name < pkgs[j].Name
+	})
+}
+
+// outdatedOverview picks out what's outdated across every manager, for the
+// summary block at the top of the Packages section — capped at max rows so
+// a machine with dozens of stale packages doesn't push the manager-grouped
+// table below off screen. Order follows the input slice's own order rather
+// than re-sorting, so it agrees with whatever's currently shown beneath it.
+func outdatedOverview(pkgs []pkg, max int) (shown []pkg, more int) {
+	for _, p := range pkgs {
+		if !p.Outdated() {
+			continue
+		}
+		if len(shown) < max {
+			shown = append(shown, p)
+		} else {
+			more++
+		}
+	}
+	return shown, more
+}
+
 // ── discovery ─────────────────────────────────────────────────
 
 func discoverPackages() tea.Cmd {

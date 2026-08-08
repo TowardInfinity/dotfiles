@@ -76,16 +76,42 @@ func (m doctorModel) keys() []key.Binding {
 	return ks
 }
 
+// manageModel's navigation contract, adhered to by every section below:
+//
+//   - left/right (h/l) is the OUTER axis. It switches the rail section and
+//     does nothing else, in every section, always — including ones with no
+//     row list to move a cursor through.
+//   - up/down (j/k) is the INNER axis. It moves whatever the current section
+//     has to move — a row cursor (Services/Packages/Projects/Machines) or a
+//     scroll offset over static content (Overview/Dotfiles) — and never
+//     switches the section. Where a section truly has nothing to move (an
+//     empty list, content that already fits) it is inert rather than bound
+//     to a second meaning.
+//   - Filtering suspends both. While a filter box owns the keyboard
+//     (svcFiltering/pkgFiltering), every key including h/j/k/l goes to the
+//     filter — checked before outer-axis dispatch in manageModel.update()
+//     and before inner-axis handling in each section's own update*Key.
+//
+// A key is listed in a section's footer only when it can currently act —
+// same rule Doctor's `i` and Machines' `d` already followed before this.
 func (m manageModel) keys() []key.Binding {
 	nav := bind("h/l", "section")
 	switch m.section {
 	case secOverview:
-		return []key.Binding{nav, bind("r", "refresh")}
+		ks := []key.Binding{nav, bind("r", "refresh")}
+		if len(m.overviewLines()) > m.bodyRows() {
+			ks = append(ks, bind("j/k", "scroll"))
+		}
+		return ks
 	case secDotfiles:
-		return []key.Binding{nav,
+		ks := []key.Binding{nav,
 			bind("u", "update"), bind("L", "relink"),
 			bind("p", "plugins"), bind("t", "tpm"), bind("D", "deps"),
 		}
+		if len(m.dotfilesLines()) > m.bodyRows() {
+			ks = append(ks, bind("j/k", "scroll"))
+		}
+		return ks
 	case secServices:
 		if m.svcFiltering {
 			return []key.Binding{bind("enter", "keep"), bind("esc", "clear")}
@@ -99,7 +125,7 @@ func (m manageModel) keys() []key.Binding {
 		if m.pkgFiltering {
 			return []key.Binding{bind("enter", "keep"), bind("esc", "clear")}
 		}
-		ks := []key.Binding{nav, bind("j/k", "move"), bind("/", "filter"), bind("r", "rescan")}
+		ks := []key.Binding{nav, bind("j/k", "move"), bind("/", "filter"), bind("r", "rescan"), bind("s", "sort")}
 		// Same "only advertise a key that can act" rule as below: `u` is
 		// worth listing only once the cursor is actually on a row it can do
 		// something with (pmGo rows have no upgrade action).

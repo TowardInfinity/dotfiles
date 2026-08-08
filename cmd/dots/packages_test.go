@@ -264,6 +264,103 @@ func TestPackageActionGoHasNoAction(t *testing.T) {
 	}
 }
 
+// ── sortPackagesFor / outdatedOverview ─────────────────────────
+
+// Manager grouping is the outer order and must never move, regardless of
+// sort mode — the redesign kept manager groups as label headers, not
+// reorderable sections, so this is the one invariant both modes share.
+func TestSortPackagesForKeepsManagerGrouping(t *testing.T) {
+	for _, mode := range []pkgSortMode{pkgSortOutdated, pkgSortName} {
+		pkgs := []pkg{
+			{Manager: pmNpm, Name: "zeta", Version: "1.0"},
+			{Manager: pmBrew, Name: "git", Version: "1.0"},
+			{Manager: pmNpm, Name: "alpha", Version: "1.0"},
+			{Manager: pmBrew, Name: "jq", Version: "1.0"},
+		}
+		sortPackagesFor(pkgs, mode)
+		for i := 1; i < len(pkgs); i++ {
+			if pkgs[i].Manager < pkgs[i-1].Manager {
+				t.Fatalf("mode %v: manager grouping broken at %d: %+v", mode, i, pkgs)
+			}
+		}
+	}
+}
+
+func TestSortPackagesForOutdatedFirst(t *testing.T) {
+	pkgs := []pkg{
+		{Manager: pmBrew, Name: "current-a", Version: "1.0"},
+		{Manager: pmBrew, Name: "stale-b", Version: "1.0", Latest: "2.0"},
+		{Manager: pmBrew, Name: "current-c", Version: "1.0"},
+		{Manager: pmBrew, Name: "stale-a", Version: "1.0", Latest: "2.0"},
+	}
+	sortPackagesFor(pkgs, pkgSortOutdated)
+	// Both outdated rows first (alphabetical among themselves), then the
+	// non-outdated rows (also alphabetical).
+	want := []string{"stale-a", "stale-b", "current-a", "current-c"}
+	for i, name := range want {
+		if pkgs[i].Name != name {
+			t.Errorf("position %d = %q, want %q (%+v)", i, pkgs[i].Name, name, pkgs)
+		}
+	}
+}
+
+func TestSortPackagesForName(t *testing.T) {
+	pkgs := []pkg{
+		{Manager: pmBrew, Name: "zeta", Version: "1.0", Latest: "2.0"}, // outdated, but name mode ignores that
+		{Manager: pmBrew, Name: "alpha", Version: "1.0"},
+		{Manager: pmBrew, Name: "mid", Version: "1.0"},
+	}
+	sortPackagesFor(pkgs, pkgSortName)
+	want := []string{"alpha", "mid", "zeta"}
+	for i, name := range want {
+		if pkgs[i].Name != name {
+			t.Errorf("position %d = %q, want %q (%+v)", i, pkgs[i].Name, name, pkgs)
+		}
+	}
+}
+
+func TestOutdatedOverviewCapAndOverflow(t *testing.T) {
+	pkgs := []pkg{
+		{Manager: pmBrew, Name: "a", Version: "1.0", Latest: "2.0"},
+		{Manager: pmBrew, Name: "b", Version: "1.0"}, // not outdated
+		{Manager: pmBrew, Name: "c", Version: "1.0", Latest: "2.0"},
+		{Manager: pmNpm, Name: "d", Version: "1.0", Latest: "2.0"},
+		{Manager: pmNpm, Name: "e", Version: "1.0", Latest: "2.0"},
+	}
+	shown, more := outdatedOverview(pkgs, 3)
+	if len(shown) != 3 {
+		t.Fatalf("got %d shown, want 3 (cap)", len(shown))
+	}
+	if more != 1 {
+		t.Errorf("more = %d, want 1 (4 outdated total, capped at 3)", more)
+	}
+	for _, p := range shown {
+		if !p.Outdated() {
+			t.Errorf("non-outdated package in overview: %+v", p)
+		}
+	}
+}
+
+func TestOutdatedOverviewEmpty(t *testing.T) {
+	shown, more := outdatedOverview(nil, 5)
+	if len(shown) != 0 || more != 0 {
+		t.Errorf("nil input: shown=%v more=%d, want none", shown, more)
+	}
+	allCurrent := []pkg{{Manager: pmBrew, Name: "a", Version: "1.0"}}
+	shown, more = outdatedOverview(allCurrent, 5)
+	if len(shown) != 0 || more != 0 {
+		t.Errorf("nothing outdated: shown=%v more=%d, want none", shown, more)
+	}
+}
+
+func TestOutdatedOverviewUnderCap(t *testing.T) {
+	pkgs := []pkg{{Manager: pmBrew, Name: "a", Version: "1.0", Latest: "2.0"}}
+	shown, more := outdatedOverview(pkgs, 5)
+	if len(shown) != 1 || more != 0 {
+		t.Errorf("shown=%v more=%d, want 1 shown, 0 more", shown, more)
+	}
+}
+
 func TestPackageActionKnownManagers(t *testing.T) {
 	for _, m := range []pkgManager{pmBrew, pmPnpm, pmNpm, pmUvTool, pmPip} {
 		p := pkg{Manager: m, Name: "thing", Version: "1.0", Latest: "1.1"}

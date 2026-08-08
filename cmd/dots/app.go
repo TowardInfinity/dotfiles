@@ -83,7 +83,7 @@ func (m model) capturingInput() bool {
 	case tabDocs:
 		return m.docs.filtering
 	case tabManage:
-		return m.man.svcFiltering || m.man.pkgFiltering
+		return m.man.filtering()
 	}
 	return false
 }

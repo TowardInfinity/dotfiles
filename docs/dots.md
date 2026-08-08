@@ -30,7 +30,7 @@ dots search copy  # find which page mentions it
 |---|---|---|
 | `1` | **Docs** | These pages. `/` filters, `j`/`k` moves, `d`/`u` scrolls by half a screen, the wheel scrolls. |
 | `2` | **Doctor** | Whether the tools these configs actually call are installed. `r` re-checks, `i` installs what is missing. |
-| `3` | **Manage** | Everything stateful. `h`/`l` moves between its five sections. |
+| `3` | **Manage** | Everything stateful. `h`/`l` moves between its six sections. |
 
 `q` quits from anywhere.
 
@@ -39,16 +39,25 @@ dots search copy  # find which page mentions it
 All four work, everywhere something can move. The status bar shows the letter
 form because it is shorter, but the arrows are always aliases for it:
 
-| | Moves the rail | Moves the list |
+| | Moves the rail | Moves within the section |
 |---|---|---|
 | **Docs** | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
-| **Manage** — Overview, Dotfiles | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
-| **Manage** — Services, Projects, Machines | `←` `→` · `h` `l` | `↑` `↓` · `j` `k` |
+| **Manage** | `←` `→` · `h` `l` | `↑` `↓` · `j` `k` |
 
-The one asymmetry is deliberate. Three of Manage's sections put a list in the
-body, and there `↑`/`↓` has to drive the list — so the rail keeps `←`/`→`. In
-the two sections with no list, `↑`/`↓` falls through to the rail instead of
-doing nothing.
+Manage's rail and its section content never share a key: `←`/`→` always
+switches sections, `↑`/`↓` always acts within whichever section is showing —
+a row cursor where there's a list (Services, Packages, Projects, Machines), a
+scroll offset where there's just text (Overview, Dotfiles). Where a section
+has nothing to move, `↑`/`↓` does nothing rather than falling back to a
+second meaning — an earlier version had `↑`/`↓` move the rail in the two
+sections with no list, which meant the same keys meant two different things
+depending on where you were; landing on Services mid-scroll and having
+`↑`/`↓` suddenly mean something else was the actual bug report that got it
+removed.
+
+While a filter box is open (Services' or Packages' `/`), every key including
+`h`/`j`/`k`/`l` goes into the filter text instead — none of the above fires
+until you `enter`/`esc` out of it.
 
 Doctor has neither a rail nor a list, so the arrows have nothing to move there.
 

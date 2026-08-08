@@ -6,12 +6,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// All four arrows have to do something wherever something can move, and none of
-// them may quietly change meaning depending on where you are. The awkward case
-// is Manage: its rail is drawn vertically, so up/down reads as the way to move
-// it, but three of its five sections put a list in the body that up/down must
-// drive instead. These tests pin that split down, because it is exactly the
-// kind of rule that a later "just make it uniform" edit would flatten.
+// All four arrows have to do something wherever something can move, and none
+// of them may quietly change meaning depending on where you are.
+//
+// This file used to pin the opposite of that: up/down switched the rail in
+// Overview/Dotfiles (the two sections with no row list) and moved a cursor
+// everywhere else, on the theory that giving up/down *some* job in every
+// section beat leaving it dead in two of them. In practice that meant the
+// same keys meant two different things depending on which section you were
+// on, and a user walking the rail with j/k hit the seam the moment they
+// landed on Services — reported directly as "when i reach services it fall
+// to other inner." Up/down now never switches sections, full stop; see the
+// navigation contract above manageModel.keys() in keys.go. Overview and
+// Dotfiles get their up/down back as a scroll offset instead (bodyRows/
+// scrollWindow in manage.go), so nothing is left dead — it just no longer
+// means something else depending on where you are.
 
 func manageAt(t *testing.T, s manageSection) tea.Model {
 	t.Helper()
@@ -48,31 +57,22 @@ func TestManageLeftRightAlwaysMovesRail(t *testing.T) {
 	}
 }
 
-// Up and down move the rail only where the body has no list to claim them.
-func TestManageUpDownMovesRailOnlyWithoutAList(t *testing.T) {
+// Up and down never move the rail, in any section — that's left/right's job
+// alone now. Where a section has nothing to move (an empty list, content
+// that already fits), up/down is inert rather than falling back to a second
+// meaning.
+func TestManageUpDownNeverMovesRail(t *testing.T) {
 	for s := manageSection(0); s < numSections; s++ {
-		railed := s == secOverview || s == secDotfiles
-
 		tm := manageAt(t, s)
 		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
-		got := tm.(model).man.section
-		want := s
-		if railed {
-			want = (s + 1) % numSections
-		}
-		if got != want {
-			t.Errorf("down from %v landed on %v, want %v (railed=%v)", s, got, want, railed)
+		if got := tm.(model).man.section; got != s {
+			t.Errorf("down from %v landed on %v, want no change", s, got)
 		}
 
 		tm = manageAt(t, s)
 		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
-		got = tm.(model).man.section
-		want = s
-		if railed {
-			want = (s + numSections - 1) % numSections
-		}
-		if got != want {
-			t.Errorf("up from %v landed on %v, want %v (railed=%v)", s, got, want, railed)
+		if got := tm.(model).man.section; got != s {
+			t.Errorf("up from %v landed on %v, want no change", s, got)
 		}
 	}
 }

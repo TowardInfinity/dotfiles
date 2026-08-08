@@ -80,10 +80,12 @@ type manageModel struct {
 
 	ovInfo    overviewInfo
 	ovLoading bool
+	ovScroll  int
 
 	dfInfo    dotfilesInfo
 	dfLoading bool
 	dfMsg     string
+	dfScroll  int
 
 	services     []service
 	svcSources   []string
@@ -107,6 +109,7 @@ type manageModel struct {
 	pkgFilter    string
 	pkgFiltering bool
 	pkgTI        textinput.Model
+	pkgSortMode  pkgSortMode // zero value = pkgSortOutdated, today's order
 
 	projects     []projectInfo
 	projLoading  bool
@@ -169,6 +172,51 @@ func (m manageModel) Init() tea.Cmd {
 func (m manageModel) resize(w, h int) manageModel {
 	m.w, m.h = w, h
 	return m
+}
+
+// filtering reports whether a filter box currently owns the keyboard. Both
+// the section-switch keys above and app.go's capturingInput() check this
+// before anything else — a filter must see every key it can hold text or a
+// cursor position for, including the ones that mean "switch section"
+// everywhere else.
+func (m manageModel) filtering() bool {
+	return m.svcFiltering || m.pkgFiltering
+}
+
+// bodyRows is the number of lines a section's own content has to work with,
+// matching contentColumn's documented h-3 body budget (layout.go). Sections
+// whose content can outgrow the pane (Overview, Dotfiles) use it to decide
+// how much of their scroll offset is actually visible. Services/Packages
+// compute their own row budget already (advisories and the outdated block
+// eat into theirs); this is not a replacement for that.
+func (m manageModel) bodyRows() int {
+	rows := m.h - 3
+	if rows < 3 {
+		rows = 3
+	}
+	return rows
+}
+
+// scrollWindow slices lines to whatever fits at rows starting from offset,
+// clamping offset to a range that can never scroll past the end or before
+// the start. Callers that mutate a scroll field should reuse the clamped
+// offset returned here to keep the stored value in range too.
+func scrollWindow(lines []string, offset, rows int) (window []string, clamped int) {
+	max := len(lines) - rows
+	if max < 0 {
+		max = 0
+	}
+	if offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	end := offset + rows
+	if end > len(lines) {
+		end = len(lines)
+	}
+	return lines[offset:end], offset
 }
 
 // ── update ────────────────────────────────────────────────────
@@ -257,29 +305,20 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// The rail is drawn vertically, so up/down would be the natural way to
-		// move it — and that is what Docs does. Here it cannot be
-		// unconditional: three of the five sections put a list in the body and
-		// up/down has to drive that. So up/down moves the rail only in the two
-		// sections with no list, which leaves all four arrows doing something
-		// everywhere without ever changing what a key already meant. The
-		// non-rail cases deliberately fall out of the switch rather than
-		// returning, so the section dispatch below still sees the key.
-		railUpDown := m.section == secOverview || m.section == secDotfiles
-		switch msg.String() {
-		case "l", "right":
-			m.section = (m.section + 1) % numSections
-			return m, nil
-		case "h", "left":
-			m.section = (m.section + numSections - 1) % numSections
-			return m, nil
-		case "j", "down":
-			if railUpDown {
+		// See the navigation contract above manageModel.keys() in keys.go:
+		// left/right is the only thing that ever switches the rail, up/down is
+		// the only thing that ever moves within a section, and neither fires
+		// while a filter box owns the keyboard. This used to also switch
+		// section on j/k/up/down in the two sections with no row list
+		// (Overview, Dotfiles) — up/down now scrolls those instead (see
+		// updateOverviewKey/updateDotfilesKey), so the split is gone and every
+		// section behaves the same way.
+		if !m.filtering() {
+			switch msg.String() {
+			case "l", "right":
 				m.section = (m.section + 1) % numSections
 				return m, nil
-			}
-		case "k", "up":
-			if railUpDown {
+			case "h", "left":
 				m.section = (m.section + numSections - 1) % numSections
 				return m, nil
 			}
@@ -304,19 +343,31 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 }
 
 // updateOverviewKey is deliberately narrow: this section only ever reports
-// on the machine, it never acts on it, so "r" (refresh) is the only key it
+// on the machine, it never acts on it, so refresh and scroll are all it
 // handles.
 func (m manageModel) updateOverviewKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
 	case "r":
 		m.ovLoading = true
 		return m, fetchOverviewInfo()
+	case "j", "down":
+		_, m.ovScroll = scrollWindow(m.overviewLines(), m.ovScroll+1, m.bodyRows())
+		return m, nil
+	case "k", "up":
+		_, m.ovScroll = scrollWindow(m.overviewLines(), m.ovScroll-1, m.bodyRows())
+		return m, nil
 	}
 	return m, nil
 }
 
 func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
+	case "j", "down":
+		_, m.dfScroll = scrollWindow(m.dotfilesLines(), m.dfScroll+1, m.bodyRows())
+		return m, nil
+	case "k", "up":
+		_, m.dfScroll = scrollWindow(m.dotfilesLines(), m.dfScroll-1, m.bodyRows())
+		return m, nil
 	case "u":
 		if m.repo == "" {
 			m.dfMsg = "no checkout to update"
@@ -512,6 +563,14 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		m.pkgLoading = true
 		m.pkgMsg = ""
 		return m, discoverPackages()
+	case "s":
+		if m.pkgSortMode == pkgSortOutdated {
+			m.pkgSortMode = pkgSortName
+		} else {
+			m.pkgSortMode = pkgSortOutdated
+		}
+		m.pkgCursor = 0
+		return m, nil
 	case "u":
 		if m.pkgCursor >= len(vis) {
 			return m, nil
@@ -957,7 +1016,80 @@ func (m manageModel) packagesSummary() string {
 	if src == "" {
 		src = "none"
 	}
-	return fmt.Sprintf("%d packages, %d outdated  ·  via %s", len(m.packages), outdated, src)
+	return fmt.Sprintf("%d packages, %d outdated  ·  via %s  ·  sorted by %s",
+		len(m.packages), outdated, src, m.pkgSortMode)
+}
+
+// overviewLines is the content Overview shows, one stat per line. Split out
+// from viewOverview so both the view and the scroll-key handler can measure
+// and window it without shelling out or duplicating the formatting.
+func (m manageModel) overviewLines() []string {
+	measure := measureFor(m.w - railWidth - 1)
+	const keyW = 10
+	valW := measure - keyW
+	if valW < 4 {
+		valW = 4
+	}
+
+	info := m.ovInfo
+	var lines []string
+
+	host := info.host
+	if host == "" {
+		host = "unknown"
+	}
+	lines = append(lines, statRow("host", styValue.Render(truncate(host, valW)), keyW))
+
+	osName := info.osName
+	if osName == "" {
+		osName = runtime.GOOS
+	}
+	lines = append(lines, statRow("os", styValue.Render(truncate(osName, valW)), keyW))
+
+	lines = append(lines, statRow("arch", styValue.Render(info.arch), keyW))
+
+	profile := "full"
+	if info.profileLight {
+		profile = "light"
+	}
+	lines = append(lines, statRow("profile", styValue.Render(profile), keyW))
+
+	dots := info.version
+	if dots == "" {
+		dots = "dev"
+	}
+	if info.distSource != "" {
+		dots += " (" + info.distSource + ")"
+	}
+	lines = append(lines, statRow("dots", styValue.Render(truncate(dots, valW)), keyW))
+
+	lines = append(lines, statRow("repo", m.overviewRepoLine(valW), keyW))
+
+	lines = append(lines, statRow("tools", countSummary(info.toolsHave, info.toolsTotal, "present"), keyW))
+
+	lines = append(lines, statRow("services", m.overviewServicesLine(), keyW))
+
+	if info.memKnown {
+		mem := fmt.Sprintf("%s free / %s", formatBytes(info.memFreeBytes), formatBytes(info.memTotalBytes))
+		lines = append(lines, statRow("memory", styValue.Render(truncate(mem, valW)), keyW))
+	} else {
+		lines = append(lines, statRow("memory", styMuted.Render("unknown"), keyW))
+	}
+
+	if info.diskKnown {
+		disk := fmt.Sprintf("%s free / %s", formatBytes(info.diskFreeBytes), formatBytes(info.diskTotalBytes))
+		lines = append(lines, statRow("disk", styValue.Render(truncate(disk, valW)), keyW))
+	} else {
+		lines = append(lines, statRow("disk", styMuted.Render("unknown"), keyW))
+	}
+
+	if info.uptimeKnown {
+		lines = append(lines, statRow("uptime", styValue.Render(formatDuration(info.uptime)), keyW))
+	} else {
+		lines = append(lines, statRow("uptime", styMuted.Render("unknown"), keyW))
+	}
+
+	return lines
 }
 
 // viewOverview is read-only: every field either comes straight from
@@ -968,72 +1100,14 @@ func (m manageModel) viewOverview(spin string) string {
 		return "\n  " + spin + styPending.Render(" gathering machine info")
 	}
 
-	measure := measureFor(m.w - railWidth - 1)
-	const keyW = 10
-	valW := measure - keyW
-	if valW < 4 {
-		valW = 4
+	lines := m.overviewLines()
+	rows := m.bodyRows()
+	win, off := scrollWindow(lines, m.ovScroll, rows)
+	body := strings.Join(win, "\n")
+	if hidden := len(lines) - off - len(win); hidden > 0 {
+		body += "\n" + styMuted.Render(fmt.Sprintf("↓ %d more, j/k to scroll", hidden))
 	}
-
-	info := m.ovInfo
-	var b strings.Builder
-
-	host := info.host
-	if host == "" {
-		host = "unknown"
-	}
-	b.WriteString(statRow("host", styValue.Render(truncate(host, valW)), keyW) + "\n")
-
-	osName := info.osName
-	if osName == "" {
-		osName = runtime.GOOS
-	}
-	b.WriteString(statRow("os", styValue.Render(truncate(osName, valW)), keyW) + "\n")
-
-	b.WriteString(statRow("arch", styValue.Render(info.arch), keyW) + "\n")
-
-	profile := "full"
-	if info.profileLight {
-		profile = "light"
-	}
-	b.WriteString(statRow("profile", styValue.Render(profile), keyW) + "\n")
-
-	dots := info.version
-	if dots == "" {
-		dots = "dev"
-	}
-	if info.distSource != "" {
-		dots += " (" + info.distSource + ")"
-	}
-	b.WriteString(statRow("dots", styValue.Render(truncate(dots, valW)), keyW) + "\n")
-
-	b.WriteString(statRow("repo", m.overviewRepoLine(valW), keyW) + "\n")
-
-	b.WriteString(statRow("tools", countSummary(info.toolsHave, info.toolsTotal, "present"), keyW) + "\n")
-
-	b.WriteString(statRow("services", m.overviewServicesLine(), keyW) + "\n")
-
-	if info.memKnown {
-		mem := fmt.Sprintf("%s free / %s", formatBytes(info.memFreeBytes), formatBytes(info.memTotalBytes))
-		b.WriteString(statRow("memory", styValue.Render(truncate(mem, valW)), keyW) + "\n")
-	} else {
-		b.WriteString(statRow("memory", styMuted.Render("unknown"), keyW) + "\n")
-	}
-
-	if info.diskKnown {
-		disk := fmt.Sprintf("%s free / %s", formatBytes(info.diskFreeBytes), formatBytes(info.diskTotalBytes))
-		b.WriteString(statRow("disk", styValue.Render(truncate(disk, valW)), keyW) + "\n")
-	} else {
-		b.WriteString(statRow("disk", styMuted.Render("unknown"), keyW) + "\n")
-	}
-
-	if info.uptimeKnown {
-		b.WriteString(statRow("uptime", styValue.Render(formatDuration(info.uptime)), keyW) + "\n")
-	} else {
-		b.WriteString(statRow("uptime", styMuted.Render("unknown"), keyW) + "\n")
-	}
-
-	return b.String()
+	return body
 }
 
 // overviewRepoLine reuses m.repo/m.dfInfo — the same state Dotfiles renders
@@ -1089,11 +1163,11 @@ func (m manageModel) overviewServicesLine() string {
 	return countSummary(run, len(m.services), "running")
 }
 
-func (m manageModel) viewDotfiles() string {
-	if m.dfLoading {
-		return styPending.Render("checking…")
-	}
-	var b strings.Builder
+// dotfilesLines is the content Dotfiles shows, split out from viewDotfiles
+// for the same reason overviewLines is: the scroll-key handler needs to
+// measure it without duplicating the formatting.
+func (m manageModel) dotfilesLines() []string {
+	var lines []string
 
 	repo := m.repo
 	if repo == "" {
@@ -1101,44 +1175,59 @@ func (m manageModel) viewDotfiles() string {
 	} else {
 		repo = styValue.Render(truncate(repo, m.w-14))
 	}
-	b.WriteString(styKey.Render("repo    ") + repo + "\n")
+	lines = append(lines, styKey.Render("repo    ")+repo)
 
 	branch := m.dfInfo.branch
 	if branch == "" {
-		b.WriteString(styKey.Render("branch  ") + styMuted.Render("unknown") + "\n")
+		lines = append(lines, styKey.Render("branch  ")+styMuted.Render("unknown"))
 	} else {
-		b.WriteString(styKey.Render("branch  ") + styValue.Render(branch) + "\n")
+		lines = append(lines, styKey.Render("branch  ")+styValue.Render(branch))
 	}
 
 	sha := m.dfInfo.sha
 	if sha == "" {
-		b.WriteString(styKey.Render("sha     ") + styMuted.Render("unknown") + "\n")
+		lines = append(lines, styKey.Render("sha     ")+styMuted.Render("unknown"))
 	} else {
-		b.WriteString(styKey.Render("sha     ") + styValue.Render(sha) + "\n")
+		lines = append(lines, styKey.Render("sha     ")+styValue.Render(sha))
 	}
 
 	if !m.dfInfo.dirtyKnown {
-		b.WriteString(styKey.Render("status  ") + styMuted.Render("unknown") + "\n")
+		lines = append(lines, styKey.Render("status  ")+styMuted.Render("unknown"))
 	} else if m.dfInfo.dirty {
-		b.WriteString(styKey.Render("status  ") + styBad.Render("dirty") + "\n")
+		lines = append(lines, styKey.Render("status  ")+styBad.Render("dirty"))
 	} else {
-		b.WriteString(styKey.Render("status  ") + styOK.Render("clean") + "\n")
+		lines = append(lines, styKey.Render("status  ")+styOK.Render("clean"))
 	}
 
 	switch {
 	case m.dfInfo.behind < 0:
-		b.WriteString(styKey.Render("behind  ") + styMuted.Render("unknown") + "\n")
+		lines = append(lines, styKey.Render("behind  ")+styMuted.Render("unknown"))
 	case m.dfInfo.behind == 0:
-		b.WriteString(styKey.Render("behind  ") + styOK.Render("up to date") + "\n")
+		lines = append(lines, styKey.Render("behind  ")+styOK.Render("up to date"))
 	default:
-		b.WriteString(styKey.Render("behind  ") + styPending.Render(fmt.Sprintf("%d commit(s)", m.dfInfo.behind)) + "\n")
+		lines = append(lines, styKey.Render("behind  ")+styPending.Render(fmt.Sprintf("%d commit(s)", m.dfInfo.behind)))
 	}
 
-	b.WriteString("\n")
 	if m.dfMsg != "" {
-		b.WriteString(styMuted.Render(m.dfMsg))
+		lines = append(lines, "", styMuted.Render(m.dfMsg))
 	}
-	return b.String()
+
+	return lines
+}
+
+func (m manageModel) viewDotfiles() string {
+	if m.dfLoading {
+		return styPending.Render("checking…")
+	}
+
+	lines := m.dotfilesLines()
+	rows := m.bodyRows()
+	win, off := scrollWindow(lines, m.dfScroll, rows)
+	body := strings.Join(win, "\n")
+	if hidden := len(lines) - off - len(win); hidden > 0 {
+		body += "\n" + styMuted.Render(fmt.Sprintf("↓ %d more, j/k to scroll", hidden))
+	}
+	return body
 }
 
 func (m manageModel) viewServices(spin string) string {
@@ -1258,6 +1347,43 @@ func (m manageModel) visibleServices() []service {
 // a label in the first column only when the manager changes, not a flat list
 // like Services — since "which manager is this" is the first thing worth
 // knowing about a package row.
+// pkgOutdatedOverviewCap bounds the Outdated summary block so a machine with
+// dozens of stale packages doesn't push the manager-grouped table below off
+// screen — the same reasoning viewServices/viewPackages already apply to
+// their own row lists.
+const pkgOutdatedOverviewCap = 5
+
+// outdatedOverviewBlock renders the "what's outdated, across every manager"
+// summary shown above the manager-grouped table. Built from m.packages
+// (unfiltered) rather than the visible/filtered slice — it's a whole-machine
+// summary, not scoped to whatever the filter box happens to show. Returns ""
+// with height 0 when nothing is outdated, so a fully up-to-date machine
+// doesn't carry an empty header around.
+func (m manageModel) outdatedOverviewBlock(measure int) (string, int) {
+	shown, more := outdatedOverview(m.packages, pkgOutdatedOverviewCap)
+	if len(shown) == 0 {
+		return "", 0
+	}
+	total := len(shown) + more
+
+	var b strings.Builder
+	b.WriteString("  " + styGroup.Render(fmt.Sprintf("OUTDATED (%d)", total)) + "\n")
+	height := 1
+	for _, p := range shown {
+		line := fmt.Sprintf("  %s %s  %s %s %s",
+			styMuted.Render(strings.ToUpper(p.Manager.String())),
+			styValue.Render(p.Name), p.Version,
+			styMuted.Render("→"), styPending.Render(p.Latest))
+		b.WriteString(truncate(line, measure) + "\n")
+		height++
+	}
+	if more > 0 {
+		b.WriteString("  " + styMuted.Render(fmt.Sprintf("… %d more outdated", more)) + "\n")
+		height++
+	}
+	return b.String(), height
+}
+
 func (m manageModel) viewPackages(spin string) string {
 	measure := measureFor(m.w - railWidth - 1)
 
@@ -1280,17 +1406,26 @@ func (m manageModel) viewPackages(spin string) string {
 		return head + "  " + styMuted.Render("nothing matches that filter")
 	}
 
-	rows := m.h - 9
+	outBlock, outHeight := m.outdatedOverviewBlock(measure)
+
+	var adv strings.Builder
+	advHeight := 0
+	if len(m.advisories) > 0 {
+		for _, a := range m.advisories {
+			adv.WriteString("  " + styPending.Render("! ") + styMuted.Render(truncate(a.Text, measure)) + "\n")
+		}
+		// The blank-line separator below the advisories block is part of
+		// its footprint too, same as the pre-redesign math counted.
+		advHeight = len(m.advisories) + 1
+	}
+
+	// Both fixed blocks above the table are computed and subtracted
+	// together, then floored once — subtracting and re-flooring them one at
+	// a time could still leave rows too tall for what's actually left once
+	// both blocks are present, at the smallest sizes this app supports.
+	rows := m.h - 9 - outHeight - advHeight
 	if rows < 3 {
 		rows = 3
-	}
-	// Advisories are a fixed block above the table, not part of the
-	// scrolling list, so they eat into the row budget up front.
-	if len(m.advisories) > 0 {
-		rows -= len(m.advisories) + 1
-		if rows < 3 {
-			rows = 3
-		}
 	}
 	start := 0
 	if len(vis) > rows {
@@ -1327,12 +1462,7 @@ func (m manageModel) viewPackages(spin string) string {
 		data = append(data, []string{label, p.Name, p.Version, mark + " " + latest})
 	}
 
-	var adv strings.Builder
-	for _, a := range m.advisories {
-		adv.WriteString("  " + styPending.Render("! ") + styMuted.Render(truncate(a.Text, measure)) + "\n")
-	}
-
-	body := head + adv.String() + dataTable(
+	body := head + outBlock + adv.String() + dataTable(
 		[]string{"", "PACKAGE", "VERSION", "LATEST"},
 		data, m.pkgCursor-start, measure)
 
@@ -1345,9 +1475,11 @@ func (m manageModel) viewPackages(spin string) string {
 	return body
 }
 
-// visiblePackages applies the search box. m.packages is already grouped by
-// manager (discoverPackages sorts it that way) and filtering only removes
-// entries, so the grouping survives a filter unchanged.
+// visiblePackages applies the search box, then the active sort mode.
+// m.packages is already grouped by manager (discoverPackages sorts it that
+// way) and filtering only removes entries, so the grouping survives a
+// filter unchanged; sortPackagesFor re-sorts within each group without
+// touching that outer order.
 func (m manageModel) visiblePackages() []pkg {
 	q := strings.ToLower(m.pkgFilter)
 	out := make([]pkg, 0, len(m.packages))
@@ -1358,6 +1490,7 @@ func (m manageModel) visiblePackages() []pkg {
 		}
 		out = append(out, p)
 	}
+	sortPackagesFor(out, m.pkgSortMode)
 	return out
 }
 

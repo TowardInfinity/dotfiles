@@ -55,3 +55,66 @@ func isQuit(cmd tea.Cmd) bool {
 	}
 	return cmd() == tea.Quit()
 }
+
+// "h"/"l" (and the arrow keys of the same name) are Manage's section-switch
+// keys everywhere else — but while a filter box is focused they must be
+// typed, or move the cursor within it, not treated as navigation. This was a
+// real bug: the top-level nav switch in manageModel.update() ran before
+// updateServicesKey/updatePackagesKey's own filtering guards ever saw the
+// key, so typing "lazygit" into either filter silently hopped sections
+// partway through the word.
+func TestFilterCapturesSectionKeys(t *testing.T) {
+	// Services: two "l" presses from Overview lands here (Dotfiles, then
+	// Services), matching capture_test.go's existing navigation above.
+	m := newModel()
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
+	tm, _ = tm.Update(discoverServices()())
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+	for _, r := range "lazygit" {
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if got := tm.(model).man.section; got != secServices {
+		t.Errorf("typing into the services filter changed section to %v", got)
+	}
+	if got := tm.(model).man.svcFilter; got != "lazygit" {
+		t.Errorf("services filter = %q, want %q", got, "lazygit")
+	}
+
+	// Arrow-type left/right move the textinput's cursor, not the value — so
+	// only assert the section held, not that the text changed.
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := tm.(model).man.section; got != secServices {
+		t.Errorf("arrow keys in the services filter changed section to %v", got)
+	}
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	// Packages: one more "l" from Services.
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Packages
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+
+	for _, r := range "lazygit" {
+		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	if got := tm.(model).man.section; got != secPackages {
+		t.Errorf("typing into the packages filter changed section to %v", got)
+	}
+	if got := tm.(model).man.pkgFilter; got != "lazygit" {
+		t.Errorf("packages filter = %q, want %q", got, "lazygit")
+	}
+
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if got := tm.(model).man.section; got != secPackages {
+		t.Errorf("arrow keys in the packages filter changed section to %v", got)
+	}
+}

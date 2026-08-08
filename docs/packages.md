@@ -57,7 +57,7 @@ a missing `uv tool install` aren't the same repair.
 
 ## The Manage tab's Packages section
 
-Six backends, each contributing nothing when its manager isn't installed —
+Seven backends, each contributing nothing when its manager isn't installed —
 the same "silently skip, never error" rule `cmd/dots/services.go` already
 follows for launchd/systemd/docker:
 
@@ -69,6 +69,7 @@ follows for launchd/systemd/docker:
 | uv tool | `uv tool list` | not offered — no offline query | `uv tool upgrade <name>` |
 | pip (`--user`) | `pip3 list --user --format=json` | `pip3 list --user --outdated --format=json` | `pip3 install --user --upgrade <name>` |
 | go (`~/go/bin`) | `go version -m <binary>` per file | not offered — needs a network call per binary | not offered — `go install <mod>@latest` re-fetches rather than upgrading in place |
+| installer (claude, opencode) | `<bin> --version` | not offered — no offline query | re-runs the same `curl \| bash` install script bootstrap.sh used, which is self-updating |
 
 A blank `LATEST` column means "not knowable offline for this manager", never
 a guessed "up to date" — the same principle the doctor checks above already
@@ -77,10 +78,10 @@ cursor is on a row that actually has an upgrade path; pressing it runs the
 command through the same confirm-then-stream overlay every other Manage
 action (services, dotfiles updates, machine doctor) already uses.
 
-Groups are shown in a fixed order — pnpm, npm, uv tool, pip, go, then brew
-last. Brew typically outnumbers every other manager's packages combined, so
-putting it first pushed the shorter, often more interesting groups below the
-fold; this way they're what you see without scrolling.
+Groups are shown in a fixed order — pnpm, npm, uv tool, pip, go, installer,
+then brew last. Brew typically outnumbers every other manager's packages
+combined, so putting it first pushed the shorter, often more interesting
+groups below the fold; this way they're what you see without scrolling.
 
 Two keys work on top of that grouping without changing it:
 
@@ -88,9 +89,10 @@ Two keys work on top of that grouping without changing it:
   (default) or alphabetical by name. The group order above never moves; only
   what comes within one group does.
 - **`m`** cycles a manager filter — All → pnpm → npm → uv tool → pip → go →
-  brew → All — narrowing the table to one group at a time instead of
-  scrolling past the others to reach it. The breadcrumb names the active one
-  (`Packages › Brew`), same as the outer rail names the current section.
+  installer → brew → All — narrowing the table to one group at a time
+  instead of scrolling past the others to reach it. The breadcrumb names the
+  active one (`Packages › Brew`), same as the outer rail names the current
+  section.
 
 An **Outdated overview** block sits above the table, capped at five rows with
 a "+N more" line past that. It always summarizes every manager regardless of

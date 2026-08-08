@@ -586,9 +586,10 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		m.pkgCursor = 0
 		return m, nil
 	case "m":
-		// Cycles All → Pnpm → Npm → Uv Tool → Pip → Go → Brew → All, the same
-		// order the table already groups by — so one press always lands on
-		// whichever group currently follows the one you're looking at.
+		// Cycles All → Pnpm → Npm → Uv Tool → Pip → Go → Installer → Brew →
+		// All, the same order the table already groups by — so one press
+		// always lands on whichever group currently follows the one you're
+		// looking at.
 		m.pkgMgrFilter = (m.pkgMgrFilter + 1) % numPkgManagers
 		m.pkgCursor = 0
 		return m, nil
@@ -1443,7 +1444,7 @@ func (m manageModel) viewPackages(spin string) string {
 	}
 	if len(m.packages) == 0 {
 		return "\n  " + styMuted.Render(
-			"Nothing found. Looked for brew, pnpm, npm, uv tool, pip and go-installed binaries.")
+			"Nothing found. Looked for brew, pnpm, npm, uv tool, pip, go-installed binaries, and claude/opencode.")
 	}
 
 	var head string

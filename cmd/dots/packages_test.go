@@ -198,6 +198,34 @@ func TestParseGoVersionMNoModLine(t *testing.T) {
 	}
 }
 
+// ── installer (claude, opencode) ────────────────────────────────
+
+func TestParseInstallerVersion(t *testing.T) {
+	cases := map[string]string{
+		"2.1.226 (Claude Code)\n": "2.1.226",
+		"1.18.7\n":                "1.18.7",
+		"":                        "",
+		"   \n":                   "",
+	}
+	for out, want := range cases {
+		if got := parseInstallerVersion(out); got != want {
+			t.Errorf("parseInstallerVersion(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
+func TestInstallerURLFor(t *testing.T) {
+	if url, ok := installerURLFor("claude"); !ok || url != "https://claude.ai/install.sh" {
+		t.Errorf("claude: url=%q ok=%v, want https://claude.ai/install.sh, true", url, ok)
+	}
+	if url, ok := installerURLFor("opencode"); !ok || url != "https://opencode.ai/install" {
+		t.Errorf("opencode: url=%q ok=%v, want https://opencode.ai/install, true", url, ok)
+	}
+	if _, ok := installerURLFor("something-else"); ok {
+		t.Error("unknown name: expected ok=false")
+	}
+}
+
 // ── pkg.Outdated ──────────────────────────────────────────────
 
 func TestPkgOutdated(t *testing.T) {
@@ -223,12 +251,13 @@ func TestPkgOutdated(t *testing.T) {
 
 func TestPkgManagerString(t *testing.T) {
 	cases := map[pkgManager]string{
-		pmBrew:   "brew",
-		pmPnpm:   "pnpm",
-		pmNpm:    "npm",
-		pmUvTool: "uv tool",
-		pmPip:    "pip",
-		pmGo:     "go",
+		pmBrew:      "brew",
+		pmPnpm:      "pnpm",
+		pmNpm:       "npm",
+		pmUvTool:    "uv tool",
+		pmPip:       "pip",
+		pmGo:        "go",
+		pmInstaller: "installer",
 	}
 	for m, want := range cases {
 		if got := m.String(); got != want {
@@ -406,7 +435,7 @@ func TestPackagesManagerCycleKey(t *testing.T) {
 		packages:  []pkg{{Manager: pmBrew, Name: "git", Version: "1.0"}},
 		pkgCursor: 3,
 	}
-	want := []pkgManager{pmPnpm, pmNpm, pmUvTool, pmPip, pmGo, pmBrew, pkgManagerAll}
+	want := []pkgManager{pmPnpm, pmNpm, pmUvTool, pmPip, pmGo, pmInstaller, pmBrew, pkgManagerAll}
 	for i, w := range want {
 		var cmd tea.Cmd
 		m, cmd = m.updatePackagesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
@@ -458,6 +487,11 @@ func TestPackagesBreadcrumbShowsManagerFilter(t *testing.T) {
 	}
 }
 
+// pmGo and pmInstaller are deliberately excluded: pmGo has no per-package
+// upgrade at all, and pmInstaller's action depends on which name it is
+// (claude vs. opencode have different URLs) rather than working for any
+// name the way the other five managers' commands do — see
+// TestPackageActionInstaller for those.
 func TestPackageActionKnownManagers(t *testing.T) {
 	for _, m := range []pkgManager{pmBrew, pmPnpm, pmNpm, pmUvTool, pmPip} {
 		p := pkg{Manager: m, Name: "thing", Version: "1.0", Latest: "1.1"}
@@ -472,5 +506,35 @@ func TestPackageActionKnownManagers(t *testing.T) {
 		if spec.Confirm == "" {
 			t.Errorf("%v: empty Confirm", m)
 		}
+	}
+}
+
+// The install command is a pipe (`curl | bash`), so it has to run through a
+// shell rather than being exec'd directly like every other manager's Argv —
+// pinning that shape here since it's the one case where getting it wrong
+// wouldn't be caught by "does len(Argv) look reasonable."
+func TestPackageActionInstaller(t *testing.T) {
+	for _, name := range []string{"claude", "opencode"} {
+		p := pkg{Manager: pmInstaller, Name: name, Version: "1.0"}
+		spec, ok := packageAction(p)
+		if !ok {
+			t.Fatalf("%s: expected an action", name)
+		}
+		if len(spec.Argv) != 3 || spec.Argv[0] != "sh" || spec.Argv[1] != "-c" {
+			t.Errorf("%s: Argv = %v, want [sh -c <pipe>]", name, spec.Argv)
+		}
+		url, _ := installerURLFor(name)
+		if !strings.Contains(spec.Argv[2], url) || !strings.Contains(spec.Argv[2], "| bash") {
+			t.Errorf("%s: Argv[2] = %q, want it to curl %q and pipe to bash", name, spec.Argv[2], url)
+		}
+		if spec.Confirm == "" {
+			t.Errorf("%s: empty Confirm", name)
+		}
+	}
+
+	// A name that isn't claude or opencode has no known install URL, so
+	// there's nothing packageAction could safely run.
+	if _, ok := packageAction(pkg{Manager: pmInstaller, Name: "unknown-tool", Version: "1.0"}); ok {
+		t.Error("unknown installer name: expected no action")
 	}
 }

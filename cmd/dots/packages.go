@@ -50,6 +50,7 @@ const (
 	pmUvTool
 	pmPip
 	pmGo
+	pmInstaller // claude, opencode — see discoverInstallerCLIs
 	pmBrew
 	numPkgManagers
 )
@@ -68,6 +69,8 @@ func (m pkgManager) String() string {
 		return "pip"
 	case pmGo:
 		return "go"
+	case pmInstaller:
+		return "installer"
 	case pmBrew:
 		return "brew"
 	}
@@ -78,7 +81,7 @@ func (m pkgManager) String() string {
 // match sectionNames' style ("Overview", "Dotfiles", …) rather than
 // String()'s all-lowercase form used everywhere else (search text, the
 // summary line, upgrade confirmations). strings.Title is deprecated and
-// this covers exactly six known values, so a plain switch beats pulling in
+// this covers exactly seven known values, so a plain switch beats pulling in
 // golang.org/x/text/cases for one label.
 func (m pkgManager) managerTitle() string {
 	switch m {
@@ -92,6 +95,8 @@ func (m pkgManager) managerTitle() string {
 		return "Pip"
 	case pmGo:
 		return "Go"
+	case pmInstaller:
+		return "Installer"
 	case pmBrew:
 		return "Brew"
 	}
@@ -209,6 +214,7 @@ func discoverPackages() tea.Cmd {
 			{"uv", discoverUvTools},
 			{"pip", discoverPip},
 			{"go", discoverGoBin},
+			{"installer", discoverInstallerCLIs},
 		}
 		for _, b := range backends {
 			b := b
@@ -615,6 +621,64 @@ func parseGoVersionM(binName, output string) (pkg, bool) {
 	return pkg{}, false
 }
 
+// ── backend: web installer scripts ──────────────────────────────
+
+// installerCLIs lists tools bootstrap.sh installs via a vendor's own web
+// install script (`curl -fsSL <url> | bash`) rather than through any package
+// manager above — brew, pnpm, npm, uv tool, pip and go all have no way to
+// see these, since none of them did the installing. install.sh is also how
+// each one upgrades: re-running it just fetches whatever's current, the
+// same self-updating shape `uv`/`pnpm`/`fnm`'s own installers already have.
+var installerCLIs = []struct {
+	bin, install string
+}{
+	{"claude", "https://claude.ai/install.sh"},
+	{"opencode", "https://opencode.ai/install"},
+}
+
+func discoverInstallerCLIs(ctx context.Context) ([]pkg, bool) {
+	var pkgs []pkg
+	ran := false
+	for _, c := range installerCLIs {
+		p, ok := have(c.bin)
+		if !ok {
+			continue // not installed here — not every machine runs --ai
+		}
+		ran = true
+		out, err := exec.CommandContext(ctx, p, "--version").Output()
+		if err != nil {
+			continue
+		}
+		if v := parseInstallerVersion(string(out)); v != "" {
+			pkgs = append(pkgs, pkg{Manager: pmInstaller, Name: c.bin, Version: v})
+		}
+	}
+	return pkgs, ran
+}
+
+// parseInstallerVersion takes just the first field: claude prints
+// "2.1.226 (Claude Code)", opencode prints a bare "1.18.7" — both leave a
+// clean version number as the first whitespace-separated token.
+func parseInstallerVersion(out string) string {
+	fields := strings.Fields(out)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+// installerURLFor looks up the install command for a pmInstaller package by
+// name — Manager alone doesn't say which one, since claude and opencode
+// share it the same way multiple names share pmUvTool or pmGo.
+func installerURLFor(name string) (string, bool) {
+	for _, c := range installerCLIs {
+		if c.bin == name {
+			return c.install, true
+		}
+	}
+	return "", false
+}
+
 // ── actions ───────────────────────────────────────────────────
 
 // packageAction builds the actionSpec behind the "u" key, per manager.
@@ -661,6 +725,20 @@ func packageAction(p pkg) (actionSpec, bool) {
 			Argv:    []string{"pip3", "install", "--user", "--upgrade", p.Name},
 			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) via pip?", p.Name, p.Version, target),
 			Timeout: 3 * time.Minute,
+		}, true
+	case pmInstaller:
+		url, ok := installerURLFor(p.Name)
+		if !ok {
+			return actionSpec{}, false
+		}
+		// Argv runs through a shell rather than exec'd directly, unlike every
+		// other case here — the install command IS a pipe (`curl | bash`),
+		// same as bootstrap.sh runs it, so there's no argv form without one.
+		return actionSpec{
+			Title:   "Upgrade " + p.Name,
+			Argv:    []string{"sh", "-c", "curl -fsSL " + url + " | bash"},
+			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) by re-running its install script?", p.Name, p.Version, target),
+			Timeout: 5 * time.Minute,
 		}, true
 	default:
 		return actionSpec{}, false

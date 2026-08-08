@@ -432,10 +432,31 @@ func launchdActionSpec(s service, verb string) (actionSpec, bool) {
 	case "stop":
 		argv = []string{"launchctl", "bootout", target}
 	case "restart":
-		// bootout then bootstrap, one shell so the second step always runs
-		// even when the job wasn't loaded to begin with (`;`, not `&&`).
+		// bootout, WAIT for the label to actually go away, then bootstrap.
+		//
+		// `;` rather than `&&` on purpose: bootstrap must still run when the
+		// job wasn't loaded to begin with, and bootout fails in that case.
+		//
+		// The wait is the part that took a service down to learn. bootout
+		// returns as soon as launchd has accepted the request, not once the
+		// job is gone, so a bootstrap issued immediately after can land while
+		// the label is still registered and fail with
+		//
+		//   Bootstrap failed: 5: Input/output error
+		//
+		// which reads like a broken plist and is not — retrying the identical
+		// command succeeds. It is worse than a plain failure: the bootout half
+		// already worked, so a failed restart leaves the service STOPPED. That
+		// is the opposite of what someone pressing "restart" is asking for.
+		//
+		// Polling `launchctl print` is the check that matches the failure: it
+		// asks the same domain the same question bootstrap will. Bounded at
+		// ~10s, comfortably inside the 30s action timeout, and it exits the
+		// instant the label clears — so the common case costs one iteration.
 		argv = []string{"sh", "-c",
-			"launchctl bootout " + shellQuote(target) + "; " +
+			"launchctl bootout " + shellQuote(target) + " 2>/dev/null; " +
+				"n=0; while launchctl print " + shellQuote(target) +
+				" >/dev/null 2>&1 && [ \"$n\" -lt 50 ]; do sleep 0.2; n=$((n+1)); done; " +
 				"launchctl bootstrap " + shellQuote(gui) + " " + shellQuote(plist)}
 	}
 	return actionSpec{

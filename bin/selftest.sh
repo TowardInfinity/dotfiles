@@ -418,6 +418,13 @@ env HOME="$DRYHOME" sh "$REPO/bootstrap.sh" --dry >/dev/null 2>&1
   && ok "--dry does not write known_hosts" \
   || bad "--dry does not write known_hosts" "the ssh probe ran anyway"
 
+INSTALL_DRY_HOME="$WORK/install-dry-home"; mkdir -p "$INSTALL_DRY_HOME"
+env HOME="$INSTALL_DRY_HOME" bash "$REPO/install.sh" --dry >/dev/null 2>&1
+dry_changes=$(find "$INSTALL_DRY_HOME" -mindepth 1 -print)
+[ -z "$dry_changes" ] \
+  && ok "install.sh --dry leaves an empty HOME entirely empty" \
+  || bad "install.sh --dry leaves an empty HOME entirely empty" "$dry_changes"
+
 if [ "$(uname -s)" = "Darwin" ]; then
   env HOME="$DRYHOME" sh "$REPO/bootstrap.sh" --light --dry >/dev/null 2>&1
   [ $? -ne 0 ] && ok "--light is rejected on macOS" \
@@ -425,6 +432,83 @@ if [ "$(uname -s)" = "Darwin" ]; then
 else
   $VERBOSE && printf '  \033[90mskip\033[0m  --light macOS guard (not on Darwin)\n'
 fi
+
+# ── bootstrap.sh dependency recovery ─────────────────────────
+#
+# Exercise the full-deps state transitions without touching the host. Linux is
+# forced through PATH and every privileged/package command is stubbed. Archive
+# installs deliberately fail: linking still has to run after package trouble.
+DEPSHOME="$WORK/depshome"
+DEPSREPO="$WORK/depsrepo"
+DEPSBIN="$WORK/depsbin"
+DEPS_LINKED="$WORK/deps-linked"
+mkdir -p "$DEPSHOME/.config/dots" "$DEPSHOME/.sdkman/bin" \
+         "$DEPSHOME/.oh-my-zsh/custom/plugins/zsh-autosuggestions" \
+         "$DEPSHOME/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting" \
+         "$DEPSREPO/.git" "$DEPSBIN"
+printf 'light\n' > "$DEPSHOME/.config/dots/profile"
+printf '# installed\n' > "$DEPSHOME/.oh-my-zsh/oh-my-zsh.sh"
+cat > "$DEPSHOME/.sdkman/bin/sdkman-init.sh" <<'SDK'
+sdk() {
+  mkdir -p "$HOME/.sdkman/candidates/java/current/bin"
+  printf '#!/bin/sh\n' > "$HOME/.sdkman/candidates/java/current/bin/java"
+  chmod +x "$HOME/.sdkman/candidates/java/current/bin/java"
+}
+SDK
+cat > "$DEPSREPO/install.sh" <<'INSTALL'
+#!/bin/sh
+: > "$DOTS_LINK_MARKER"
+INSTALL
+cat > "$DEPSBIN/uname" <<'STUB'
+#!/bin/sh
+case "${1:-}" in
+  -s) echo Linux ;;
+  -m) echo aarch64 ;;
+  *)  echo Linux ;;
+esac
+STUB
+cat > "$DEPSBIN/curl" <<'STUB'
+#!/bin/sh
+out= url=
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o) out=$2; shift 2 ;;
+    -*) shift ;;
+    *) url=$1; shift ;;
+  esac
+done
+[ -n "$out" ] && : > "$out"
+case "$url" in
+  *go.dev/VERSION*) printf 'go1.25.0\n' ;;
+  *api.github.com/repos/charmbracelet/glow*) printf '{"tag_name":"v1.0.0"}\n' ;;
+esac
+STUB
+cat > "$DEPSBIN/sudo" <<'STUB'
+#!/bin/sh
+case "${1:-}" in
+  tar|rm) exit 1 ;;
+  *)      exit 0 ;;
+esac
+STUB
+for stub in git uv; do
+  printf '#!/bin/sh\nexit 0\n' > "$DEPSBIN/$stub"
+done
+chmod +x "$DEPSREPO/install.sh" "$DEPSBIN"/*
+
+DEPS_LOG="$WORK/deps.log"
+env HOME="$DEPSHOME" PATH="$DEPSBIN:/usr/bin:/bin" \
+    DOTFILES_DIR="$DEPSREPO" DOTS_LINK_MARKER="$DEPS_LINKED" \
+    sh "$REPO/bootstrap.sh" --deps >"$DEPS_LOG" 2>&1
+deps_rc=$?
+[ ! -e "$DEPSHOME/.config/dots/profile" ] \
+  && ok "--deps clears a stale light profile" \
+  || bad "--deps clears a stale light profile"
+[ -x "$DEPSHOME/.sdkman/candidates/java/current/bin/java" ] \
+  && ok "--deps repairs SDKMAN when its JDK is missing" \
+  || bad "--deps repairs SDKMAN when its JDK is missing"
+[ "$deps_rc" -eq 0 ] && [ -e "$DEPS_LINKED" ] \
+  && ok "Linux archive failures do not abort config linking" \
+  || bad "Linux archive failures do not abort config linking" "rc=$deps_rc; $(tail -5 "$DEPS_LOG")"
 
 # ── tmux model indicator ──────────────────────────────────────
 #
@@ -786,6 +870,30 @@ else
   ok "no machine-specific paths in the shared settings"
 fi
 
+group "claude usage: session starts survive turn-window filtering"
+
+USAGE_ROOT="$WORK/usage/projects"
+mkdir -p "$USAGE_ROOT/project"
+old_ts=$(python3 -c 'import datetime; print((datetime.date.today() - datetime.timedelta(days=30)).isoformat() + "T12:00:00Z")')
+new_ts=$(python3 -c 'import datetime; print(datetime.date.today().isoformat() + "T12:00:00Z")')
+usage_turn() {
+  printf '{"timestamp":"%s","message":{"model":"claude-sonnet-5","usage":{"input_tokens":1,"output_tokens":1}}}\n' "$1"
+}
+{
+  usage_turn "$old_ts"
+  usage_turn "$new_ts"
+} > "$USAGE_ROOT/project/resumed.jsonl"
+usage_turn "$new_ts" > "$USAGE_ROOT/project/fresh.jsonl"
+
+usage_out=$(python3 "$REPO/bin/claude-usage.py" --root "$USAGE_ROOT" --days 7 \
+  --policy 2000-01-01T00:00)
+case "$usage_out" in
+  *"sessions STARTED in window (1)"*"NOT YET VALID: 1/10"*)
+    ok "an old session resumed in-window is not counted as a fresh start" ;;
+  *)
+    bad "an old session resumed in-window is not counted as a fresh start" "$usage_out" ;;
+esac
+
 group "claude: resumed sessions off policy"
 
 HOOK_SH="$REPO/common/claude/session-start.sh"
@@ -898,8 +1006,10 @@ for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
   if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi
   $sh_bin -n "$REPO/$f" 2>/dev/null && ok "$f parses" || bad "$f parses"
 done
-python3 -m py_compile "$REPO/bin/merge-toml-block.py" 2>/dev/null \
-  && ok "merge-toml-block.py parses" || bad "merge-toml-block.py parses"
+for f in merge-toml-block.py claude-usage.py; do
+  python3 -m py_compile "$REPO/bin/$f" 2>/dev/null \
+    && ok "$f parses" || bad "$f parses"
+done
 find "$REPO/bin" -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

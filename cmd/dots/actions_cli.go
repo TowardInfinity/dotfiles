@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 // The state-changing subcommands.
@@ -109,7 +108,8 @@ To set up a machine that has none of this yet:
 // runUpdateCLI is the command-line twin of Manage's `u`: pull, then relink.
 func runUpdateCLI(args []string) int {
 	for _, a := range args {
-		if a == "-h" || a == "--help" {
+		switch a {
+		case "-h", "--help":
 			fmt.Print(`dots update — pull the latest configs and relink
 
   dots update    git pull --ff-only, then re-run install.sh
@@ -117,6 +117,9 @@ func runUpdateCLI(args []string) int {
 The docs page about updating is: dots docs update
 `)
 			return 0
+		default:
+			fmt.Fprintf(os.Stderr, "dots update: unknown option: %s\n", a)
+			return 1
 		}
 	}
 
@@ -129,11 +132,10 @@ The docs page about updating is: dots docs update
 	// upstream tracking, which `git push origin main` does not set — a repo
 	// whose remote was re-added by hand has none, and the failure is a
 	// screenful of git's own help text.
-	branch := "main"
-	if out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--short", "HEAD").Output(); err == nil {
-		if b := strings.TrimSpace(string(out)); b != "" {
-			branch = b
-		}
+	branch, ok := currentBranch(repo)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "dots update: detached HEAD — check out a branch before updating")
+		return 1
 	}
 
 	if code := runStreaming(repo, "git", "-C", repo, "pull", "--ff-only", "origin", branch); code != 0 {

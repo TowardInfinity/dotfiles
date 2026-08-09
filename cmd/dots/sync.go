@@ -75,12 +75,16 @@ Hosts come from ~/.ssh/config. Unreachable ones are skipped, not retried.
 
 	rc := 0
 	if !remotesOnly {
-		if code := syncLocal(repo, message, assumeYes); code != 0 {
+		code, proceed := syncLocal(repo, message, assumeYes)
+		if code != 0 {
 			// A failed push means the remotes would pull something that is not
 			// there. Stop rather than reporting success on three machines for a
 			// change none of them received.
 			fmt.Fprintln(os.Stderr, "dots sync: local push failed — not touching the remotes")
 			return code
+		}
+		if !proceed {
+			return 0
 		}
 	}
 	if !pushOnly {
@@ -90,11 +94,15 @@ Hosts come from ~/.ssh/config. Unreachable ones are skipped, not retried.
 }
 
 // syncLocal commits anything outstanding and pushes.
-func syncLocal(repo, message string, assumeYes bool) int {
+func syncLocal(repo, message string, assumeYes bool) (int, bool) {
+	if _, ok := currentBranch(repo); !ok {
+		fmt.Fprintln(os.Stderr, "dots sync: detached HEAD — check out a branch before syncing")
+		return 1, false
+	}
 	out, err := exec.Command("git", "-C", repo, "status", "--porcelain").Output()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dots sync: cannot read git status: %v\n", err)
-		return 1
+		return 1, false
 	}
 	changed := strings.Split(strings.TrimSpace(string(out)), "\n")
 	if len(changed) == 1 && changed[0] == "" {
@@ -112,13 +120,13 @@ func syncLocal(repo, message string, assumeYes bool) int {
 		fmt.Printf("\n  commit message: %s\n", styValue.Render(message))
 		if !confirm(fmt.Sprintf("Commit %s and push?", plural(len(changed), "file", "files")), assumeYes) {
 			fmt.Println("  skipped")
-			return 0
+			return 0, false
 		}
 		if code := runStreaming(repo, "git", "-C", repo, "add", "-A"); code != 0 {
-			return code
+			return code, false
 		}
 		if code := runStreaming(repo, "git", "-C", repo, "commit", "-m", message); code != 0 {
-			return code
+			return code, false
 		}
 	} else {
 		fmt.Println(styMuted.Render("No local changes to commit."))
@@ -126,20 +134,26 @@ func syncLocal(repo, message string, assumeYes bool) int {
 
 	// Push regardless of whether we just committed: there may be earlier
 	// commits that never went out, and the remotes cannot pull those either.
-	branch := currentBranch(repo)
+	branch, ok := currentBranch(repo)
+	if !ok {
+		// The branch was removed or HEAD detached after the preflight. Never
+		// fall back to main: that can push a different ref than the commit made.
+		fmt.Fprintln(os.Stderr, "dots sync: detached HEAD — check out a branch before syncing")
+		return 1, false
+	}
 	ahead := commitsAhead(repo, branch)
 	if ahead == 0 {
 		fmt.Println(styMuted.Render("Nothing to push."))
-		return 0
+		return 0, true
 	}
 
 	fmt.Printf("\n%s %s\n", styTitle.Render("Push"),
 		styMuted.Render(fmt.Sprintf("%s ahead on %s", plural(ahead, "commit", "commits"), branch)))
 	if !confirm("Push to origin?", assumeYes) {
 		fmt.Println("  skipped")
-		return 0
+		return 0, false
 	}
-	return runStreaming(repo, "git", "-C", repo, "push", "origin", branch)
+	return runStreaming(repo, "git", "-C", repo, "push", "origin", branch), true
 }
 
 // syncRemotes runs `dots update` on each reachable host from ~/.ssh/config.
@@ -196,15 +210,15 @@ func syncRemotes(assumeYes bool) int {
 
 // ── helpers ──────────────────────────────────────────────────
 
-func currentBranch(repo string) string {
+func currentBranch(repo string) (string, bool) {
 	out, err := exec.Command("git", "-C", repo, "symbolic-ref", "--short", "HEAD").Output()
 	if err != nil {
-		return "main"
+		return "", false
 	}
 	if b := strings.TrimSpace(string(out)); b != "" {
-		return b
+		return b, true
 	}
-	return "main"
+	return "", false
 }
 
 // commitsAhead counts what origin does not have yet.
@@ -227,44 +241,13 @@ func commitsAhead(repo, branch string) int {
 	return n
 }
 
-// sshHosts reads Host aliases from ~/.ssh/config, skipping wildcards and any
-// entry with no HostName — the same rule the Machines pane uses.
+// sshHosts is the Sync view of the shared parsed SSH configuration.
 func sshHosts() []string {
-	var out []string
-	var pending []string
-	hasHostName := false
-
-	flush := func() {
-		if hasHostName {
-			out = append(out, pending...)
-		}
-		pending, hasHostName = nil, false
+	hosts := parseSSHConfig()
+	out := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		out = append(out, host.alias)
 	}
-
-	// Reads through sshConfigLines so Include'd files are seen. A host this
-	// misses is a machine sync silently never updates.
-	for _, line := range sshConfigLines() {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		switch strings.ToLower(fields[0]) {
-		case "host":
-			flush()
-			for _, alias := range fields[1:] {
-				if strings.ContainsAny(alias, "*?!") {
-					continue
-				}
-				// One alias per host block is enough; the first is the short one.
-				if len(pending) == 0 {
-					pending = append(pending, alias)
-				}
-			}
-		case "hostname":
-			hasHostName = true
-		}
-	}
-	flush()
 	return out
 }
 

@@ -11,6 +11,55 @@ import (
 // rather than looping.
 const sshIncludeMaxDepth = 16
 
+// sshHost is the one parsed model used by both the Machines pane and sync.
+// HostName is optional in OpenSSH: without it, the alias itself is the target.
+type sshHost struct {
+	alias    string
+	hostname string
+}
+
+// parseSSHConfig returns one usable alias per Host block. Wildcard and negated
+// aliases are matching rules, not concrete destinations; a mixed block such as
+// `Host work *` still has a usable `work` alias, so filtering is per alias.
+func parseSSHConfig() []sshHost {
+	var hosts []sshHost
+	var cur *sshHost
+
+	flush := func() {
+		if cur != nil {
+			if cur.hostname == "" {
+				cur.hostname = cur.alias
+			}
+			hosts = append(hosts, *cur)
+		}
+		cur = nil
+	}
+
+	for _, line := range sshConfigLines() {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "host":
+			flush()
+			for _, alias := range fields[1:] {
+				if strings.HasPrefix(alias, "!") || strings.ContainsAny(alias, "*?") {
+					continue
+				}
+				cur = &sshHost{alias: alias}
+				break // use the first concrete alias from this block
+			}
+		case "hostname":
+			if cur != nil {
+				cur.hostname = fields[1]
+			}
+		}
+	}
+	flush()
+	return hosts
+}
+
 // sshConfigLines returns the lines of ~/.ssh/config with every `Include`
 // expanded in place, which is where ssh itself would read them.
 //
@@ -19,11 +68,11 @@ const sshIncludeMaxDepth = 16
 // the exact divergence sync is for. Anyone who splits their config into
 // ~/.ssh/config.d/* would have had those machines quietly skipped.
 //
-// It stays a best-effort reader, not an ssh_config implementation. `Match`
-// blocks, `Host` negation and per-host option inheritance are not modelled;
-// the callers only need Host aliases and their HostName. Where this is
-// wrong it should over-report a host, never hide one — the cost of a
-// spurious entry is a failed connection you can see, and the cost of a
+// It stays a best-effort reader, not an ssh_config implementation. Negated
+// aliases are excluded, but `Match` blocks and full per-host option inheritance
+// are not modelled; the callers only need concrete Host aliases and HostName.
+// Where this is wrong it should over-report a host, never hide one — the cost
+// of a spurious entry is a failed connection you can see, and the cost of a
 // missing one is a machine that drifts unnoticed.
 func sshConfigLines() []string {
 	home := os.Getenv("HOME")

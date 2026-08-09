@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -47,8 +48,8 @@ func TestSyncHelpNeedsNoRepo(t *testing.T) {
 	}
 }
 
-// Host parsing must skip wildcards and entries with no HostName — offering to
-// ssh to "*" would be actively bad.
+// Host parsing must skip wildcard and negated aliases — offering to ssh to
+// "*" or "!laptop" would be actively bad.
 func TestSSHHostsSkipsWildcards(t *testing.T) {
 	hosts := sshHosts()
 	for _, h := range hosts {
@@ -57,4 +58,82 @@ func TestSSHHostsSkipsWildcards(t *testing.T) {
 		}
 	}
 	t.Logf("hosts: %v", hosts)
+}
+
+func TestSyncRefusesDetachedHEADBeforeStagingOrPushing(t *testing.T) {
+	repo := newTestRepo(t)
+	remote := filepath.Join(filepath.Dir(repo), "remote.git")
+
+	git := func(args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	before := git("--git-dir", remote, "rev-parse", "main")
+	git("-C", repo, "checkout", "--detach")
+	file := filepath.Join(repo, "detached.txt")
+	if err := os.WriteFile(file, []byte("must remain unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("DOTFILES_DIR", repo)
+	if code := runSyncCLI([]string{"--yes"}); code == 0 {
+		t.Fatal("dots sync accepted a detached HEAD")
+	}
+	if staged := git("-C", repo, "diff", "--cached", "--name-only"); staged != "" {
+		t.Errorf("detached sync staged files: %q", staged)
+	}
+	if after := git("--git-dir", remote, "rev-parse", "main"); after != before {
+		t.Errorf("origin/main changed from %s to %s after refused sync", before, after)
+	}
+}
+
+func TestSyncDecliningLocalCommitStopsWorkflow(t *testing.T) {
+	repo := newTestRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "declined.txt"), []byte("keep local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	marker := filepath.Join(t.TempDir(), "ssh-ran")
+	binDir := t.TempDir()
+	ssh := filepath.Join(binDir, "ssh")
+	if err := os.WriteFile(ssh, []byte("#!/bin/sh\n: > \"$DOTS_SSH_MARKER\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeSSH(t, map[string]string{
+		".ssh/config": "Host remote\n  HostName remote.example\n",
+	})
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("DOTS_SSH_MARKER", marker)
+	t.Setenv("DOTFILES_DIR", repo)
+
+	// Force the no-terminal path even when a developer runs `go test` from an
+	// interactive shell. A declined local half must end the whole workflow;
+	// reaching syncRemotes would execute the fake ssh and create marker.
+	oldStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	if code := runSyncCLI(nil); code != 0 {
+		t.Fatalf("declining local sync returned %d, want 0", code)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("remote sync ran after local decline; marker stat = %v", err)
+	}
+	if staged, err := exec.Command("git", "-C", repo, "diff", "--cached", "--name-only").Output(); err != nil {
+		t.Fatal(err)
+	} else if strings.TrimSpace(string(staged)) != "" {
+		t.Errorf("declined sync staged files: %q", staged)
+	}
 }

@@ -73,6 +73,19 @@ func TestInstallRejectsUnknownFlag(t *testing.T) {
 	}
 }
 
+func TestUpdateRejectsUnknownFlag(t *testing.T) {
+	bin := buildDots(t)
+	cmd := exec.Command(bin, "update", "--definitely-not-a-flag")
+	cmd.Env = noRepoEnv()
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Error("unknown flag should be a non-zero exit")
+	}
+	if !strings.Contains(string(out), "unknown option") {
+		t.Errorf("unhelpful message: %s", out)
+	}
+}
+
 func buildDots(t *testing.T) string {
 	t.Helper()
 	bin := t.TempDir() + "/dots"

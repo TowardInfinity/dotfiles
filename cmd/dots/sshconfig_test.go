@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -92,17 +93,25 @@ func TestTildeIncludeAndCycleTerminates(t *testing.T) {
 	}
 }
 
-// Wildcards are templates, not machines, and an entry with no HostName is not
-// a reachable target.
-func TestWildcardsAndHostNamelessEntriesAreSkipped(t *testing.T) {
+// Wildcards and negations are match rules, not machines. Concrete aliases in
+// the same Host block still count, and OpenSSH uses an alias as its HostName
+// when no explicit HostName is present.
+func TestSSHHostAliasFilteringAndDefaultHostName(t *testing.T) {
 	fakeSSH(t, map[string]string{
 		".ssh/config": "Host *\n  User me\n\nHost tmpl?\n  HostName t.example\n\n" +
+			"Host !excluded mixed *\n  HostName mixed.example\n\n" +
 			"Host nohost\n  User me\n\nHost real\n  HostName real.example\n",
 	})
 
 	got := sshHosts()
-	if len(got) != 1 || got[0] != "real" {
-		t.Errorf("sshHosts() = %v, want [real]", got)
+	want := []string{"mixed", "nohost", "real"}
+	if !slices.Equal(got, want) {
+		t.Errorf("sshHosts() = %v, want %v", got, want)
+	}
+
+	hosts := parseSSHConfig()
+	if len(hosts) < 2 || hosts[1].alias != "nohost" || hosts[1].hostname != "nohost" {
+		t.Errorf("host without HostName = %#v, want alias and hostname nohost", hosts)
 	}
 }
 

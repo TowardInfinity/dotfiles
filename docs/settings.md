@@ -31,8 +31,10 @@ copy step and no sync step. Commit from the repo afterwards.
 ## Per-machine settings that stay untracked
 
 Anything true of one box only belongs in **`~/.zshrc.local`**. It is sourced
-last if it exists and is never tracked, which keeps the repo's `.zshrc`
-byte-identical on every machine. Both macOS and Linux have this hook.
+near the end if it exists and is never tracked, which keeps the repo's `.zshrc`
+byte-identical on every machine. Both macOS and Linux have this hook. SDKMAN's
+initialisation follows it because SDKMAN requires its block to stay last, so a
+local setting that SDKMAN itself rewrites must be applied another way.
 
 Use it for: work-specific env vars, a machine's own PATH entries, credentials,
 an override of any alias defined above it.

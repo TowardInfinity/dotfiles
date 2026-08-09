@@ -320,7 +320,6 @@ merge_toml common/codex/config.policy.toml "$HOME/.codex/config.toml"
 # ── tmux ──────────────────────────────────────────────────────
 # Linked as individual files, not the whole directory, so TPM plugins and
 # resurrect snapshots keep living in ~/.config/tmux untracked.
-mkdir -p "$HOME/.config/tmux"
 link "$OS/tmux/tmux.conf" "$HOME/.config/tmux/tmux.conf"
 # The status bar's model segment. On PATH rather than referenced into the repo:
 # tmux status jobs run under /bin/sh with the tmux server's environment, which

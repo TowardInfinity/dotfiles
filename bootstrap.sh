@@ -273,8 +273,12 @@ install_linux_pkgs() {
     tmp=$(mktemp -d)
     if curl -fsSL -o "$tmp/nvim.tar.gz" \
         "https://github.com/neovim/neovim/releases/latest/download/nvim-linux-${NVIM_ARCH}.tar.gz"; then
-      sudo tar -C /opt -xzf "$tmp/nvim.tar.gz"
-      sudo ln -sf "/opt/nvim-linux-${NVIM_ARCH}/bin/nvim" /usr/local/bin/nvim
+      if sudo tar -C /opt -xzf "$tmp/nvim.tar.gz"; then
+        sudo ln -sf "/opt/nvim-linux-${NVIM_ARCH}/bin/nvim" /usr/local/bin/nvim \
+          || warn "Neovim extracted, but linking /usr/local/bin/nvim failed"
+      else
+        warn "Neovim archive could not be extracted — skipping"
+      fi
     else
       warn "could not fetch Neovim for $NVIM_ARCH — skipping"
     fi
@@ -300,7 +304,11 @@ install_linux_pkgs() {
     if curl -fsSL -o "$tmp/go.tar.gz" "https://go.dev/dl/${gov}.linux-${GO_ARCH}.tar.gz"; then
       # Only remove the old install once the new tarball is actually in hand —
       # `rm -rf /usr/local/go` before a failed download leaves no Go at all.
-      sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "$tmp/go.tar.gz"
+      if sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "$tmp/go.tar.gz"; then
+        :
+      else
+        warn "Go archive could not be installed — skipping"
+      fi
     else
       warn "could not fetch Go for $GO_ARCH — skipping"
     fi
@@ -400,24 +408,48 @@ install_omz() {
 # rcupdate=false because our .zshrc already does the sourcing; letting the
 # installer append its own block would duplicate it into a tracked file.
 install_sdkman() {
-  if [ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
-    return 0
+  sdk_init="$HOME/.sdkman/bin/sdkman-init.sh"
+  sdk_java="$HOME/.sdkman/candidates/java/current/bin/java"
+
+  if [ ! -s "$sdk_init" ]; then
+    if $DRY; then
+      echo "    would: install SDKMAN and a default JDK"
+      return 0
+    fi
+    say "Installing SDKMAN"
+    curl -fsSL "https://get.sdkman.io?rcupdate=false" | bash \
+      || { warn "SDKMAN install failed — skipping the JDK"; return 0; }
   fi
+
+  # SDKMAN and its candidates have separate health states. Returning merely
+  # because sdkman-init.sh exists made `--deps` unable to repair a partial
+  # install whose Java candidate was absent.
+  [ -x "$sdk_java" ] && return 0
   if $DRY; then
-    echo "    would: install SDKMAN and a default JDK"
+    echo "    would: install a default JDK through SDKMAN"
     return 0
   fi
-  say "Installing SDKMAN"
-  curl -fsSL "https://get.sdkman.io?rcupdate=false" | bash \
-    || { warn "SDKMAN install failed — skipping the JDK"; return 0; }
 
   # sdk is a shell function, so it only exists after sourcing the init script.
   # </dev/null keeps `sdk install java` from stopping on its set-as-default
   # prompt when there is no one to answer it.
   say "Installing a default JDK"
   # shellcheck disable=SC1091
-  ( . "$HOME/.sdkman/bin/sdkman-init.sh" && sdk install java </dev/null ) \
+  ( . "$sdk_init" && sdk install java </dev/null ) \
     || warn "JDK install failed — run: sdk install java"
+}
+
+# A light profile describes intent, not merely the last package command. Once
+# a machine is promoted to the full --deps set, leaving the marker behind makes
+# doctor suppress real gaps and prevents the resolver's source-build fallback.
+clear_light_profile() {
+  profile="$HOME/.config/dots/profile"
+  [ -e "$profile" ] || return 0
+  if $DRY; then
+    echo "    would: remove the light profile marker"
+  else
+    rm -f "$profile" || warn "could not clear $profile"
+  fi
 }
 
 # The AI CLIs are deliberately NOT in --deps.
@@ -535,6 +567,7 @@ if $LIGHT; then
 fi
 
 if $DEPS; then
+  clear_light_profile
   say "Installing packages"
   if [ "$OS" = macos ]; then install_macos_pkgs; else install_linux_pkgs; fi
   install_uv_tools

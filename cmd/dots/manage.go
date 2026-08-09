@@ -387,6 +387,11 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			m.dfMsg = "no checkout to update"
 			return m, nil
 		}
+		branch, ok := currentBranch(m.repo)
+		if !ok {
+			m.dfMsg = "detached HEAD — check out a branch before updating"
+			return m, nil
+		}
 		// Both steps in one action, so the overlay shows the whole update
 		// rather than half of it. This is the only place a shell string is
 		// used, and deliberately: the pull has to gate the relink, and there
@@ -400,7 +405,7 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			// on a repo whose remote had been re-added by hand.
 			Argv: []string{"sh", "-c",
 				"cd " + shellQuote(m.repo) +
-					` && git pull --ff-only origin "$(git symbolic-ref --short HEAD)"` +
+					" && git pull --ff-only origin " + shellQuote(branch) +
 					" && ./install.sh"},
 			Confirm: "Pull the latest dotfiles and relink configs?",
 			Timeout: 10 * time.Minute,
@@ -844,57 +849,6 @@ func tmuxSessions() map[string]bool {
 }
 
 // ── commands: machines ────────────────────────────────────────
-
-type sshHost struct {
-	alias    string
-	hostname string
-}
-
-// parseSSHConfig reads ~/.ssh/config Host entries, excluding wildcard
-// patterns and anything without a HostName — those aren't reachable targets,
-// they're templates.
-func parseSSHConfig() []sshHost {
-	var hosts []sshHost
-	var cur *sshHost
-	var skip bool
-
-	flush := func() {
-		if cur != nil && !skip && cur.hostname != "" {
-			hosts = append(hosts, *cur)
-		}
-		cur = nil
-		skip = false
-	}
-
-	// Shared with sshHosts() in sync.go via sshConfigLines, so the two cannot
-	// disagree about which machines exist — they already differed on which
-	// wildcard characters disqualify an alias.
-	for _, line := range sshConfigLines() {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		switch strings.ToLower(fields[0]) {
-		case "host":
-			flush()
-			aliases := fields[1:]
-			for _, a := range aliases {
-				if strings.ContainsAny(a, "*?") {
-					skip = true
-				}
-			}
-			if !skip {
-				cur = &sshHost{alias: aliases[0]}
-			}
-		case "hostname":
-			if cur != nil {
-				cur.hostname = fields[1]
-			}
-		}
-	}
-	flush()
-	return hosts
-}
 
 func fetchMachinesInfo() tea.Cmd {
 	return func() tea.Msg {

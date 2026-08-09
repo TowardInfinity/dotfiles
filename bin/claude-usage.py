@@ -98,10 +98,6 @@ def main():
                 usage = msg.get("usage")
                 if not isinstance(usage, dict):
                     continue
-                day = (rec.get("timestamp") or "")[:10]
-                if cutoff and day < cutoff:
-                    continue
-
                 model = msg.get("model") or rec.get("model") or "?"
 
                 # Which model a session STARTED on is the only thing
@@ -118,6 +114,14 @@ def main():
                     s["first_ts"] = ts
                     s["first_model"] = model
                 s["models"].add(model)
+
+                # The turn-weighted aggregates are windowed, but session age
+                # is not. Record the transcript's true first usage-bearing
+                # turn before filtering, or an old session resumed this week
+                # is falsely reported as a fresh post-policy start.
+                day = ts[:10]
+                if cutoff and day < cutoff:
+                    continue
 
                 inp = usage.get("input_tokens") or 0
                 out = usage.get("output_tokens") or 0

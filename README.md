@@ -53,15 +53,17 @@ module downloads, which is too much to pay on every machine, so `install.sh`
 and `dots.sh` both go through `bin/dots-resolve.sh`, which picks the best copy
 available, falling through tiers on any failure:
 
-1. **a cached release binary** already downloaded and checksum-verified in a
-   previous run (`${XDG_CACHE_HOME:-$HOME/.cache}/dots/`)
+1. **a cached release binary** previously admitted by the release signature,
+   with its local checksum re-verified on every resolution
+   (`${XDG_CACHE_HOME:-$HOME/.cache}/dots/`)
 2. **download a release binary** for this OS/arch from the repo's
    [GitHub Releases](https://github.com/TowardInfinity/dotfiles/releases),
-   verifying its `sha256` against the published `checksums.txt` before it's
-   trusted or cached. Verification is mandatory: if `checksums.txt` cannot be
-   fetched, does not list this asset, or no `sha256sum`/`shasum` exists to
-   check it with, the download is discarded and the next tier runs. Refusing
-   costs a slower tier, never a broken install.
+   verifying the offline Ed25519 signature over the tag-bound
+   `checksums.txt`, then verifying the asset's `sha256`. Signature verification
+   is mandatory by default (`DOTS_SIGNATURE_MODE=require`): a missing or bad
+   signature, wrong manifest tag, absent digest, or unavailable checksum tool
+   discards the download and runs the next tier. See
+   [release signing](docs/signing.md) for the trust boundary and recovery mode.
 3. **`go build` from source** into `bin/dots-bin`, if a Go toolchain is on
    the machine
 4. **`bin/dots`** — the bash implementation, which needs nothing and always
@@ -80,10 +82,11 @@ a stale release binary masking it:
 ./install.sh --build
 ```
 
-New release binaries are cut by `.github/workflows/release.yml` on every
+New release binaries are built by `.github/workflows/release.yml` on every
 `v*` tag: it cross-compiles `darwin/{arm64,amd64}` and `linux/{arm64,amd64}`,
-publishes `checksums.txt` alongside them, and attaches everything to a GitHub
-Release for the tag.
+then attaches them and `checksums.txt` to a draft release. Publication is a
+separate manual step: `bin/sign-release.sh` signs CI's manifest with the
+offline key, uploads `checksums.txt.sig`, verifies it, and publishes the draft.
 
 ## Quick start
 
@@ -118,6 +121,8 @@ That one-liner is `bootstrap.sh` in this repo, served through a Worker route on
 | `--dry` | print what would happen, change nothing |
 | `--copy` | keep no repo: fetch a tarball, copy files into place, discard it |
 | `--nvim` | also restore nvim plugins from `lazy-lock.json` after linking |
+| `--ai` | also install the Claude, Codex, and OpenCode CLIs |
+| `--light` | install only a usable shell and tmux on memory-constrained Linux boxes |
 
 **Oh My Zsh and TPM install on every run, not just under `--deps`.** They are not
 optional packages: `.zshrc` does `source $ZSH/oh-my-zsh.sh` and `tmux.conf`
@@ -125,11 +130,18 @@ loads TPM plugins, so linking those configs without them gives you a shell that
 errors on every prompt and a tmux with no plugins. `--deps` is for things the
 configs *call* (ripgrep, fzf, a Node manager); this is for things they *are*.
 
+`--deps` deliberately follows several upstream “latest” URLs and installer
+scripts (including Neovim, Go, uv, fnm, pnpm, and SDKMAN) over TLS without
+pinning their digests. Release signing authenticates the `dots` binary; it does
+not extend to those third-party package sources. Treat their upstream accounts
+and delivery endpoints as part of the bootstrap trust boundary.
+
 ### Why there's a clone at all
 
 The configs are **symlinks into the repo**, so `~/.config/nvim/lua/options.lua`
 and the tracked file are the same file. Edit either path, commit from the repo,
-`git pull` to update. The whole `.git` costs 352 KB.
+`git pull` to update. A fresh clone's `.git` is about 7.0 MiB (almost all of it
+packed history), still small enough that keeping the live checkout is cheap.
 
 `--copy` skips it — real files, nothing left behind. Worth it for a container
 or a box you'll destroy tomorrow. Not worth it for a machine you work on: the
@@ -184,8 +196,8 @@ here, otherwise a fresh machine errors on every prompt.
 | git | git, gh | git, gh |
 
 Version managers rather than languages: **fnm** for Node and **uv** for Python,
-so versions stay per-project. Java is left to SDKMAN, which `.zshrc` sources if
-present.
+so versions stay per-project. For Java, `--deps` installs SDKMAN and a default
+JDK through it; `.zshrc` then sources SDKMAN when present.
 
 Already-installed tools are skipped. The check looks in `~/.local/bin`,
 `~/go/bin` and the pnpm directory as well as `PATH`, because a non-interactive

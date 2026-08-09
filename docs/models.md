@@ -16,9 +16,10 @@ Switching model mid-session does **not** restore access once you are capped —
 every model draws on the same allowance. The only thing that helps is spending
 less per turn.
 
-This page covers what's configured and why. `dots models-visibility` covers
-how you actually see what's running; `dots models-cost` and `dots
-models-delegation` cover what to do about the bill.
+This page is the configured policy and what enforces it. `dots
+models-visibility` is how to see what a session is actually running, `dots
+models-cost` what burns the allowance, `dots models-delegation` when to hand
+work to a subagent or the other tool.
 
 ## Defaults
 
@@ -64,14 +65,14 @@ the tool outright regardless of what's saved.
 **Pairing rule, enforced server-side:** the advisor must be at least as capable
 as the session's main model — equals allowed, downgrades rejected. On Sonnet
 that admits Opus, Sonnet itself, or Fable. Fable is not the choice here: the
-Which model policy against it as a *main* model (below) is a spend argument,
-and an advisor that fires unattended on every substantive step is a worse fit
-for that argument than a main model you have to deliberately switch to — same
-5x, less friction before it runs. Opus is the pick: the tier the policy
-already reserves for hard design work, invoked as a second opinion instead of
-the main seat. (Moot for now regardless — Fable is currently listed as an
-unselectable "temporarily unavailable" row in the `/advisor` picker, per a
-remotely controlled rollout, so `/advisor fable` is rejected either way.)
+[Which model](#defaults) policy against it as a *main* model is a spend
+argument, and an advisor that fires unattended on every substantive step is a
+worse fit for that argument than a main model you have to deliberately switch
+to — same 5x, less friction before it runs. Opus is the pick: the tier the
+policy already reserves for hard design work, invoked as a second opinion
+instead of the main seat. (Moot for now regardless — Fable is currently listed
+as an unselectable "temporarily unavailable" row in the `/advisor` picker, per
+a remotely controlled rollout, so `/advisor fable` is rejected either way.)
 
 **Cost:** each call bills at the advisor's rate on top of the main model's
 usage and counts toward the same plan limits shown by `/usage` — this is why
@@ -96,28 +97,50 @@ docs, the same way `advisorModel` was.
 }
 ```
 
-**`availableModels`** is a real allowlist, checked server-side by the same
-code path `/model` calls to validate a switch — not just a prose rule. Fable
-sitting outside the list means `/model fable` is rejected server-side rather
-than merely discouraged; the same check gates subagent, skill, and teammate
-model resolution too. It's excluded on purpose: it once silently became the
-single largest line item on this account — 4,256 main-session turns on a
-model that's 5x Sonnet's cost — as a deliberate main-model pick, not an
-accident a prose rule would have caught in time. Wanting Fable back for
-narrative/creative work means editing this key first, deliberately, rather
-than it staying reachable by default.
+**`availableModels`** is a correction to an earlier version of this doc, which
+said no setting could pin Fable off. Wrong: it's a real allowlist, checked
+server-side by the same code path `/model` calls to validate a switch. Fable
+outside the list means `/model fable` is rejected outright —
+`"Model 'fable' is not available. Your organization restricts model
+selection."` — and the same check gates subagent, skill, and teammate model
+resolution. The docs call it "typically set in managed settings by enterprise
+administrators"; that's a description of who usually bothers, not a
+restriction on where it's read from — the merge order
+(`userSettings → projectSettings → localSettings → flagSettings →
+policySettings`) treats plain `~/.claude/settings.json` as a normal layer.
+Fable is excluded on purpose: it was 46% of spend as a deliberate main-model
+pick, not an accident a prose rule would have caught anyway. The tradeoff,
+accepted knowingly: the documented "creative and narrative work only"
+exception is no longer reachable without editing this file first. If that
+exception is ever wanted again, it's a one-line settings.json edit and a
+`policy_key` update, not a policy violation.
 
-**`fastModePerSessionOptIn`** — Fast mode runs Opus. Without this key,
-turning it on with `/fast` risks persisting as the saved default for
-sessions after the one that needed it, the same silent-drift shape as a
-resumed session staying on the wrong model. `true` scopes it to the session
-that opted in.
+**`fastModePerSessionOptIn`** — Fast mode runs Opus. Without this key, turning
+it on with `/fast` can persist as the saved default for sessions after the one
+that needed it, the same silent-drift shape as a resumed session staying on
+the wrong model. `true` scopes it to the session that opted in.
 
-**`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: "3"`** and
-**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "1"`** put a floor under "never
-enable agent teams": agent teams are the extreme case of many concurrent,
-nested agents, and these two caps block the same shape short of the feature
-flag itself. 3 concurrent still allows a real Explore/Plan fan-out; depth 1
+**`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`** (unset default: 20) and
+**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`** (unset default: 3) give
+`delegation.md`'s "never enable agent teams" line a floor under it. Agent
+teams are the extreme case of many concurrent, nested agents; an unset default
+of 20 concurrent and 3 levels deep is most of the way there without the
+feature flag. 3 concurrent still allows a real Explore/Plan fan-out; depth 1
 still allows a normal single-level `Agent` call, it just stops that subagent
-from spawning one of its own — so ordinary delegation is untouched, and only
-the runaway-nesting shape is closed off.
+from spawning one of its own.
+
+Not hypothetical: this is Anthropic's own back-and-forth, not a guess about
+what could go wrong. `v2.1.217` (Jul 21 '26) shipped depth 1 as the default —
+no nesting — specifically to stop unbounded fan-out, alongside the 20-concurrent
+cap ("so one message can't fan out unbounded background agents," per their own
+release notes) and a fix so `--max-budget-usd` actually halted background
+subagents instead of spending past it silently. Three days later, `v2.1.219`
+walked the depth back up to 3 to "reinstate nesting." [Issue
+#68110](https://github.com/anthropics/claude-code/issues/68110) — opened
+before either release, still open — is what depth 1 was protecting against
+and depth 3 reopened: a single "research X" delegation recursively spawned 48+
+background agents, burned 1.5M+ tokens, with duplicate agents redoing the same
+sub-task (four separate agents independently researching the same API). Pinning
+`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "1"` here just keeps the fix Anthropic
+itself shipped and then reverted three days later, for a bug that's still open.
+

@@ -63,6 +63,13 @@ die()  { printf '%sError:%s %s\n' "$RED" "$R" "$1" >&2; exit 1; }
 info() { printf '%s==>%s %s\n' "$BLUE" "$R" "$1"; }
 warn() { printf '%s!!%s  %s\n' "$AMBER" "$R" "$1"; }
 
+unsupported_lifecycle() {
+  local verb="$1"
+  warn "'$verb' needs the signed Go binary; the shell fallback never performs lifecycle mutations"
+  printf '  Recover the real binary with: %sdots update%s\n' "$CYAN" "$R" >&2
+  return 1
+}
+
 topics() {
   [[ -d "$DOCS" ]] || return 0
   for f in "$DOCS"/*.md; do
@@ -330,7 +337,10 @@ update() {
   fi
 
   info "Relinking"
-  "$REPO/install.sh" || warn "install.sh reported a problem"
+  if ! "$REPO/install.sh"; then
+    warn "install.sh reported a problem — the signed binary may not have been restored"
+    return 1
+  fi
 
   cat <<EOF
 
@@ -438,6 +448,8 @@ case "${1:-}" in
   -h|--help|help) usage ;;
   search|-s)      shift; search "${1:-}" ;;
   update|-u)      update ;;
+  sync|publish|rollout|deps|apply|install)
+                  unsupported_lifecycle "$1" ;;
   doctor|-d)      doctor ;;
   edit|-e)        shift; edit "${1:-}" ;;
   path)           echo "$REPO" ;;

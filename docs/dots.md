@@ -35,12 +35,19 @@ dots search copy  # find which page mentions it
 | `dots topics` | list every page with its summary |
 | `dots doctor` | check the tools these configs call, and the configuration itself |
 | `dots doctor --online` | also check the installed `dots` against the latest release |
-| `dots install` | relink configs; `--deps` also installs the tools |
-| `dots update` | pull the latest configs, then relink |
-| `dots sync` | push changes here, then update every other machine |
+| `dots status [--online] [--fleet] [--json]` | report state; never repair |
+| `dots apply [--dry-run]` | relink and merge locally, with no network |
+| `dots deps [--dry-run] [-y]` | install dependencies explicitly |
+| `dots publish <paths…> -m "…"` | validate, commit only the selection, and push; never roll out |
+| `dots rollout <hosts…> [--revision …]` | apply one published revision to selected machines |
+| `dots install` | compatibility alias for Apply; `--deps` routes to `dots deps` |
+| `dots update` | inbound compatibility command: pull, resolve the binary, and apply |
+| `dots sync` | **temporary compatibility:** outbound publish + fleet update; prints a warning |
 | `dots edit [topic]` | open a page in `$EDITOR` |
 | `dots path` | print the repo path |
 | `dots version` | print this binary's version |
+
+The scopes and safety boundaries are listed together in `dots operations`.
 
 ### install, update and docs are verbs first
 

@@ -23,6 +23,8 @@
 #   DOTS_FORCE_BUILD=1   skip tiers 1-2, go straight to tier 3
 #   DOTS_NO_BUILD=1      skip tier 3 (hermetic tests; not a user-facing mode)
 #   DOTS_RELEASE_BASE    override the GitHub "latest" release base URL
+#   DOTS_RESOLVE_VERSION resolve one exact vMAJOR.MINOR.PATCH release (internal;
+#                        rollout uses this to avoid a Latest race)
 #   DOTS_RESOLVE_TIMEOUT curl --max-time in seconds (default 10)
 #
 # POSIX sh: this is invoked by dots.sh (POSIX sh, runs before anything else is
@@ -32,6 +34,7 @@ set -u
 
 TIMEOUT="${DOTS_RESOLVE_TIMEOUT:-10}"
 RELEASE_BASE="${DOTS_RELEASE_BASE:-https://github.com/TowardInfinity/dotfiles/releases/latest/download}"
+PINNED_VERSION="${DOTS_RESOLVE_VERSION:-}"
 
 log() {
   printf '%s\n' "$*" >&2
@@ -105,6 +108,13 @@ case "$SIGNATURE_MODE" in
     exit 1
     ;;
 esac
+
+if [ -n "$PINNED_VERSION" ] &&
+   ! printf '%s\n' "$PINNED_VERSION" |
+     awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/{ok=1} END{exit !ok}'; then
+  log "dots-resolve: DOTS_RESOLVE_VERSION must be vMAJOR.MINOR.PATCH, got '$PINNED_VERSION'"
+  exit 1
+fi
 
 # key_id_of <pubkey-file>. A stable identifier for "which key is this". The
 # digest of the PEM file is enough — any change to the key changes the file —
@@ -246,24 +256,40 @@ try_download() {
   command -v curl >/dev/null 2>&1 || { log "dots-resolve: curl not found — skipping release download"; return 1; }
 
   asset="dots_${goos}_${goarch}"
-  latest_asset_url="$RELEASE_BASE/$asset"
+  if [ -n "$PINNED_VERSION" ]; then
+    version="$PINNED_VERSION"
+    # install.sh inherits this internal override during rollout. Derive the
+    # immutable tag directory from the configured latest base so fixture and
+    # mirror overrides retain the same trust boundary as production.
+    case "$RELEASE_BASE" in
+      */latest/download)
+        tag_base="${RELEASE_BASE%/latest/download}/download/$version"
+        ;;
+      *)
+        log "dots-resolve: cannot derive a tagged release URL from DOTS_RELEASE_BASE=$RELEASE_BASE"
+        return 1
+        ;;
+    esac
+  else
+    latest_asset_url="$RELEASE_BASE/$asset"
 
-  # GitHub's .../latest/download/<asset> is a redirect to
-  # .../releases/download/<tag>/<asset>. Reading the redirect target (without
-  # following it) is a cheap way to learn the actual version tag without a
-  # separate API call. `%{redirect_url}` needs no -L.
-  redirect=$(curl -fsS --max-time "$TIMEOUT" -o /dev/null -w '%{redirect_url}' "$latest_asset_url" 2>/dev/null) || redirect=""
-  version=$(printf '%s' "$redirect" | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p')
-  if [ -z "$version" ]; then
-    log "dots-resolve: could not reach GitHub Releases (or no release published yet) — skipping"
-    return 1
+    # GitHub's .../latest/download/<asset> is a redirect to
+    # .../releases/download/<tag>/<asset>. Reading the redirect target (without
+    # following it) is a cheap way to learn the actual version tag without a
+    # separate API call. `%{redirect_url}` needs no -L.
+    redirect=$(curl -fsS --max-time "$TIMEOUT" -o /dev/null -w '%{redirect_url}' "$latest_asset_url" 2>/dev/null) || redirect=""
+    version=$(printf '%s' "$redirect" | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p')
+    if [ -z "$version" ]; then
+      log "dots-resolve: could not reach GitHub Releases (or no release published yet) — skipping"
+      return 1
+    fi
+
+    # The latest URL is mutable. Use it exactly once to resolve a tag, then pin
+    # every byte in this attempt to the immutable per-tag directory returned by
+    # that redirect. Otherwise a release published between these requests can
+    # cache new assets under the old version name.
+    tag_base=${redirect%/*}
   fi
-
-  # The latest URL is mutable. Use it exactly once to resolve a tag, then pin
-  # every byte in this attempt to the immutable per-tag directory returned by
-  # that redirect. Otherwise a release published between these requests can
-  # cache new assets under the old version name.
-  tag_base=${redirect%/*}
   asset_url="$tag_base/$asset"
   sums_url="$tag_base/checksums.txt"
   sig_url="$tag_base/checksums.txt.sig"
@@ -354,10 +380,10 @@ try_download() {
       ;;
   esac
 
-  # Bind the signed bytes to the tag we resolved. A valid signature over an
+  # Bind the manifest bytes to the tag we resolved. A valid signature over an
   # old release's otherwise-identical manifest must not be replayable under a
-  # newer tag. Require the exact CI header on the first line; a missing header
-  # is not legacy-compatible because accepting it is the replay hole.
+  # newer tag. Require the identity header in both modes: warn is the explicit
+  # unsigned recovery path, not permission to revive headerless releases.
   manifest_tag=$(awk '
     NR == 1 && NF == 3 && $1 == "#" &&
       $2 ~ /^tag=[^[:space:]]+$/ && $3 ~ /^commit=[^[:space:]]+$/ {
@@ -543,7 +569,7 @@ cache_is_fresh() {
 }
 
 if [ "${DOTS_FORCE_BUILD:-}" != "1" ]; then
-  if [ "${DOTS_FORCE_FETCH:-}" != "1" ] && cache_is_fresh; then
+  if [ "${DOTS_FORCE_FETCH:-}" != "1" ] && [ -z "$PINNED_VERSION" ] && cache_is_fresh; then
     result=$(try_cached) && { printf '%s\n' "$result"; exit 0; }
   fi
   result=$(try_download) && { printf '%s\n' "$result"; exit 0; }

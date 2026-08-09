@@ -86,7 +86,7 @@ Warnings (offline, no checkout to compare against) do not affect the exit code.
 	if state.needsSync() {
 		fmt.Println()
 		fmt.Printf("  %s  %-14s %s\n", styPending.Render("!"), "repo", state.summary())
-		fmt.Printf("     %s\n", styMuted.Render("run `dots sync` to push and update the other machines"))
+		fmt.Printf("     %s\n", styMuted.Render("publish reviewed paths with `dots publish`, then use `dots rollout`"))
 	}
 
 	fmt.Println()

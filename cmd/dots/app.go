@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -52,6 +53,8 @@ type model struct {
 
 	err string
 }
+
+type repoStateMsg struct{ state repoState }
 
 func newModel() model {
 	repo := findRepo()
@@ -126,7 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		w, h := m.contentSize()
-		a := newAction(msg.spec, w, h)
+		a := newAction(msg.plan, w, h)
 		if a.confirm {
 			m.act = &a
 			return m, nil
@@ -135,32 +138,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.act = &a2
 		return m, cmd
 
+	case actionPlanErrorMsg:
+		m.err = msg.err.Error()
+		return m, nil
+
+	case repoStateMsg:
+		m.sync = msg.state
+		return m, nil
+
 	case tea.KeyMsg:
 		// The overlay owns the keyboard while it is up.
 		if m.act != nil {
 			a, cmd, closed := m.act.update(msg)
 			if closed {
+				result := a.result
 				m.act = nil
-				// Re-check after anything that may have changed the machine,
-				// so the pane you return to is not showing a stale answer.
-				// Doctor's checks cover installs; services/machines cover
-				// the Manage actions that now run through this same overlay.
-				// Dotfiles and Projects were missing here, so after `u` pulled
-				// new commits the pane still showed the old sha, branch and
-				// behind-count — the one place you would actually look to
-				// confirm the update landed.
-				return m, tea.Batch(
-					m.doc.Init(),
-					fetchDotfilesInfo(m.repo),
-					discoverServices(),
-					discoverPackages(),
-					fetchProjectsInfo(),
-					fetchMachinesInfo(),
-				)
+				return m, m.refreshAffected(result.Affects)
 			}
 			m.act = &a
 			return m, cmd
 		}
+		m.err = ""
 
 		// A pane capturing text owns every key, including the global ones.
 		//
@@ -247,7 +245,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.act != nil {
 		switch msg.(type) {
-		case actLineMsg, actDoneMsg:
+		case actLineMsg, actDoneMsg, actStreamClosedMsg:
 			a, cmd, closed := m.act.update(msg)
 			if closed {
 				m.act = nil
@@ -280,6 +278,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, c)
 
 	return m, tea.Batch(cmds...)
+}
+
+// refreshAffected is the first consumer of operation metadata: an action that
+// changes one service no longer triggers package, project, machine and repo
+// probes. Overview is a summary, so any successful mutation refreshes it too.
+func (m model) refreshAffected(resources []ops.ResourceID) tea.Cmd {
+	if len(resources) == 0 {
+		return nil
+	}
+	seen := make(map[ops.ResourceID]bool, len(resources))
+	cmds := []tea.Cmd{fetchOverviewInfo()}
+	doctorAdded := false
+	for _, resource := range resources {
+		if seen[resource] {
+			continue
+		}
+		seen[resource] = true
+		switch resource {
+		case resourceDoctor, resourceConfig:
+			if !doctorAdded {
+				cmds = append(cmds, m.doc.Init())
+				doctorAdded = true
+			}
+		case resourceRepo:
+			cmds = append(cmds, fetchDotfilesInfo(m.repo), fetchRepoState(m.repo))
+		case resourceServices:
+			cmds = append(cmds, discoverServices())
+		case resourcePackages:
+			cmds = append(cmds, discoverPackages())
+		case resourceMachines:
+			cmds = append(cmds, fetchMachinesInfo())
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func fetchRepoState(repo string) tea.Cmd {
+	return func() tea.Msg { return repoStateMsg{state: readRepoState(repo)} }
 }
 
 func (m model) View() string {
@@ -334,7 +370,7 @@ func (m model) View() string {
 	// badge is dropped entirely rather than squeezing the key hints to nothing.
 	badge := ""
 	if m.sync.needsSync() && m.w >= 40 {
-		badge = styPending.Render("● " + m.sync.summary() + " — dots sync")
+		badge = styPending.Render("● " + m.sync.summary() + " — dots publish")
 	}
 
 	hintW := m.w - 2 - lipgloss.Width(badge)
@@ -342,6 +378,9 @@ func (m model) View() string {
 	hp := m.hp
 	hp.Width = hintW
 	hint := hp.ShortHelpView(append(append([]key.Binding{}, ks...), globalKeys...))
+	if m.err != "" {
+		hint = styBad.Render("error: " + m.err)
+	}
 	if badge != "" {
 		hint = padRight(truncate(hint, hintW), hintW) + badge
 	}

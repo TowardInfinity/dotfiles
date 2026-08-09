@@ -119,7 +119,7 @@ setting was enabled permanently.
 ```sh
 git tag v0.1.15 && git push origin v0.1.15   # CI builds a draft
 ./bin/sign-release.sh v0.1.15                # sign, verify, upload, publish
-dots sync                                     # roll it out
+dots rollout --all -y                         # roll out the published revision
 ```
 
 **Run the signing step from a real terminal**, not from an agent shell or
@@ -149,6 +149,10 @@ The binary, manifest, and signature are then fetched from that tag's immutable
 URL, so publishing a newer release halfway through resolution cannot mix bytes
 from two versions. After the manifest signature verifies, its tag must equal the
 redirect-resolved tag; headerless and replayed manifests are refused.
+During `dots rollout`, the resolver receives the already-approved SemVer tag
+through the internal `DOTS_RESOLVE_VERSION` override and skips Latest discovery
+entirely. That keeps the installed binary pinned to the same release identity
+as the checkout even if another release is published mid-rollout.
 
 A signed release has **six** assets: four binaries, `checksums.txt`, and
 `checksums.txt.sig`.

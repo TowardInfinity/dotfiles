@@ -141,9 +141,9 @@ func TestInteractiveStatesRender(t *testing.T) {
 		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 		// Action overlay, awaiting confirmation.
-		tm, _ = tm.Update(runActionMsg{spec: actionSpec{
-			Title: "Probe", Argv: []string{"echo", "x"}, Confirm: "Run the probe?",
-		}})
+		plan := testCommandPlan("Probe", "echo", "x")
+		plan.Confirm = "Run the probe?"
+		tm, _ = tm.Update(runActionMsg{plan: plan})
 		checkFrame(t, "overlay-confirm @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
 		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	}

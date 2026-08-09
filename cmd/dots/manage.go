@@ -392,70 +392,27 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			m.dfMsg = "detached HEAD — check out a branch before updating"
 			return m, nil
 		}
-		// Both steps in one action, so the overlay shows the whole update
-		// rather than half of it. This is the only place a shell string is
-		// used, and deliberately: the pull has to gate the relink, and there
-		// is nothing to relink if the pull failed. The path is a resolved
-		// local directory, not input, and it is quoted regardless.
-		spec := actionSpec{
-			Title: "Update dotfiles",
-			// Naming the remote and branch explicitly rather than relying on
-			// `git pull --ff-only` alone: without upstream tracking that fails
-			// with a wall of git's own help text, which is exactly what it did
-			// on a repo whose remote had been re-added by hand.
-			Argv: []string{"sh", "-c",
-				"cd " + shellQuote(m.repo) +
-					" && git pull --ff-only origin " + shellQuote(branch) +
-					" && ./install.sh"},
-			Confirm: "Pull the latest dotfiles and relink configs?",
-			Timeout: 10 * time.Minute,
-		}
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(updateLegacyRequest{Repo: m.repo, Branch: branch})
 	case "L":
 		if m.repo == "" {
 			m.dfMsg = "no checkout to relink"
 			return m, nil
 		}
-		spec := actionSpec{
-			Title:   "Relink configs",
-			Argv:    []string{filepath.Join(m.repo, "install.sh")},
-			Confirm: "Re-run install.sh and relink every config?",
-		}
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(applyRequest{Repo: m.repo})
 	case "p":
-		spec := actionSpec{
-			Title:   "Restore nvim plugins",
-			Argv:    []string{"nvim", "--headless", "+Lazy! restore", "+qa"},
-			Confirm: "Restore nvim plugins to match lazy-lock.json?",
-			Timeout: 20 * time.Minute,
-		}
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(nvimRestoreRequest{})
 	case "t":
 		if m.repo == "" {
 			m.dfMsg = "no repo found"
 			return m, nil
 		}
-		spec := actionSpec{
-			Title:   "Install/repair TPM",
-			Argv:    []string{filepath.Join(m.repo, "install.sh")},
-			Dir:     m.repo,
-			Confirm: "Run install.sh to install/repair TPM (clones it when absent)?",
-			Timeout: 10 * time.Minute,
-		}
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(tpmRepairRequest{Repo: m.repo})
 	case "D":
 		if m.repo == "" {
 			m.dfMsg = "no repo found"
 			return m, nil
 		}
-		spec := actionSpec{
-			Title:   "Install missing deps",
-			Argv:    []string{"sh", filepath.Join(m.repo, "bootstrap.sh"), "--deps"},
-			Dir:     m.repo,
-			Confirm: "Install missing dependencies via bootstrap.sh --deps?",
-			Timeout: 20 * time.Minute,
-		}
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(depsRequest{Repo: m.repo})
 	}
 	return m, nil
 }
@@ -526,7 +483,7 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	if m.svcCursor >= len(vis) {
 		return m, nil
 	}
-	spec, ok := serviceAction(vis[m.svcCursor], verb)
+	_, ok := serviceAction(vis[m.svcCursor], verb)
 	if !ok {
 		// Saying why is better than a key that appears to do nothing.
 		m.svcMsg = verb + " is not available for " + svcSourceName(vis[m.svcCursor].Source) +
@@ -534,7 +491,7 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 		return m, nil
 	}
 	m.svcMsg = ""
-	return m, func() tea.Msg { return runActionMsg{spec: spec} }
+	return m, requestAction(serviceRequest{Service: vis[m.svcCursor], Verb: verb})
 }
 
 func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
@@ -603,7 +560,7 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			return m, nil
 		}
 		p := vis[m.pkgCursor]
-		spec, ok := packageAction(p)
+		_, ok := packageAction(p)
 		if !ok {
 			// Saying why is better than a key that appears to do nothing —
 			// same rule Services' s/x/R already follows.
@@ -611,7 +568,7 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			return m, nil
 		}
 		m.pkgMsg = ""
-		return m, func() tea.Msg { return runActionMsg{spec: spec} }
+		return m, requestAction(packageRequest{Package: p})
 	}
 	return m, nil
 }
@@ -693,19 +650,7 @@ func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	case "d":
 		if m.machCursor < len(m.machines) {
 			alias := m.machines[m.machCursor].alias
-			spec := actionSpec{
-				Title: "Remote doctor: " + alias,
-				Argv: []string{"ssh",
-					"-o", "BatchMode=yes", "-o", "ConnectTimeout=4",
-					alias, remoteDots("doctor")},
-				// Read-only, but it still opens a connection to another
-				// machine. Every other key in this app asks first, and a
-				// keystroke that reaches out over the network without asking
-				// is a surprise even when it changes nothing.
-				Confirm: "Run doctor on " + alias + " over SSH?",
-				Timeout: 20 * time.Second,
-			}
-			return m, func() tea.Msg { return runActionMsg{spec: spec} }
+			return m, requestAction(remoteDoctorRequest{Alias: alias})
 		}
 	}
 	return m, nil
@@ -1596,13 +1541,6 @@ func (m manageModel) viewMachines() string {
 		b.WriteString(truncate(line, m.w-4) + "\n")
 	}
 	return b.String()
-}
-
-// shellQuote wraps a value in single quotes for `sh -c`, escaping any single
-// quote inside it. Used for exactly one command; everything else passes argv
-// directly and never goes near a shell.
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // wrapPlain breaks a string on spaces to fit a width, without hyphenating or

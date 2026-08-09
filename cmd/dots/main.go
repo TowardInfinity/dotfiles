@@ -65,6 +65,16 @@ func main() {
 		}
 	case "doctor":
 		os.Exit(runDoctorCLI(findRepo(), args[1:]))
+	case "status":
+		os.Exit(runStatusCLI(args[1:]))
+	case "apply":
+		os.Exit(runApplyCLI(args[1:]))
+	case "deps":
+		os.Exit(runDepsCLI(args[1:]))
+	case "publish":
+		os.Exit(runPublishCLI(args[1:]))
+	case "rollout":
+		os.Exit(runRolloutCLI(args[1:]))
 	case "install":
 		os.Exit(runInstallCLI(args[1:]))
 	case "update":
@@ -108,9 +118,14 @@ func usage() {
   dots search <term>   search every page
   dots doctor          check the tools these configs call, and the config itself
                        (--online also compares against the latest release)
-  dots install         relink configs; --deps also installs the tools
-  dots update          pull the latest configs, then relink
-  dots sync            push changes here, then update every other machine
+  dots status          concise local state; --fleet and --json are available
+  dots apply           relink/merge from this checkout without network access
+  dots deps            install dependencies explicitly
+  dots publish         validate, commit selected paths, and push; never rollout
+  dots rollout         apply one published revision to selected machines
+  dots install         compatibility alias for apply; --deps routes to deps
+  dots update          inbound compatibility command: pull, resolve, and apply
+  dots sync            LEGACY compatibility: pushes and updates the fleet
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

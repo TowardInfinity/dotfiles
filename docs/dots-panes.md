@@ -71,9 +71,9 @@ table is a reference, not something to memorise.
 
 ```
   !  repo           1 uncommitted file, 2 unpushed commits
-     run `dots sync` to push and update the other machines
+     publish reviewed paths with `dots publish`, then use `dots rollout`
 ```
 
 The badge in the status bar and that row in `dots doctor` mean this machine's
 configs have moved on and the others have not. Neither pushes anything — see
-`dots docs update` for what `dots sync` does and why it asks twice.
+`dots operations` for the separate repository and fleet actions.

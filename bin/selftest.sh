@@ -206,6 +206,20 @@ resolve_sig() { # $1 = warn|require
       sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err"
 }
 
+resolve_sig_pinned() { # $1 = exact SemVer tag
+  rm -rf "$WORK/cache"
+  : > "$WORK/curl.log"
+  env PATH="$WORK/bin:$PATH" \
+      XDG_CACHE_HOME="$WORK/cache" \
+      FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      CURL_LOG="$WORK/curl.log" \
+      DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" \
+      DOTS_SIGNATURE_MODE=require DOTS_RESOLVE_VERSION="$1" \
+      DOTS_FORCE_FETCH=1 DOTS_NO_BUILD=1 \
+      sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err"
+}
+
 accepted() { # $1 label, $2 what resolve returned
   case "$2" in
     "$WORK/cache"/*) ok "$1" ;;
@@ -247,6 +261,28 @@ if sig_supported; then
   else
     bad "all post-discovery downloads are pinned to the resolved tag" \
         "$(tr '\n' ' ' < "$WORK/curl.log")"
+  fi
+
+  # Rollout asks install.sh for the exact release it already resolved and
+  # approved. That path must never consult mutable Latest, or a release racing
+  # the rollout can install a different binary than the pinned checkout.
+  got="$(resolve_sig_pinned "$FIXTURE_VERSION")"
+  pinned_count=$(grep -c "/releases/download/$FIXTURE_VERSION/" "$WORK/curl.log" 2>/dev/null)
+  if [ "$got" = "$WORK/cache/dots/dots-$FIXTURE_VERSION" ] &&
+     [ "$pinned_count" = 3 ] && ! grep -q '/latest/download/' "$WORK/curl.log"; then
+    ok "a pinned rollout resolution never consults mutable Latest"
+  else
+    bad "a pinned rollout resolution never consults mutable Latest" \
+        "out=$got; urls=$(tr '\n' ' ' < "$WORK/curl.log")"
+  fi
+
+  out=$(env PATH="$WORK/bin:$PATH" XDG_CACHE_HOME="$WORK/cache" \
+        DOTS_RESOLVE_VERSION=v1.bad.0 DOTS_NO_BUILD=1 \
+        sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err"); rc=$?
+  if [ "$rc" -ne 0 ] && grep -q 'DOTS_RESOLVE_VERSION must be' "$WORK/err"; then
+    ok "an invalid pinned release version is rejected loudly"
+  else
+    bad "an invalid pinned release version is rejected loudly" "rc=$rc out=[$out]"
   fi
 
   # The signature alone identifies a manifest, not the release under which it
@@ -618,6 +654,34 @@ dry_changes=$(find "$INSTALL_DRY_HOME" -mindepth 1 -print)
   && ok "install.sh --dry leaves an empty HOME entirely empty" \
   || bad "install.sh --dry leaves an empty HOME entirely empty" "$dry_changes"
 
+# Apply is the operation engine's local-only primitive. It must not invoke the
+# resolver or TPM/plugin installers even on a totally empty HOME.
+APPLY_HOME="$WORK/apply-home"
+APPLY_BIN="$WORK/apply-bin"
+APPLY_NET="$WORK/apply-network-called"
+mkdir -p "$APPLY_HOME" "$APPLY_BIN"
+cat > "$APPLY_BIN/curl" <<'STUB'
+#!/bin/sh
+: > "$APPLY_NET"
+exit 99
+STUB
+cat > "$APPLY_BIN/git" <<'STUB'
+#!/bin/sh
+: > "$APPLY_NET"
+exit 99
+STUB
+chmod +x "$APPLY_BIN/curl" "$APPLY_BIN/git"
+env HOME="$APPLY_HOME" APPLY_NET="$APPLY_NET" \
+    PATH="$APPLY_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin" \
+    bash "$REPO/install.sh" --apply >/dev/null 2>"$WORK/apply.err"
+apply_rc=$?
+[ "$apply_rc" -eq 0 ] && [ ! -e "$APPLY_NET" ] &&
+[ ! -e "$APPLY_HOME/.config/tmux/plugins/tpm" ] &&
+[ "$(readlink "$APPLY_HOME/.local/bin/dots" 2>/dev/null)" = "$REPO/bin/dots" ] \
+  && ok "install.sh --apply relinks without resolver, network, or plugin installs" \
+  || bad "install.sh --apply relinks without resolver, network, or plugin installs" \
+      "rc=$apply_rc; network=$(test -e "$APPLY_NET" && echo yes || echo no); $(tail -3 "$WORK/apply.err")"
+
 if [ "$(uname -s)" = "Darwin" ]; then
   env HOME="$DRYHOME" sh "$REPO/bootstrap.sh" --light --dry >/dev/null 2>&1
   [ $? -ne 0 ] && ok "--light is rejected on macOS" \
@@ -944,8 +1008,10 @@ case "$out" in
   *'#f7768e'*'91%'*) ok "a nearly-spent window is coloured as an alarm" ;;
   *) bad "a nearly-spent window is coloured as an alarm" "$out" ;;
 esac
+# Do not pin the exact minute: the production code correctly measures again,
+# so a fixture written at 12m can cross to 11m between these two processes.
 case "$out" in
-  *'12m'*) ok "time to reset appears once the number matters" ;;
+  *'5h 91% '*m*) ok "time to reset appears once the number matters" ;;
   *) bad "time to reset appears once the number matters" "$out" ;;
 esac
 write_quota 23 4200 5 500000

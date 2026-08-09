@@ -30,13 +30,17 @@ The docs are readable from the terminal on any machine this is installed on:
 dots                 # browse interactively
 dots tmux            # print one topic
 dots search clipboard # search every topic at once
-dots update          # pull, relink, show what changed
+dots status          # concise local state; --fleet and --json are available
+dots apply           # relink/merge locally, with no network
+dots publish …       # validate, commit selected paths, and push
+dots rollout a1      # apply one published revision to one selected machine
+dots update          # compatibility: pull, resolve, and apply
 dots doctor          # check the tools these configs actually call
 ```
 
-No dependencies — it renders the markdown itself. It uses `glow` and `fzf`
-when they happen to be present, but never requires them, because the servers
-deliberately have neither.
+The Go TUI renders Markdown itself with Glamour and has no external UI
+dependency. The zero-dependency Bash recovery fallback uses `glow` and `fzf`
+when present and its own renderer/menu otherwise.
 
 `install.sh` reads `uname -s` and links `common/` plus either `macos/` or
 `linux/`. Neovim is genuinely OS-agnostic — no Homebrew paths, no `pbcopy` —
@@ -159,8 +163,8 @@ sh -c "$(curl -fsSL https://toin.in/install)" -- --copy
 
 Set `DOTFILES_DIR=/some/path` to clone somewhere other than the default
 (`~/Codes/Projects/dotfiles` on macOS, `~/Codes/dotfiles` on Linux). The
-installer records the path in `~/.config/dots/repo`, so `dots update`, `sync`
-and `path` still find a non-default checkout in a later shell where
+installer records the path in `~/.config/dots/repo`, so lifecycle commands and
+`dots path` still find a non-default checkout in a later shell where
 `DOTFILES_DIR` is no longer exported.
 
 **Always safe to re-run.** Existing files are moved to

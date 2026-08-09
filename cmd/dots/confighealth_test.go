@@ -340,12 +340,17 @@ func TestConfigRepairIsASeparateAction(t *testing.T) {
 		repo:   repo,
 		checks: []checkResult{{name: "managed block", state: checkBad}},
 	}
-	spec, _, ok := m.buildConfigRepair()
+	req, _, ok := m.buildConfigRepair()
 	if !ok {
 		t.Fatal("buildConfigRepair declined a real config failure")
 	}
-	if len(spec.Argv) == 0 || !strings.HasSuffix(spec.Argv[0], "install.sh") {
-		t.Errorf("repair runs %v, want install.sh", spec.Argv)
+	plan, err := buildOperation(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := planProcess(t, plan, 0)
+	if len(process.Argv) == 0 || !strings.HasSuffix(process.Argv[0], "install.sh") {
+		t.Errorf("repair runs %v, want install.sh", process.Argv)
 	}
 }
 

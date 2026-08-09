@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,6 +46,45 @@ func TestSyncHelpNeedsNoRepo(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "dots sync —") {
 		t.Errorf("help did not print:\n%s", out)
+	}
+}
+
+func TestSyncDryRunFetchesThenRendersTheFullInboundPlan(t *testing.T) {
+	repo := newTestRepo(t)
+	makeDiscoverableCheckout(t, repo)
+	t.Setenv("DOTFILES_DIR", repo)
+
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	t.Cleanup(func() {
+		os.Stdout = oldStdout
+		_ = r.Close()
+		_ = w.Close()
+	})
+
+	code := runSyncCLI([]string{"--dry-run"})
+	_ = w.Close()
+	os.Stdout = oldStdout
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code != 0 {
+		t.Fatalf("sync --dry-run returned %d:\n%s", code, out)
+	}
+	text := string(out)
+	for _, want := range []string{
+		"Apply the checked-out configuration",
+		"Verify applied configuration",
+		"Dry run: nothing changed.",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("sync --dry-run omitted %q:\n%s", want, text)
+		}
 	}
 }
 

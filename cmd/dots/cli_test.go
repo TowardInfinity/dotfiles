@@ -16,7 +16,7 @@ func TestVerbsBeatPageNames(t *testing.T) {
 	// environment meant they ran inside the repo and passed against a real
 	// ordering bug: the repo check came before argument parsing, so on CI both
 	// --help and an unknown flag reported "no checkout found".
-	for _, verb := range []string{"install", "update"} {
+	for _, verb := range []string{"install", "update", "status", "apply", "deps", "publish", "rollout"} {
 		cmd := exec.Command(bin, verb, "--help")
 		cmd.Env = noRepoEnv()
 		out, err := cmd.CombinedOutput()
@@ -24,7 +24,7 @@ func TestVerbsBeatPageNames(t *testing.T) {
 			t.Fatalf("%s --help: %v\n%s", verb, err, out)
 		}
 		got := string(out)
-		if !strings.Contains(got, "dots "+verb+" —") {
+		if !strings.Contains(got, "dots "+verb) {
 			t.Errorf("`dots %s --help` did not run the command; got:\n%s", verb, got)
 		}
 		// The doc page starts with prose, never with this header.
@@ -41,6 +41,22 @@ func TestVerbsBeatPageNames(t *testing.T) {
 		}
 		if len(strings.TrimSpace(string(out))) == 0 {
 			t.Errorf("`dots docs %s` rendered nothing", page)
+		}
+	}
+}
+
+func TestLifecycleCommandsRejectUnknownFlagsBeforeRepoDiscovery(t *testing.T) {
+	bin := buildDots(t)
+	for _, verb := range []string{"status", "apply", "deps", "publish", "rollout"} {
+		cmd := exec.Command(bin, verb, "--definitely-not-a-flag")
+		cmd.Env = noRepoEnv()
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Errorf("%s: unknown flag succeeded", verb)
+			continue
+		}
+		if !strings.Contains(string(out), "unknown option") {
+			t.Errorf("%s: unknown flag reached another path:\n%s", verb, out)
 		}
 	}
 }

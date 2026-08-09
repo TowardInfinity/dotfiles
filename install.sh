@@ -4,6 +4,7 @@
 #
 #   ./install.sh          link everything
 #   ./install.sh --dry    show what would happen, change nothing
+#   ./install.sh --apply  link/merge only; never fetch, build, or install plugins
 #   ./install.sh --nvim   restore nvim plugins from lazy-lock.json (:Lazy restore)
 #   ./install.sh --build  force `dots` to be built from source, not fetched
 #
@@ -26,12 +27,14 @@ DRY=false
 COPY=false
 NVIM=false
 BUILD=false
+APPLY=false
 for arg in "$@"; do
   case "$arg" in
     --dry)   DRY=true ;;
     --copy)  COPY=true ;;
     --nvim)  NVIM=true ;;
     --build) BUILD=true ;;
+    --apply) APPLY=true ;;
     # Prints the header block above by *following* it — from line 2 until the
     # first line that is not a comment — rather than a hardcoded line range,
     # same trick bootstrap.sh uses so the two don't drift apart.
@@ -241,22 +244,40 @@ describe_dots_tier() {
 }
 
 if $DRY; then
-  if $BUILD; then
+  if $APPLY; then
+    printf '  \033[36mwould reuse\033[0m  installed dots binary (else shell fallback; no resolver)\n'
+  elif $BUILD; then
     printf '  \033[36mwould build\033[0m  dots (forced --build)\n'
   else
     printf '  \033[36mwould resolve\033[0m  dots (release binary, else build, else shell fallback)\n'
   fi
 else
   echo "Resolving dots..."
-  if $BUILD; then
-    export DOTS_FORCE_BUILD=1
+  if $APPLY; then
+    # Apply is the deliberately network-free relink path. Preserve the
+    # currently installed binary when it is usable; otherwise the checked-in
+    # shell fallback keeps recovery available without downloading or building.
+    DOTS_TARGET=""
+    if [[ -L "$HOME/.local/bin/dots" ]]; then
+      DOTS_TARGET="$(readlink "$HOME/.local/bin/dots")"
+      case "$DOTS_TARGET" in
+        /*) : ;;
+        *) DOTS_TARGET="$(cd "$(dirname "$HOME/.local/bin/dots")" && pwd)/$DOTS_TARGET" ;;
+      esac
+      [[ -x "$DOTS_TARGET" ]] || DOTS_TARGET=""
+    fi
+    [[ -n "$DOTS_TARGET" ]] || DOTS_TARGET="$REPO/bin/dots"
   else
-    # An install should pick up a newer release rather than reusing whatever
-    # this machine happens to have cached. Costs one redirect request; the
-    # binary is only re-downloaded when the version actually changed.
-    export DOTS_FORCE_FETCH=1
+    if $BUILD; then
+      export DOTS_FORCE_BUILD=1
+    else
+      # An install should pick up a newer release rather than reusing whatever
+      # this machine happens to have cached. Costs one redirect request; the
+      # binary is only re-downloaded when the version actually changed.
+      export DOTS_FORCE_FETCH=1
+    fi
+    DOTS_TARGET="$(sh "$REPO/bin/dots-resolve.sh")" || DOTS_TARGET=""
   fi
-  DOTS_TARGET="$(sh "$REPO/bin/dots-resolve.sh")" || DOTS_TARGET=""
   if [[ -z "$DOTS_TARGET" || ! -e "$DOTS_TARGET" ]]; then
     printf '  \033[33mwarning\033[0m  dots-resolve.sh produced nothing usable — linking the shell fallback\n'
     DOTS_TARGET="$REPO/bin/dots"
@@ -373,7 +394,7 @@ fi
 # directory then counted as "installed" forever, so tmux.conf's `run '.../tpm'`
 # silently did nothing on every start and re-running this never repaired it.
 TPM="$HOME/.config/tmux/plugins/tpm"
-if [[ ! -d "$TPM/.git" ]]; then
+if ! $APPLY && [[ ! -d "$TPM/.git" ]]; then
   echo "Installing TPM..."
   rm -rf "$TPM"
   if git clone --depth 1 -q https://github.com/tmux-plugins/tpm "$TPM"; then
@@ -403,7 +424,7 @@ fi
 # nvim-treesitter, base46 and ui are pinned there for exactly this reason;
 # anything else you care about should be too. Treat this step as "line up
 # commits within the branches the specs already chose".
-if $NVIM; then
+if $NVIM && ! $APPLY; then
   if command -v nvim >/dev/null 2>&1; then
     echo "Restoring nvim plugins from lazy-lock.json..."
     nvim --headless "+Lazy! restore" +qa

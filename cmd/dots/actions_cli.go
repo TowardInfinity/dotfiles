@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 )
 
 // The state-changing subcommands.
@@ -20,19 +24,107 @@ import (
 // silent run that then prints everything at once would look like a hang and
 // could not answer a password prompt at all.
 
-func runStreaming(dir string, argv ...string) int {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.Dir = dir
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	if err := cmd.Run(); err != nil {
-		var ee *exec.ExitError
-		if asExitError(err, &ee) {
-			return ee.ExitCode()
-		}
-		fmt.Fprintf(os.Stderr, "dots: %s: %v\n", argv[0], err)
-		return 1
+type cliPlanOptions struct {
+	DryRun          bool
+	AssumeYes       bool
+	AskConfirm      bool
+	CancelIsSuccess bool
+}
+
+func runPlanCLI(plan ops.Plan, options cliPlanOptions) int {
+	fmt.Printf("Plan: %s\n", plan.Title)
+	if plan.Summary != "" {
+		fmt.Printf("  %s\n", plan.Summary)
 	}
-	return 0
+	fmt.Printf("  scope=%s  risk=%s\n", plan.Scope, plan.Risk)
+	if plan.Target != "" {
+		fmt.Printf("  target=%s\n", plan.Target)
+	}
+	for i, step := range plan.Steps {
+		fmt.Printf("  %d. %s\n     %s\n", i+1, step.Title, step.Exec.Describe())
+	}
+	if options.DryRun {
+		fmt.Println("Dry run: nothing changed.")
+		return 0
+	}
+	if options.AskConfirm && plan.Confirm != "" && !options.AssumeYes {
+		if !stdinIsTerminal() {
+			fmt.Fprintln(os.Stderr, "dots: confirmation required outside a terminal; re-run with -y")
+			if options.CancelIsSuccess {
+				return 0
+			}
+			return 1
+		}
+		fmt.Fprintf(os.Stderr, "%s [y/N] ", plan.Confirm)
+		answer, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Fprintln(os.Stderr, "Cancelled; nothing changed.")
+			if options.CancelIsSuccess {
+				return 0
+			}
+			return 1
+		}
+	}
+
+	timeout := plan.Timeout
+	if timeout == 0 {
+		timeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	result := operationRunner.Run(ctx, plan, ops.IO{
+		Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		Event: func(event ops.Event) {
+			if event.Kind == ops.EventStepStarted {
+				fmt.Fprintf(os.Stderr, "==> %s\n", event.Title)
+			} else if event.Kind == ops.EventStepDone && event.Status == ops.StatusSkipped && event.Err != nil {
+				fmt.Fprintf(os.Stderr, "skip %s: %s\n", event.Title, event.Err)
+			}
+		},
+	})
+	if plan.Action == actionRollout || result.Status == ops.StatusPartial {
+		printPlanResult(result)
+	}
+	if result.OK() {
+		fmt.Printf("done  %s\n", plan.Title)
+		return 0
+	}
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "dots: %s failed: %s\n", plan.Action, result.Error)
+	}
+	if result.ExitCode != 0 {
+		return result.ExitCode
+	}
+	return 1
+}
+
+func printPlanResult(result ops.Result) {
+	for _, line := range planResultLines(result) {
+		fmt.Println(line)
+	}
+}
+
+func planResultLines(result ops.Result) []string {
+	lines := []string{"Result: " + string(result.Status)}
+	for _, step := range result.Steps {
+		mark := "-"
+		switch step.Status {
+		case ops.StatusCompleted:
+			mark = "ok"
+		case ops.StatusFailed, ops.StatusCancelled:
+			mark = "failed"
+		case ops.StatusSkipped:
+			mark = "skipped"
+		}
+		lines = append(lines, fmt.Sprintf("  %-7s %s", mark, step.Title))
+	}
+	return lines
+}
+
+func stdinIsTerminal() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 // needRepo returns the checkout, or explains why there isn't one and how to
@@ -90,19 +182,18 @@ To set up a machine that has none of this yet:
 		return 1
 	}
 
-	// --deps lives in bootstrap.sh, everything else in install.sh. Routing by
-	// flag rather than always going through bootstrap keeps a plain relink from
-	// re-running package detection it does not need.
-	var argv []string
+	var req ops.Request
 	if deps {
-		argv = []string{"sh", filepath.Join(repo, "bootstrap.sh"), "--deps"}
+		req = depsRequest{Repo: repo}
 	} else {
-		argv = []string{filepath.Join(repo, "install.sh")}
+		req = applyRequest{Repo: repo}
 	}
-	if dry {
-		argv = append(argv, "--dry")
+	plan, err := buildOperation(req)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dots install: %v\n", err)
+		return 1
 	}
-	return runStreaming(repo, argv...)
+	return runPlanCLI(plan, cliPlanOptions{DryRun: dry, AskConfirm: true})
 }
 
 // runUpdateCLI is the command-line twin of Manage's `u`: pull, then relink.
@@ -138,11 +229,13 @@ The docs page about updating is: dots docs update
 		return 1
 	}
 
-	if code := runStreaming(repo, "git", "-C", repo, "pull", "--ff-only", "origin", branch); code != 0 {
-		fmt.Fprintln(os.Stderr, "dots: pull failed — leaving the checkout alone")
-		return code
+	plan, err := buildOperation(updateLegacyRequest{Repo: repo, Branch: branch})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "dots update: %v\n", err)
+		return 1
 	}
-	return runStreaming(repo, filepath.Join(repo, "install.sh"))
+	fmt.Fprintln(os.Stderr, "notice: `dots update` is the inbound compatibility command; it will become `dots sync` after fleet convergence")
+	return runPlanCLI(plan, cliPlanOptions{})
 }
 
 // runDocsCLI is the explicit way to reach a page whose name is also a verb.

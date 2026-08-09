@@ -488,7 +488,8 @@ func TestPackageActionKnownManagers(t *testing.T) {
 			t.Errorf("%v: expected an action", m)
 			continue
 		}
-		if len(spec.Argv) == 0 {
+		process := planProcess(t, spec, 0)
+		if len(process.Argv) == 0 {
 			t.Errorf("%v: empty Argv", m)
 		}
 		if spec.Confirm == "" {
@@ -510,12 +511,13 @@ func TestPackageActionInstaller(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: expected an action", name)
 		}
-		if len(spec.Argv) != 3 || spec.Argv[0] != "sh" || spec.Argv[1] != "-c" {
-			t.Errorf("%s: Argv = %v, want [sh -c <pipe>]", name, spec.Argv)
+		process := planProcess(t, spec, 0)
+		if len(process.Argv) != 3 || process.Argv[0] != "sh" || process.Argv[1] != "-c" {
+			t.Errorf("%s: Argv = %v, want [sh -c <pipe>]", name, process.Argv)
 		}
 		cmd, _ := installerCmdFor(name)
-		if spec.Argv[2] != cmd {
-			t.Errorf("%s: Argv[2] = %q, want %q", name, spec.Argv[2], cmd)
+		if process.Argv[2] != cmd {
+			t.Errorf("%s: Argv[2] = %q, want %q", name, process.Argv[2], cmd)
 		}
 		if spec.Confirm == "" {
 			t.Errorf("%s: empty Confirm", name)

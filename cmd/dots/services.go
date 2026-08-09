@@ -22,6 +22,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -395,98 +396,14 @@ func parseDockerPort(ports string) int {
 
 // ── actions ───────────────────────────────────────────────────
 
-// serviceAction builds the actionSpec for start/stop/restart, per source.
+// serviceAction asks the shared operation registry for the service plan.
 // It always sets Confirm on success, and returns false for anything it
 // cannot safely do — notably a system-level (non --user) systemd unit,
 // which would need sudo, and offering an action that will just fail is
 // worse than not offering it at all.
-func serviceAction(s service, verb string) (actionSpec, bool) {
-	switch verb {
-	case "start", "stop", "restart":
-	default:
-		return actionSpec{}, false
-	}
-
-	switch s.Source {
-	case srcLaunchd:
-		return launchdActionSpec(s, verb)
-	case srcSystemd:
-		return systemdActionSpec(s, verb)
-	case srcDocker:
-		return dockerActionSpec(s, verb)
-	default:
-		return actionSpec{}, false
-	}
-}
-
-func launchdActionSpec(s service, verb string) (actionSpec, bool) {
-	home := os.Getenv("HOME")
-	plist := filepath.Join(home, "Library", "LaunchAgents", s.ID+".plist")
-	gui := fmt.Sprintf("gui/%d", os.Getuid())
-	target := gui + "/" + s.ID
-
-	var argv []string
-	switch verb {
-	case "start":
-		argv = []string{"launchctl", "bootstrap", gui, plist}
-	case "stop":
-		argv = []string{"launchctl", "bootout", target}
-	case "restart":
-		// bootout, WAIT for the label to actually go away, then bootstrap.
-		//
-		// `;` rather than `&&` on purpose: bootstrap must still run when the
-		// job wasn't loaded to begin with, and bootout fails in that case.
-		//
-		// The wait is the part that took a service down to learn. bootout
-		// returns as soon as launchd has accepted the request, not once the
-		// job is gone, so a bootstrap issued immediately after can land while
-		// the label is still registered and fail with
-		//
-		//   Bootstrap failed: 5: Input/output error
-		//
-		// which reads like a broken plist and is not — retrying the identical
-		// command succeeds. It is worse than a plain failure: the bootout half
-		// already worked, so a failed restart leaves the service STOPPED. That
-		// is the opposite of what someone pressing "restart" is asking for.
-		//
-		// Polling `launchctl print` is the check that matches the failure: it
-		// asks the same domain the same question bootstrap will. Bounded at
-		// ~10s, comfortably inside the 30s action timeout, and it exits the
-		// instant the label clears — so the common case costs one iteration.
-		argv = []string{"sh", "-c",
-			"launchctl bootout " + shellQuote(target) + " 2>/dev/null; " +
-				"n=0; while launchctl print " + shellQuote(target) +
-				" >/dev/null 2>&1 && [ \"$n\" -lt 50 ]; do sleep 0.2; n=$((n+1)); done; " +
-				"launchctl bootstrap " + shellQuote(gui) + " " + shellQuote(plist)}
-	}
-	return actionSpec{
-		Title:   verbTitle(verb) + " " + s.Name,
-		Argv:    argv,
-		Confirm: confirmSentence(s, verb, "launchd"),
-		Timeout: 30 * time.Second,
-	}, true
-}
-
-func systemdActionSpec(s service, verb string) (actionSpec, bool) {
-	if !s.UserUnit {
-		// A system unit needs sudo; offering it here would just fail loudly.
-		return actionSpec{}, false
-	}
-	return actionSpec{
-		Title:   verbTitle(verb) + " " + s.Name,
-		Argv:    []string{"systemctl", "--user", verb, s.ID},
-		Confirm: confirmSentence(s, verb, "systemctl --user"),
-		Timeout: 30 * time.Second,
-	}, true
-}
-
-func dockerActionSpec(s service, verb string) (actionSpec, bool) {
-	return actionSpec{
-		Title:   verbTitle(verb) + " " + s.Name,
-		Argv:    []string{"docker", verb, s.ID},
-		Confirm: confirmSentence(s, verb, "docker"),
-		Timeout: 30 * time.Second,
-	}, true
+func serviceAction(s service, verb string) (ops.Plan, bool) {
+	plan, err := buildOperation(serviceRequest{Service: s, Verb: verb})
+	return plan, err == nil
 }
 
 func verbTitle(verb string) string {

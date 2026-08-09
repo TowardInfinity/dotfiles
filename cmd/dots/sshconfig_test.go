@@ -99,19 +99,27 @@ func TestTildeIncludeAndCycleTerminates(t *testing.T) {
 func TestSSHHostAliasFilteringAndDefaultHostName(t *testing.T) {
 	fakeSSH(t, map[string]string{
 		".ssh/config": "Host *\n  User me\n\nHost tmpl?\n  HostName t.example\n\n" +
-			"Host !excluded mixed *\n  HostName mixed.example\n\n" +
-			"Host nohost\n  User me\n\nHost real\n  HostName real.example\n",
+			"Host -oProxyCommand=bad\n  HostName option.example\n\n" +
+			"Host !excluded mixed sibling *\n  HostName mixed.example\n\n" +
+			"Host nohost\n  User me\n\nHost real\n  HostName real.example\n\n" +
+			"Host real\n  HostName ignored-second.example\n",
 	})
 
 	got := sshHosts()
-	want := []string{"mixed", "nohost", "real"}
+	want := []string{"mixed", "sibling", "nohost", "real"}
 	if !slices.Equal(got, want) {
 		t.Errorf("sshHosts() = %v, want %v", got, want)
 	}
 
 	hosts := parseSSHConfig()
-	if len(hosts) < 2 || hosts[1].alias != "nohost" || hosts[1].hostname != "nohost" {
+	if len(hosts) < 3 || hosts[2].alias != "nohost" || hosts[2].hostname != "nohost" {
 		t.Errorf("host without HostName = %#v, want alias and hostname nohost", hosts)
+	}
+	if len(hosts) != 4 || hosts[0].hostname != "mixed.example" || hosts[1].hostname != "mixed.example" {
+		t.Errorf("aliases in one Host block did not share HostName: %#v", hosts)
+	}
+	if len(hosts) != 4 || hosts[3].hostname != "real.example" {
+		t.Errorf("repeated Host alias was not deduplicated with first HostName: %#v", hosts)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -679,68 +680,12 @@ func installerCmdFor(name string) (string, bool) {
 
 // ── actions ───────────────────────────────────────────────────
 
-// packageAction builds the actionSpec behind the "u" key, per manager.
+// packageAction asks the shared operation registry for the plan behind "u".
 // Returns false for anything with no safe single-package upgrade command —
 // currently pmGo, see discoverGoBin's comment for why.
-func packageAction(p pkg) (actionSpec, bool) {
-	target := p.Latest
-	if target == "" {
-		target = "latest"
-	}
-
-	switch p.Manager {
-	case pmBrew:
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"brew", "upgrade", p.Name},
-			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) via brew?", p.Name, p.Version, target),
-			Timeout: 5 * time.Minute,
-		}, true
-	case pmPnpm:
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"pnpm", "add", "-g", p.Name + "@latest"},
-			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) via pnpm?", p.Name, p.Version, target),
-			Timeout: 3 * time.Minute,
-		}, true
-	case pmNpm:
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"npm", "update", "-g", p.Name},
-			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) via npm?", p.Name, p.Version, target),
-			Timeout: 3 * time.Minute,
-		}, true
-	case pmUvTool:
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"uv", "tool", "upgrade", p.Name},
-			Confirm: fmt.Sprintf("Upgrade %s via uv tool?", p.Name),
-			Timeout: 3 * time.Minute,
-		}, true
-	case pmPip:
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"pip3", "install", "--user", "--upgrade", p.Name},
-			Confirm: fmt.Sprintf("Upgrade %s (%s → %s) via pip?", p.Name, p.Version, target),
-			Timeout: 3 * time.Minute,
-		}, true
-	case pmInstaller:
-		cmd, ok := installerCmdFor(p.Name)
-		if !ok {
-			return actionSpec{}, false
-		}
-		// Argv runs through a shell rather than exec'd directly, unlike every
-		// other case here — the install command IS a pipe (`curl | bash`),
-		// same as bootstrap.sh runs it, so there's no argv form without one.
-		return actionSpec{
-			Title:   "Upgrade " + p.Name,
-			Argv:    []string{"sh", "-c", cmd},
-			Confirm: fmt.Sprintf("Upgrade %s by re-running its install script?", p.Name),
-			Timeout: 5 * time.Minute,
-		}, true
-	default:
-		return actionSpec{}, false
-	}
+func packageAction(p pkg) (ops.Plan, bool) {
+	plan, err := buildOperation(packageRequest{Package: p})
+	return plan, err == nil
 }
 
 // ── advisories: consolidation, not automation ──────────────────

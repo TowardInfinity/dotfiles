@@ -28,7 +28,8 @@ work to a subagent or the other tool.
 | Claude Code | Sonnet 5, effort `high` | `/model opusplan` |
 | Codex | Terra, effort `medium` | `codex -p sol` |
 
-Both defaults live in the repo and travel with `dots sync`:
+Both defaults live in the repo and travel through `dots publish` followed by
+`dots rollout` (or the temporary compatibility `dots sync`):
 `common/claude/settings.json` is symlinked into place, and
 `common/codex/config.policy.toml` is *merged* into `~/.codex/config.toml`
 between `# >>> dots: managed block` markers — Codex writes its own
@@ -143,4 +144,3 @@ background agents, burned 1.5M+ tokens, with duplicate agents redoing the same
 sub-task (four separate agents independently researching the same API). Pinning
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: "1"` here just keeps the fix Anthropic
 itself shipped and then reverted three days later, for a bug that's still open.
-

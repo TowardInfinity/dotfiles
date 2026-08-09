@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -223,22 +222,22 @@ func (m doctorModel) update(msg tea.Msg) (doctorModel, tea.Cmd) {
 			if m.loading {
 				return m, nil
 			}
-			spec, note, ok := m.buildInstall()
+			req, note, ok := m.buildInstall()
 			m.note = note
 			if !ok {
 				return m, nil
 			}
-			return m, func() tea.Msg { return runActionMsg{spec: spec} }
+			return m, requestAction(req)
 		case "c":
 			if m.loading {
 				return m, nil
 			}
-			spec, note, ok := m.buildConfigRepair()
+			req, note, ok := m.buildConfigRepair()
 			m.note = note
 			if !ok {
 				return m, nil
 			}
-			return m, func() tea.Msg { return runActionMsg{spec: spec} }
+			return m, requestAction(req)
 		}
 	}
 	return m, nil
@@ -249,18 +248,14 @@ func (m doctorModel) update(msg tea.Msg) (doctorModel, tea.Cmd) {
 // two fix disjoint problems — "i" installs packages, this repairs what is
 // already installed — and folding them together would mean a missing brew
 // formula could block a config repair, or vice versa.
-func (m doctorModel) buildConfigRepair() (spec actionSpec, note string, ok bool) {
+func (m doctorModel) buildConfigRepair() (req ops.Request, note string, ok bool) {
 	if !configRepairable(m.checks) {
-		return actionSpec{}, "", false
+		return nil, "", false
 	}
 	if m.repo == "" {
-		return actionSpec{}, "no checkout found — nothing to relink from", false
+		return nil, "no checkout found — nothing to relink from", false
 	}
-	return actionSpec{
-		Title: "Relink configs and re-merge the managed block",
-		Argv:  []string{filepath.Join(m.repo, "install.sh")},
-		Dir:   m.repo,
-	}, "", true
+	return applyRequest{Repo: m.repo}, "", true
 }
 
 // brewFormulas maps a check's binary name to the brew formula name, for the
@@ -282,7 +277,7 @@ func brewFormula(check string) string {
 // everything currently missing. ok is false when there is nothing to do, or
 // nothing this pane knows how to do — note then explains why (empty when
 // there is simply nothing missing).
-func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
+func (m doctorModel) buildInstall() (req ops.Request, note string, ok bool) {
 	var missing []string
 	for _, c := range m.checks {
 		// Config and Package rows are deliberately skipped: none of them names
@@ -295,7 +290,7 @@ func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 		}
 	}
 	if len(missing) == 0 {
-		return actionSpec{}, "", false
+		return nil, "", false
 	}
 
 	// oh-my-zsh and tpm are directories the repo's install.sh creates, not
@@ -310,64 +305,13 @@ func (m doctorModel) buildInstall() (spec actionSpec, note string, ok bool) {
 		}
 	}
 
-	if runtime.GOOS == "darwin" {
-		if len(pkgs) == 0 {
-			// Only the directories are missing: install.sh is what sets
-			// those up, brew has nothing to install.
-			if m.repo == "" {
-				return actionSpec{}, "no repo found — can't run install.sh for " + strings.Join(dirs, ", "), false
-			}
-			installSh := filepath.Join(m.repo, "install.sh")
-			return actionSpec{
-				Title:   "Set up " + strings.Join(dirs, ", "),
-				Argv:    []string{installSh},
-				Dir:     m.repo,
-				Confirm: "Run install.sh to set up " + strings.Join(dirs, ", ") + "?",
-				Timeout: 10 * time.Minute,
-			}, "", true
-		}
-
-		var formulas []string
-		seen := map[string]bool{}
-		for _, n := range pkgs {
-			f := brewFormula(n)
-			if !seen[f] {
-				seen[f] = true
-				formulas = append(formulas, f)
-			}
-		}
-		argv := append([]string{"brew", "install"}, formulas...)
-		confirm := fmt.Sprintf("Install %d package(s) with brew: %s?", len(formulas), strings.Join(formulas, " "))
-		if len(dirs) > 0 {
-			confirm += " (" + strings.Join(dirs, ", ") + " still need install.sh — Manage > Dotfiles)"
-		}
-		return actionSpec{
-			Title:   "Install missing tools",
-			Argv:    argv,
-			Confirm: confirm,
-			Timeout: 15 * time.Minute,
-		}, "", true
+	if runtime.GOOS != "darwin" && m.repo == "" {
+		return nil, "no repo found — can't run bootstrap.sh --deps", false
 	}
-
-	// Linux: several of these (glow, go, uv, pnpm, fnm) are not apt packages
-	// at all here — they come from tarballs/scripts inside bootstrap.sh, and
-	// that same run also links the configs (creating tpm) and always
-	// installs oh-my-zsh. Re-running it is simpler and more correct than
-	// reimplementing that split here.
-	if m.repo == "" {
-		return actionSpec{}, "no repo found — can't run bootstrap.sh --deps", false
+	if runtime.GOOS == "darwin" && len(pkgs) == 0 && m.repo == "" {
+		return nil, "no repo found — can't run install.sh for " + strings.Join(dirs, ", "), false
 	}
-	installer := filepath.Join(m.repo, "bootstrap.sh")
-	if _, err := os.Stat(installer); err != nil {
-		return actionSpec{}, "bootstrap.sh not found in repo", false
-	}
-	return actionSpec{
-		Title:   "Install missing dependencies",
-		Argv:    []string{"sh", installer, "--deps"},
-		Dir:     m.repo,
-		Confirm: fmt.Sprintf("Install missing (%s) via bootstrap.sh --deps?", strings.Join(missing, ", ")),
-		Timeout: 20 * time.Minute,
-	}, "", true
+	return doctorRepairRequest{Repo: m.repo, Missing: missing, GOOS: runtime.GOOS}, "", true
 }
 
 // checkGroup labels a run of related checks, so the list reads as three short

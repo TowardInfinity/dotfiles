@@ -26,6 +26,12 @@ tmux source-file ~/.config/tmux/tmux.conf
 Never `tmux kill-server` on a box with live sessions. `source-file` applies
 the config in place and leaves your sessions running.
 
+`dots update` is the inbound compatibility spelling during the transition. New
+work should use `dots publish` to push a reviewed selection and `dots rollout`
+to update named machines. Bare `dots sync` still performs both old outbound
+halves for one release and prints a warning; `dots operations` records the
+exact boundaries and the later inbound semantic flip.
+
 ## Changing a config
 
 The live files are symlinks into the repo, so your edit is already live —
@@ -45,11 +51,10 @@ Then on any other machine, `dots update`.
 dots sync
 ```
 
-Commits and pushes whatever changed here, then runs `dots update` on each
-reachable host from `~/.ssh/config`. It asks twice — once before pushing, once
-before touching the remotes — because the two halves fail differently: a push
-is hard to walk back, and a remote update happens on a machine you are not
-looking at.
+Commits and pushes whatever changed here, then runs `dots update` on each host
+from `~/.ssh/config`. During this compatibility release it renders both halves
+as one typed plan and asks once for the complete outbound scope. A failed push
+stops before SSH; a failed host is reported while the remaining hosts continue.
 
 | | |
 |---|---|
@@ -59,9 +64,18 @@ looking at.
 | `dots sync -y` | do not ask — for scripts |
 
 With no terminal it declines rather than assuming yes, so an unattended run
-never pushes on its own. Unreachable hosts are skipped, not retried, and a
-failed local push stops the run before any remote is touched — otherwise the
-remotes would pull a change that is not there.
+never pushes on its own. Failed hosts are not retried, and a failed local push
+stops the run before any remote is touched — otherwise the remotes would pull a
+change that is not there.
+
+This block documents the temporary compatibility behavior. The replacement is
+explicit and separable:
+
+```sh
+dots publish common/nvim/lua/options.lua -m "nvim: tune options"
+dots rollout a1                         # canary
+dots rollout v1 v2                      # remaining servers
+```
 
 ### Being reminded
 
@@ -71,7 +85,7 @@ a status-bar badge and `dots doctor` prints a row when the checkout is ahead:
 
 ```
   !  repo           1 uncommitted file, 2 unpushed commits
-     run `dots sync` to push and update the other machines
+     publish reviewed paths with `dots publish`, then use `dots rollout`
 ```
 
 It only ever reports. Nothing pushes without you asking, because a push is
@@ -86,8 +100,8 @@ a failure.
 The GitHub repo is public, so anyone can read it, fork it and open a pull
 request — but write access is the owner's alone, and a ruleset on `main` blocks
 force-pushes and branch deletion. It deliberately does **not** require pull
-requests: `dots sync` pushes straight to `main`, and requiring review would
-break the one command this whole setup runs on. The threat being defended
+requests: `dots publish` pushes reviewed selections straight to `main`, and
+requiring review would break that direct-main workflow. The threat being defended
 against is an accident, not an intruder.
 
 Secret scanning and push protection are on, so a credential in a config is

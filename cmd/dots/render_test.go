@@ -98,11 +98,9 @@ func TestActionOverlayCapturesKeys(t *testing.T) {
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	tm, _ = tm.Update(runActionMsg{spec: actionSpec{
-		Title:   "Probe",
-		Argv:    []string{"echo", "hello"},
-		Confirm: "Run the probe?",
-	}})
+	plan := testCommandPlan("Probe", "echo", "hello")
+	plan.Confirm = "Run the probe?"
+	tm, _ = tm.Update(runActionMsg{plan: plan})
 	if tm.(model).act == nil {
 		t.Fatal("overlay did not open")
 	}
@@ -128,7 +126,7 @@ func TestActionOverlayCapturesKeys(t *testing.T) {
 
 // A confirmed action must actually run and capture output.
 func TestActionRuns(t *testing.T) {
-	a := newAction(actionSpec{Title: "Probe", Argv: []string{"echo", "marker-line"}}, 80, 20)
+	a := newAction(testCommandPlan("Probe", "echo", "marker-line"), 80, 20)
 	a, cmd := a.start()
 	if cmd == nil {
 		t.Fatal("start returned no command")
@@ -158,7 +156,7 @@ func TestActionRuns(t *testing.T) {
 
 // A failing command must be reported, not swallowed.
 func TestActionReportsFailure(t *testing.T) {
-	a := newAction(actionSpec{Title: "Fail", Argv: []string{"sh", "-c", "exit 3"}}, 80, 20)
+	a := newAction(testCommandPlan("Fail", "sh", "-c", "exit 3"), 80, 20)
 	a, cmd := a.start()
 	deadline := time.After(10 * time.Second)
 	for !a.done {
@@ -196,7 +194,7 @@ func TestAsyncResultReachesInactiveTab(t *testing.T) {
 // Cancelling a running action must not wedge the overlay. The overlay owns
 // the keyboard, so a stuck one takes the whole program with it.
 func TestCancelDoesNotWedge(t *testing.T) {
-	a := newAction(actionSpec{Title: "Sleep", Argv: []string{"sleep", "30"}}, 80, 20)
+	a := newAction(testCommandPlan("Sleep", "sleep", "30"), 80, 20)
 	a, cmd := a.start()
 
 	a, cmd, _ = a.update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -230,14 +228,35 @@ func TestOneActionAtATime(t *testing.T) {
 	m := newModel()
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	tm, _ = tm.Update(runActionMsg{spec: actionSpec{Title: "First", Argv: []string{"sleep", "5"}}})
+	tm, _ = tm.Update(runActionMsg{plan: testCommandPlan("First", "sleep", "5")})
 	first := tm.(model).act
 	if first == nil {
 		t.Fatal("first action did not open")
 	}
-	tm, _ = tm.Update(runActionMsg{spec: actionSpec{Title: "Second", Argv: []string{"echo", "hi"}}})
-	if tm.(model).act.spec.Title != "First" {
+	tm, _ = tm.Update(runActionMsg{plan: testCommandPlan("Second", "echo", "hi")})
+	if tm.(model).act.plan.Title != "First" {
 		t.Error("a second action replaced the running one")
+	}
+
+	// Do not leave the package-global Runner occupied for whichever test runs
+	// next. The production Program would keep consuming the action stream; this
+	// unit test deliberately bypasses that event loop after the assertion.
+	if first.cancel != nil {
+		first.cancel()
+	}
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case msg, ok := <-first.ch:
+			if !ok {
+				t.Fatal("first action stream closed without a result")
+			}
+			if _, ok := msg.(actDoneMsg); ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("first action did not stop during test cleanup")
+		}
 	}
 }
 
@@ -281,7 +300,7 @@ func TestKeysDoNotLeakAcrossTabs(t *testing.T) {
 	}
 	if tm.(model).act != nil {
 		t.Errorf("pressing 'u' in Docs started an action: %q",
-			tm.(model).act.spec.Title)
+			tm.(model).act.plan.Title)
 	}
 
 	// And 'i' in Docs must not trigger Doctor's installer.
@@ -294,6 +313,6 @@ func TestKeysDoNotLeakAcrossTabs(t *testing.T) {
 	}
 	if tm.(model).act != nil {
 		t.Errorf("pressing 'i' in Docs started an action: %q",
-			tm.(model).act.spec.Title)
+			tm.(model).act.plan.Title)
 	}
 }

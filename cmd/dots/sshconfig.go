@@ -18,21 +18,30 @@ type sshHost struct {
 	hostname string
 }
 
-// parseSSHConfig returns one usable alias per Host block. Wildcard and negated
-// aliases are matching rules, not concrete destinations; a mixed block such as
-// `Host work *` still has a usable `work` alias, so filtering is per alias.
+// parseSSHConfig returns every usable alias from each Host block. Wildcard and
+// negated aliases are matching rules, not concrete destinations; a mixed block
+// such as `Host work *` still has a usable `work` alias, so filtering is per
+// alias. Multiple concrete aliases on one line are separate selectable
+// machines and inherit the block's HostName.
 func parseSSHConfig() []sshHost {
 	var hosts []sshHost
-	var cur *sshHost
+	var current []sshHost
+	seen := make(map[string]bool)
 
 	flush := func() {
-		if cur != nil {
-			if cur.hostname == "" {
-				cur.hostname = cur.alias
+		for _, host := range current {
+			if host.hostname == "" {
+				host.hostname = host.alias
 			}
-			hosts = append(hosts, *cur)
+			// Repeating a Host block is valid ssh_config and commonly adds
+			// later options. It is still one selectable machine; OpenSSH's
+			// first obtained value wins for HostName, so keep the first row.
+			if !seen[host.alias] {
+				seen[host.alias] = true
+				hosts = append(hosts, host)
+			}
 		}
-		cur = nil
+		current = nil
 	}
 
 	for _, line := range sshConfigLines() {
@@ -44,15 +53,16 @@ func parseSSHConfig() []sshHost {
 		case "host":
 			flush()
 			for _, alias := range fields[1:] {
-				if strings.HasPrefix(alias, "!") || strings.ContainsAny(alias, "*?") {
+				if strings.HasPrefix(alias, "!") || strings.HasPrefix(alias, "-") || strings.ContainsAny(alias, "*?") {
 					continue
 				}
-				cur = &sshHost{alias: alias}
-				break // use the first concrete alias from this block
+				current = append(current, sshHost{alias: alias})
 			}
 		case "hostname":
-			if cur != nil {
-				cur.hostname = fields[1]
+			for i := range current {
+				if current[i].hostname == "" {
+					current[i].hostname = fields[1]
+				}
 			}
 		}
 	}

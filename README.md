@@ -58,8 +58,9 @@ available, falling through tiers on any failure:
    (`${XDG_CACHE_HOME:-$HOME/.cache}/dots/`)
 2. **download a release binary** for this OS/arch from the repo's
    [GitHub Releases](https://github.com/TowardInfinity/dotfiles/releases),
-   verifying the offline Ed25519 signature over `checksums.txt`, then the
-   asset's `sha256`. Signature verification is mandatory by default
+   resolving Latest once and pinning every fetch to that tag, verifying the
+   offline Ed25519 signature over a manifest that names the tag and commit,
+   then the asset's `sha256`. Signature verification is mandatory by default
    (`DOTS_SIGNATURE_MODE=require`): a missing or bad
    signature, absent digest, or unavailable checksum tool discards the download
    and runs the next tier. See
@@ -84,9 +85,12 @@ a stale release binary masking it:
 
 New release binaries are built by `.github/workflows/release.yml` on every
 `v*` tag: it cross-compiles `darwin/{arm64,amd64}` and `linux/{arm64,amd64}`,
-then attaches them and `checksums.txt` to a draft release. Publication is a
-separate manual step: `bin/sign-release.sh` signs CI's manifest with the
-offline key, uploads `checksums.txt.sig`, verifies it, and publishes the draft.
+then attaches them and a tag/commit-bound `checksums.txt` to a draft release.
+Publication is a separate manual step: `bin/sign-release.sh` checks the remote
+tag and CI upload provenance, signs the manifest with the offline key, uploads
+`checksums.txt.sig`, verifies it, and publishes the draft.
+The repository's immutable-releases setting then locks the tag and all six
+assets; drafts remain mutable so the detached signature can be attached first.
 
 ## Quick start
 

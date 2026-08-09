@@ -3,7 +3,7 @@
 #
 # Called from status-right as
 #
-#   #(~/.local/bin/tmux-model '#{pane_id}' '#{pane_current_command}' '#{pane_current_path}')
+#   #(~/.local/bin/tmux-model #{q:pane_id} #{q:pane_current_command})
 #
 # and re-run every status-interval, so it must be fast and must never block:
 # a status-line job that hangs freezes the whole bar.
@@ -32,6 +32,15 @@ pane_id="${1:-${TMUX_PANE:-}}"
 pane_cmd="${2:-}"
 pane_cwd="${3:-}"
 [ -n "$pane_id" ] || exit 0
+
+# Never interpolate pane_current_path into tmux's #() shell command. tmux
+# expands formats before /bin/sh parses the command, so a quote in a directory
+# name can otherwise become code on every status refresh. Tests may still pass
+# an explicit third argument without needing a live tmux server.
+if [ -z "$pane_cwd" ] && command -v tmux >/dev/null 2>&1; then
+  pane_cwd=$(tmux display-message -p -t "$pane_id" -F '#{pane_current_path}' 2>/dev/null) \
+    || pane_cwd=""
+fi
 
 MARKS="${DOTS_PANE_DIR:-$HOME/.cache/dots/panes}"
 mark="$MARKS/${pane_id#%}"

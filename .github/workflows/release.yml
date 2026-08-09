@@ -31,11 +31,10 @@ on:
       - "v*"
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   test:
+    permissions:
+      contents: read
     strategy:
       # Report both platforms even when one fails. With fail-fast a Linux
       # error cancels the macOS leg, which hides exactly the divergence this
@@ -74,6 +73,8 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -111,7 +112,11 @@ jobs:
 
       - name: Checksums
         working-directory: dist
-        run: sha256sum dots_* > checksums.txt
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          printf '# tag=%s commit=%s\n' "$VERSION" "$GITHUB_SHA" > checksums.txt
+          sha256sum dots_* >> checksums.txt
 
       - name: Show what will ship
         working-directory: dist

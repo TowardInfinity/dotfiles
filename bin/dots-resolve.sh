@@ -70,12 +70,14 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 # — it proves nothing about who published it. Anything able to replace the
 # binary can replace its checksum line in the same breath.
 #
-# The detached Ed25519 signature protects against someone who can alter release
-# assets without also altering this checkout: a stolen release-page token, a
-# tampered Actions artifact, or a corrupted/MITM'd download. The public key is
-# committed here, so this checkout is the root of trust rather than the release
-# page. A compromised checkout can replace the key too and defeats this check
-# by construction.
+# The detached Ed25519 signature protects against someone who can alter or add
+# release assets without also altering this checkout or obtaining the offline
+# key: a stolen release-page token or a corrupted/MITM'd download. Before the
+# key signs, sign-release.sh also checks the draft inputs came from GitHub
+# Actions and match its server-side digests. A compromised release workflow is
+# still inside the trust boundary. The public key is committed here, so this
+# checkout is the root of trust rather than the release page; a compromised
+# checkout can replace the key too and defeats this check by construction.
 #
 # openssl is the verifier because it is the one tool present on every machine
 # here — the low-memory boxes have no gh, no cosign and no minisign. Verified
@@ -95,6 +97,13 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 # rather than a legacy.
 PUBKEY="${DOTS_RELEASE_PUBKEY:-$REPO/keys/release.pub}"
 SIGNATURE_MODE="${DOTS_SIGNATURE_MODE:-require}"
+case "$SIGNATURE_MODE" in
+  require|warn) : ;;
+  *)
+    log "dots-resolve: DOTS_SIGNATURE_MODE must be require or warn, got '$SIGNATURE_MODE'"
+    exit 1
+    ;;
+esac
 
 # key_id_of <pubkey-file>. A stable identifier for "which key is this". The
 # digest of the PEM file is enough — any change to the key changes the file —
@@ -236,19 +245,27 @@ try_download() {
   command -v curl >/dev/null 2>&1 || { log "dots-resolve: curl not found — skipping release download"; return 1; }
 
   asset="dots_${goos}_${goarch}"
-  asset_url="$RELEASE_BASE/$asset"
-  sums_url="$RELEASE_BASE/checksums.txt"
+  latest_asset_url="$RELEASE_BASE/$asset"
 
   # GitHub's .../latest/download/<asset> is a redirect to
   # .../releases/download/<tag>/<asset>. Reading the redirect target (without
   # following it) is a cheap way to learn the actual version tag without a
   # separate API call. `%{redirect_url}` needs no -L.
-  redirect=$(curl -fsS --max-time "$TIMEOUT" -o /dev/null -w '%{redirect_url}' "$asset_url" 2>/dev/null) || redirect=""
+  redirect=$(curl -fsS --max-time "$TIMEOUT" -o /dev/null -w '%{redirect_url}' "$latest_asset_url" 2>/dev/null) || redirect=""
   version=$(printf '%s' "$redirect" | sed -n 's#.*/releases/download/\([^/]*\)/.*#\1#p')
   if [ -z "$version" ]; then
     log "dots-resolve: could not reach GitHub Releases (or no release published yet) — skipping"
     return 1
   fi
+
+  # The latest URL is mutable. Use it exactly once to resolve a tag, then pin
+  # every byte in this attempt to the immutable per-tag directory returned by
+  # that redirect. Otherwise a release published between these requests can
+  # cache new assets under the old version name.
+  tag_base=${redirect%/*}
+  asset_url="$tag_base/$asset"
+  sums_url="$tag_base/checksums.txt"
+  sig_url="$tag_base/checksums.txt.sig"
 
   mkdir -p "$CACHE_DIR" 2>/dev/null || { log "dots-resolve: cannot create cache dir $CACHE_DIR — skipping"; return 1; }
 
@@ -317,7 +334,7 @@ try_download() {
   # be the file that was signed. Verifying the digest against an unverified
   # checksums.txt would be checking the download against the attacker's own
   # arithmetic.
-  verify_signature "$sums" "$RELEASE_BASE/checksums.txt.sig"
+  verify_signature "$sums" "$sig_url"
   case $? in
     0) sig_verified=1 ;;  # proven
     1)
@@ -331,10 +348,27 @@ try_download() {
         rm -f "$tmp" "$sums"
         return 1
       fi
-      log "dots-resolve: release is unsigned — continuing on checksum alone"
+      log "dots-resolve: release is unsigned — continuing on checksum and manifest identity only"
       sig_verified=0
       ;;
   esac
+
+  # Bind the signed bytes to the tag we resolved. A valid signature over an
+  # old release's otherwise-identical manifest must not be replayable under a
+  # newer tag. Require the exact CI header on the first line; a missing header
+  # is not legacy-compatible because accepting it is the replay hole.
+  manifest_tag=$(awk '
+    NR == 1 && NF == 3 && $1 == "#" &&
+      $2 ~ /^tag=[^[:space:]]+$/ && $3 ~ /^commit=[^[:space:]]+$/ {
+        sub(/^tag=/, "", $2); print $2
+      }
+  ' "$sums" 2>/dev/null)
+  if [ "$manifest_tag" != "$version" ]; then
+    [ -n "$manifest_tag" ] || manifest_tag="<missing or malformed>"
+    log "dots-resolve: release manifest is for $manifest_tag, not $version — refusing"
+    rm -f "$tmp" "$sums"
+    return 1
+  fi
 
   expected=$(awk -v f="$asset" '$2==f{print $1; exit}' "$sums" 2>/dev/null)
   rm -f "$sums"

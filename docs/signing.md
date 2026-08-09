@@ -16,11 +16,20 @@ who published it: anything able to replace the binary — a stolen token, a
 compromised Actions run, a bad workflow edit — can replace its checksum line in
 the same breath, and four machines would install it without a complaint.
 
-The detached Ed25519 signature protects against someone who can alter release
-assets without also altering the checkout: a stolen token used against the
-release page, a tampered Actions artifact, or a corrupted/MITM'd download. The
-private key never touches GitHub; it is generated offline, stored encrypted,
-and used by hand.
+The detached Ed25519 signature protects against someone who can alter or add
+release assets without also altering the checkout or obtaining the offline key:
+a stolen release-page token or a corrupted/MITM'd download. The private key
+never touches GitHub; it is generated offline, stored encrypted, and used by
+hand.
+
+Before asking for that key, the signing script checks that the manifest names
+the remote tag and commit, that all five unsigned inputs were uploaded by
+`github-actions[bot]`, and that GitHub's server-side binary digests match the
+manifest. That prevents a user/release token from replacing a mutable draft and
+waiting for the offline signer to bless it. It does **not** make a compromised
+release workflow trustworthy: a malicious job already runs as
+`github-actions[bot]` and remains inside this design's trust boundary. Test jobs
+hold only `contents: read`; the single release job alone receives write access.
 
 The checkout's `keys/release.pub` is still the root of trust. A compromised
 checkout can replace that key and the release it verifies, so this design does
@@ -90,14 +99,26 @@ openssl pkey -pubin -in keys/release.pub -outform DER \
 
 ## Cutting a signed release
 
-CI builds the four binaries and `checksums.txt` and leaves them as a **draft**.
+CI builds the four binaries and a `checksums.txt` whose first line binds the
+manifest to the tag and commit, then leaves them as a **draft**:
+
+```
+# tag=v0.1.15 commit=<40-character commit SHA>
+```
+
 Drafts are excluded from `releases/latest/download` — that path always redirects
 into the newest *published* release, and a draft's own asset URL is 404
 anonymously. So no unsigned release is ever reachable by the fleet.
 
+Immutable releases are enabled for this repository. GitHub deliberately leaves
+a draft mutable, so `sign-release.sh` can upload or replace its detached
+signature; publishing then locks the tag and every asset. That exact
+draft/upload/`--clobber` flow was exercised against this repository before the
+setting was enabled permanently.
+
 ```sh
-git tag v0.1.11 && git push origin v0.1.11   # CI builds a draft
-./bin/sign-release.sh v0.1.11                # sign, verify, upload, publish
+git tag v0.1.15 && git push origin v0.1.15   # CI builds a draft
+./bin/sign-release.sh v0.1.15                # sign, verify, upload, publish
 dots sync                                     # roll it out
 ```
 
@@ -116,10 +137,18 @@ manager is that the media and the passphrase never sit together.
 
 `sign-release.sh` downloads **CI's own** `checksums.txt` rather than rebuilding
 locally — Go output is not guaranteed bit-identical across machines, and signing
-a local rebuild would sign bytes nobody tested. It first checks that the
-working-tree key matches `keys/release.pub` at the tag, then verifies its own
-signature against that tagged key before publishing. Signing with the wrong key
+a local rebuild would sign bytes nobody tested. It compares the local tag with
+origin, checks the manifest's tag and commit, verifies the CI uploader and
+server-side asset digests, and confirms that the working-tree key matches
+`keys/release.pub` at the tag. After signing, it verifies its own signature
+against that tagged key before publishing. A wrong key or substituted draft
 therefore fails here instead of failing simultaneously on four machines.
+
+The resolver uses `releases/latest/download` only to discover the current tag.
+The binary, manifest, and signature are then fetched from that tag's immutable
+URL, so publishing a newer release halfway through resolution cannot mix bytes
+from two versions. After the manifest signature verifies, its tag must equal the
+redirect-resolved tag; headerless and replayed manifests are refused.
 
 A signed release has **six** assets: four binaries, `checksums.txt`, and
 `checksums.txt.sig`.
@@ -132,6 +161,10 @@ A signed release has **six** assets: four binaries, `checksums.txt`, and
 |---|---|
 | `require` (default) | a valid signature or no binary |
 | `warn` | verify when a signature is present; allow unsigned, loudly |
+
+Both modes still require the manifest's tag/commit identity header. `warn`
+relaxes only the detached-signature requirement; it is an emergency recovery
+mode, not permission to accept the headerless manifests that remain replayable.
 
 The order matters and is not cosmetic. A resolver that does not check
 signatures ignores them, so the *verifying* resolver has to reach every machine

@@ -45,6 +45,7 @@ while [ $# -gt 0 ]; do
     *) url="$1"; shift ;;
   esac
 done
+[ -n "${CURL_LOG:-}" ] && printf '%s\n' "$url" >> "$CURL_LOG"
 name="${url##*/}"
 if $want_redirect; then
   [ -f "$FIXTURES/$name" ] || exit 22
@@ -81,9 +82,11 @@ file_mode() {
 # $WORK/err. $1 names the scenario.
 resolve() {
   rm -rf "$WORK/cache"
+  : > "$WORK/curl.log"
   env PATH="$WORK/bin:$PATH" \
       XDG_CACHE_HOME="$WORK/cache" \
       FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      CURL_LOG="$WORK/curl.log" \
       DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
       DOTS_SIGNATURE_MODE=warn \
       DOTS_FORCE_FETCH=1 DOTS_NO_BUILD=1 \
@@ -94,6 +97,7 @@ resolve() {
 group "dots-resolve: unverifiable downloads are refused"
 
 FIXTURE_VERSION="v9.9.9"
+FIXTURE_COMMIT="0123456789abcdef0123456789abcdef01234567"
 goos=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$(uname -m)" in x86_64|amd64) goarch=amd64 ;; aarch64|arm64) goarch=arm64 ;; *) goarch=unknown ;; esac
 ASSET="dots_${goos}_${goarch}"
@@ -101,13 +105,18 @@ ASSET="dots_${goos}_${goarch}"
 FIXTURES="$WORK/fx"; mkdir -p "$FIXTURES"
 printf '#!/bin/sh\necho fake\n' > "$FIXTURES/$ASSET"
 GOOD_SHA="$(sha_of "$FIXTURES/$ASSET")"
+write_manifest() { # write_manifest <sha> <asset> [tag] [commit]
+  printf '# tag=%s commit=%s\n%s  %s\n' \
+    "${3:-$FIXTURE_VERSION}" "${4:-$FIXTURE_COMMIT}" "$1" "$2" \
+    > "$FIXTURES/checksums.txt"
+}
 
 # 1. Everything present and correct -> accepted.
-printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+write_manifest "$GOOD_SHA" "$ASSET"
 got="$(resolve)"
 [ -n "$got" ] && [ -x "$got" ] \
-  && ok "a correctly-signed download is accepted" \
-  || bad "a correctly-signed download is accepted" "got '$got'; stderr: $(tail -1 "$WORK/err")"
+  && ok "a correctly checksummed manifest is accepted in warn mode" \
+  || bad "a correctly checksummed manifest is accepted in warn mode" "got '$got'; stderr: $(tail -1 "$WORK/err")"
 
 # A refusal is not "resolve fails" — it is "this tier declines, the next one
 # runs". Tier 3 (go build) or tier 4 (bin/dots) then answers, and that is the
@@ -129,17 +138,16 @@ rm -f "$FIXTURES/checksums.txt"
 refused "checksums.txt unreachable is refused" "refusing" "$(resolve)"
 
 # 3. Asset absent from checksums.txt.
-printf '%s  %s\n' "$GOOD_SHA" "some_other_asset" > "$FIXTURES/checksums.txt"
+write_manifest "$GOOD_SHA" "some_other_asset"
 refused "asset missing from checksums.txt is refused" "not listed" "$(resolve)"
 
 # 4. Digest disagrees. This one always worked; it is here so a future
 #    refactor cannot quietly lose it.
-printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$ASSET" \
-  > "$FIXTURES/checksums.txt"
+write_manifest "0000000000000000000000000000000000000000000000000000000000000000" "$ASSET"
 refused "checksum mismatch is refused" "mismatch" "$(resolve)"
 
 # 5. A corrupted cache is discarded rather than reused forever.
-printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+write_manifest "$GOOD_SHA" "$ASSET"
 got="$(resolve)"
 if [ -n "$got" ]; then
   printf 'tampered' >> "$got"
@@ -177,9 +185,11 @@ sig_supported() {
 # stderr in $WORK/err.
 resolve_sig() { # $1 = warn|require
   rm -rf "$WORK/cache"
+  : > "$WORK/curl.log"
   env PATH="$WORK/bin:$PATH" \
       XDG_CACHE_HOME="$WORK/cache" \
       FIXTURES="$FIXTURES" FIXTURE_VERSION="$FIXTURE_VERSION" \
+      CURL_LOG="$WORK/curl.log" \
       DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
       DOTS_RELEASE_PUBKEY="$WORK/sigkey.pub" \
       DOTS_SIGNATURE_MODE="$1" \
@@ -194,11 +204,18 @@ accepted() { # $1 label, $2 what resolve returned
   esac
 }
 
+out="$(resolve_sig requrie)"; rc=$?
+if [ "$rc" -ne 0 ] && grep -q "must be require or warn" "$WORK/err"; then
+  ok "an invalid signature mode is rejected loudly"
+else
+  bad "an invalid signature mode is rejected loudly" "rc=$rc out=[$out] err=[$(cat "$WORK/err")]"
+fi
+
 if sig_supported; then
   # Restore the good fixture set (test 5 above left the cache tampered).
   printf '#!/bin/sh\necho fake\n' > "$FIXTURES/$ASSET"
   GOOD_SHA="$(sha_of "$FIXTURES/$ASSET")"
-  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  write_manifest "$GOOD_SHA" "$ASSET"
   sign_fixture() {
     openssl pkeyutl -sign -inkey "$WORK/sigkey.pem" -rawin \
       -in "$FIXTURES/checksums.txt" -out "$FIXTURES/checksums.txt.sig" 2>/dev/null
@@ -209,6 +226,37 @@ if sig_supported; then
   #      stricter than the signature actually being valid.
   accepted "a validly signed release is accepted (warn)"    "$(resolve_sig warn)"
   accepted "a validly signed release is accepted (require)" "$(resolve_sig require)"
+
+  # Discovery is the only request allowed through mutable latest/download.
+  # Once it yields a tag, the asset, manifest, and signature must all come from
+  # that tag's directory, or a publication racing this run can mix releases.
+  latest_count=$(grep -c "/releases/latest/download/$ASSET$" "$WORK/curl.log" 2>/dev/null)
+  tagged_count=$(grep -c "/releases/download/$FIXTURE_VERSION/" "$WORK/curl.log" 2>/dev/null)
+  if [ "$latest_count" = 1 ] && [ "$tagged_count" = 3 ] \
+       && ! grep -q '/latest/download/checksums.txt' "$WORK/curl.log"; then
+    ok "all post-discovery downloads are pinned to the resolved tag"
+  else
+    bad "all post-discovery downloads are pinned to the resolved tag" \
+        "$(tr '\n' ' ' < "$WORK/curl.log")"
+  fi
+
+  # The signature alone identifies a manifest, not the release under which it
+  # is being served. Bind the signed header to the redirect-resolved tag.
+  write_manifest "$GOOD_SHA" "$ASSET" "v9.9.8"
+  sign_fixture
+  refused "a signed manifest for another tag is refused" "manifest is for" \
+    "$(resolve_sig require)"
+
+  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  sign_fixture
+  refused "a signed manifest without an identity header is refused (require)" "missing or malformed" \
+    "$(resolve_sig require)"
+  refused "a signed manifest without an identity header is refused (warn)" "missing or malformed" \
+    "$(resolve_sig warn)"
+
+  # Restore the valid bytes before exercising signature-mode differences.
+  write_manifest "$GOOD_SHA" "$ASSET"
+  sign_fixture
 
   # 3. Unsigned: the migration release has to stay installable, so warn mode
   #    proceeds — but it must say so rather than passing silently.
@@ -228,15 +276,14 @@ if sig_supported; then
   # 5. A signature over different bytes. This is the attack the whole scheme
   #    exists for: a replaced checksums.txt carrying the old, real signature.
   sign_fixture
-  printf '%s  %s\n' \
-    "1111111111111111111111111111111111111111111111111111111111111111" "$ASSET" \
-    > "$FIXTURES/checksums.txt"
+  write_manifest \
+    "1111111111111111111111111111111111111111111111111111111111111111" "$ASSET"
   refused "a signature over different bytes is refused (warn)" "FAILS" "$(resolve_sig warn)"
   refused "a signature over different bytes is refused (require)" "FAILS" "$(resolve_sig require)"
 
   # 6. Malformed — not 64 bytes, not a signature at all. Must fail closed
   #    (proven wrong), not open as "could not ask".
-  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  write_manifest "$GOOD_SHA" "$ASSET"
   printf 'not a signature' > "$FIXTURES/checksums.txt.sig"
   refused "a malformed signature is refused (warn)" "FAILS" "$(resolve_sig warn)"
 
@@ -266,7 +313,7 @@ PY
   #    alone during the warn window is byte-identical to a signed one once it
   #    is sitting in the cache, so require mode has to re-examine it — or the
   #    flip to require changes nothing on exactly the machines it protects.
-  printf '%s  %s\n' "$GOOD_SHA" "$ASSET" > "$FIXTURES/checksums.txt"
+  write_manifest "$GOOD_SHA" "$ASSET"
   rm -f "$FIXTURES/checksums.txt.sig"
   got="$(resolve_sig warn)"                 # cached with NO signature
   if [ -n "$got" ] && [ -f "$got" ]; then
@@ -377,6 +424,137 @@ out=$(env HOME="$WORK" DOTS_SIGNING_KEY="$WORK/nope.pem" \
 [ "$rc" -ne 0 ] \
   && ok "it refuses when a key is missing" \
   || bad "it refuses when a key is missing" "it continued: $out"
+
+# Exercise the local-vs-remote tag comparison without a release, a signing key,
+# or a network. The script must distinguish a proved mismatch from an origin it
+# could not ask; both used to collapse into trusting the local ref silently.
+SIGNBIN="$WORK/sign-bin"; mkdir -p "$SIGNBIN"
+SIGN_GH_LOG="$WORK/sign-gh.log"
+SIGN_MANIFEST="$WORK/sign-manifest.txt"
+SIGN_KEY="$WORK/sign-key.pem"; : > "$SIGN_KEY"
+SIGN_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SIGN_HASH="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+SIGN_TAG="v9.9.9"
+
+cat > "$SIGNBIN/git" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  show) cat "$REAL_PUBKEY" ;;
+  rev-parse) printf '%s\n' "$SIGN_SHA" ;;
+  ls-remote)
+    case "${GIT_REMOTE_MODE:-equal}" in
+      equal) printf '%s\trefs/tags/%s\n' "$SIGN_SHA" "$SIGN_TAG" ;;
+      annotated)
+        printf '%s\trefs/tags/%s\n' "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "$SIGN_TAG"
+        printf '%s\trefs/tags/%s^{}\n' "$SIGN_SHA" "$SIGN_TAG"
+        ;;
+      mismatch) printf '%s\trefs/tags/%s\n' "cccccccccccccccccccccccccccccccccccccccc" "$SIGN_TAG" ;;
+      empty) exit 0 ;;
+      fail) exit 2 ;;
+    esac
+    ;;
+  *) exit 2 ;;
+esac
+STUB
+
+cat > "$SIGNBIN/gh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$SIGN_GH_LOG"
+[ "${GH_MODE:-fail}" = draft ] || exit 2
+case "${1:-} ${2:-}" in
+  "release view")
+    case " $* " in
+      *" isDraft "*) printf 'true\n' ;;
+      *" assets "*)
+        for a in checksums.txt dots_darwin_arm64 dots_darwin_amd64 dots_linux_arm64 dots_linux_amd64; do
+          printf '%s\thttps://api.example.invalid/assets/%s\tsha256:%s\n' "$a" "$a" "${GH_DIGEST:-$SIGN_HASH}"
+        done
+        ;;
+      *) exit 2 ;;
+    esac
+    ;;
+  "release list") exit 0 ;;
+  "release download")
+    dest=""
+    while [ $# -gt 0 ]; do
+      if [ "$1" = --dir ]; then dest=$2; break; fi
+      shift
+    done
+    [ -n "$dest" ] || exit 2
+    cp "$SIGN_MANIFEST" "$dest/checksums.txt"
+    ;;
+  api*) printf '%s\n' "${GH_UPLOADER:-github-actions[bot]}" ;;
+  *) exit 2 ;;
+esac
+STUB
+
+cat > "$SIGNBIN/openssl" <<'STUB'
+#!/bin/sh
+exit 2
+STUB
+chmod +x "$SIGNBIN/git" "$SIGNBIN/gh" "$SIGNBIN/openssl"
+
+run_sign_preflight() { # run_sign_preflight <remote-mode> <gh-mode>
+  : > "$SIGN_GH_LOG"
+  env PATH="$SIGNBIN:/usr/bin:/bin" \
+      REAL_PUBKEY="$REPO/keys/release.pub" SIGN_SHA="$SIGN_SHA" SIGN_HASH="$SIGN_HASH" SIGN_TAG="$SIGN_TAG" \
+      GIT_REMOTE_MODE="$1" GH_MODE="$2" SIGN_GH_LOG="$SIGN_GH_LOG" \
+      GH_UPLOADER="${3:-github-actions[bot]}" \
+      GH_DIGEST="${4:-$SIGN_HASH}" \
+      SIGN_MANIFEST="$SIGN_MANIFEST" DOTS_SIGNING_KEY="$SIGN_KEY" \
+      bash "$REPO/bin/sign-release.sh" "$SIGN_TAG" 2>&1
+}
+
+out=$(run_sign_preflight mismatch fail); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "does not match origin" \
+  && [ ! -s "$SIGN_GH_LOG" ] \
+  && ok "a local tag that differs from origin is refused before GitHub is touched" \
+  || bad "a local tag that differs from origin is refused before GitHub is touched" "rc=$rc: $out"
+
+out=$(run_sign_preflight equal fail); rc=$?
+[ "$rc" -ne 0 ] && grep -q '^release view' "$SIGN_GH_LOG" \
+  && ok "a matching lightweight remote tag passes the comparison" \
+  || bad "a matching lightweight remote tag passes the comparison" "rc=$rc: $out"
+
+out=$(run_sign_preflight annotated fail); rc=$?
+[ "$rc" -ne 0 ] && grep -q '^release view' "$SIGN_GH_LOG" \
+  && ok "an annotated remote tag is compared by its peeled commit" \
+  || bad "an annotated remote tag is compared by its peeled commit" "rc=$rc: $out"
+
+out=$(run_sign_preflight fail fail); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "could not reach origin" \
+  && grep -q '^release view' "$SIGN_GH_LOG" \
+  && ok "an unreachable origin is an explicit warning, not a silent pass" \
+  || bad "an unreachable origin is an explicit warning, not a silent pass" "rc=$rc: $out"
+
+printf '# tag=v9.9.8 commit=%s\n' "$SIGN_SHA" > "$SIGN_MANIFEST"
+out=$(run_sign_preflight equal draft); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "is for v9.9.8, not $SIGN_TAG" \
+  && ok "the signer refuses a draft manifest naming another tag" \
+  || bad "the signer refuses a draft manifest naming another tag" "rc=$rc: $out"
+
+printf '# tag=%s commit=%s\n' "$SIGN_TAG" "dddddddddddddddddddddddddddddddddddddddd" > "$SIGN_MANIFEST"
+out=$(run_sign_preflight equal draft); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "not $SIGN_SHA" \
+  && ok "the signer refuses a draft manifest naming another commit" \
+  || bad "the signer refuses a draft manifest naming another commit" "rc=$rc: $out"
+
+{
+  printf '# tag=%s commit=%s\n' "$SIGN_TAG" "$SIGN_SHA"
+  for a in dots_darwin_arm64 dots_darwin_amd64 dots_linux_arm64 dots_linux_amd64; do
+    printf '%s  %s\n' "$SIGN_HASH" "$a"
+  done
+} > "$SIGN_MANIFEST"
+out=$(run_sign_preflight equal draft TowardInfinity); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "not github-actions\[bot\]" \
+  && ok "the signer refuses draft inputs replaced through a user token" \
+  || bad "the signer refuses draft inputs replaced through a user token" "rc=$rc: $out"
+
+out=$(run_sign_preflight equal draft 'github-actions[bot]' \
+      ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff); rc=$?
+[ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q "does not match checksums.txt" \
+  && ok "the signer refuses a draft binary whose server digest changed" \
+  || bad "the signer refuses a draft binary whose server digest changed" "rc=$rc: $out"
 
 # ── merge-toml-block.py: file mode ────────────────────────────
 group "merge-toml-block.py: does not widen the file it rewrites"
@@ -623,16 +801,37 @@ esac
 # is what should break the tie instead.
 ROLL_MINE="$FAKE_CODEX/sessions/2026/08/08/rollout-2026-08-08T11-00-00-mine.jsonl"
 ROLL_OTHER="$FAKE_CODEX/sessions/2026/08/08/rollout-2026-08-08T11-00-05-other.jsonl"
-printf '%s\n' '{"type":"session_meta","payload":{"cwd":"/tmp/mine"}}' > "$ROLL_MINE"
+EVIL_CWD="$WORK/model'; touch $WORK/model-pwned; #"
+printf '{"type":"session_meta","payload":{"cwd":"%s"}}\n' "$EVIL_CWD" > "$ROLL_MINE"
 printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-terra","effort":"medium"}}' >> "$ROLL_MINE"
 sleep 1   # ROLL_OTHER must land with a strictly newer mtime, by mtime alone
 printf '%s\n' '{"type":"session_meta","payload":{"cwd":"/tmp/other"}}' > "$ROLL_OTHER"
 printf '%s\n' '{"type":"turn_context","payload":{"model":"gpt-5.6-sol","effort":"high"}}' >> "$ROLL_OTHER"
 printf 'codex\t%s\tgpt-5.6-terra\n' "$$" > "$PANES/9"
-out=$(model_seg codex /tmp/mine)
+out=$(model_seg codex "$EVIL_CWD")
 case "$out" in
   *terra*) ok "a pane's own cwd wins over a fresher rollout from elsewhere" ;;
   *) bad "a pane's own cwd wins over a fresher rollout from elsewhere" "$out" ;;
+esac
+
+# tmux.conf no longer interpolates the path into #() shell source. model.sh
+# asks tmux for it as data instead; a quote and semicolon therefore remain a
+# directory name rather than becoming a command on every status refresh.
+TMUXBIN="$WORK/tmux-bin"; mkdir -p "$TMUXBIN"
+cat > "$TMUXBIN/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$TMUX_TEST_CWD"
+STUB
+chmod +x "$TMUXBIN/tmux"
+out=$(env PATH="$TMUXBIN:$PATH" TMUX_TEST_CWD="$EVIL_CWD" \
+      DOTS_PANE_DIR="$PANES" CODEX_HOME="$FAKE_CODEX" DOTS_STATE_DIR="$QSTATE" \
+      sh "$MODEL_SH" '%9' codex 2>/dev/null)
+case "$out" in
+  *terra*)
+    [ ! -e "$WORK/model-pwned" ] \
+      && ok "model cwd lookup treats shell punctuation as data" \
+      || bad "model cwd lookup treats shell punctuation as data" "the sentinel was created" ;;
+  *) bad "model cwd lookup treats shell punctuation as data" "$out" ;;
 esac
 
 # No cwd match (or no cwd passed at all — an older tmux.conf) falls back to
@@ -997,6 +1196,71 @@ grep -q 'link common/tmux/model.sh' "$REPO/install.sh" \
 grep -q 'link common/claude/statusline.sh' "$REPO/install.sh" \
   && ok "install.sh links statusline.sh" \
   || bad "install.sh links statusline.sh"
+
+# The project picker uses a positional parameter and a NUL-delimited pipeline;
+# the selected path never becomes part of sh -c's source. Exercise that exact
+# shell shape with a hostile directory name, then pin the config syntax so a
+# later refactor cannot leave the behavioural test while reintroducing `{}`.
+PICKBIN="$WORK/picker-bin"; mkdir -p "$PICKBIN"
+PICK_LOG="$WORK/picker.log"
+cat > "$PICKBIN/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$PICK_LOG"
+[ "${1:-}" = has-session ] && exit 1
+exit 0
+STUB
+chmod +x "$PICKBIN/tmux"
+EVIL_PICK="$WORK/project'; touch $WORK/picker-pwned; #"
+mkdir -p "$EVIL_PICK"
+env PATH="$PICKBIN:$PATH" PICK_LOG="$PICK_LOG" sh -c '
+  dir=$1
+  n=$(basename "$dir" | tr . _)
+  tmux has-session -t "$n" 2>/dev/null || tmux new-session -ds "$n" -c "$dir"
+  tmux switch-client -t "$n"
+' sh "$EVIL_PICK"
+if [ ! -e "$WORK/picker-pwned" ] && grep -Fq -- "$EVIL_PICK" "$PICK_LOG"; then
+  ok "the project picker treats shell punctuation as one path argument"
+else
+  bad "the project picker treats shell punctuation as one path argument" "$(cat "$PICK_LOG" 2>/dev/null)"
+fi
+
+MAC_TMUX="$REPO/macos/tmux/tmux.conf"
+if grep -Fq -- '-print0' "$MAC_TMUX" \
+   && grep -Fq -- 'fzf --read0 --print0' "$MAC_TMUX" \
+   && grep -Fq -- 'xargs -0 -r sh -c' "$MAC_TMUX" \
+   && grep -Fq -- 'dir=\$1' "$MAC_TMUX" \
+   && ! grep -Fq -- '-I{} sh -c' "$MAC_TMUX"; then
+  ok "the configured project picker passes a NUL-delimited positional argument"
+else
+  bad "the configured project picker passes a NUL-delimited positional argument"
+fi
+
+safe_jobs=true
+for c in macos linux; do
+  conf="$REPO/$c/tmux/tmux.conf"
+  grep -Fq '#(cd #{q:pane_current_path}' "$conf" || safe_jobs=false
+  grep -Fq 'tmux-model #{q:pane_id} #{q:pane_current_command}' "$conf" || safe_jobs=false
+  grep 'tmux-model' "$conf" | grep -Fq "'#{pane_" && safe_jobs=false
+  grep 'tmux-model' "$conf" | grep -q 'pane_current_path' && safe_jobs=false
+  grep -Fq "cd '#{pane_current_path}'" "$conf" && safe_jobs=false
+done
+$safe_jobs \
+  && ok "all four status jobs keep pane paths out of shell source" \
+  || bad "all four status jobs keep pane paths out of shell source"
+
+if [ "$(grep -c '^    permissions:$' "$REPO/.github/workflows/release.yml")" = 2 ] \
+   && grep -A2 '^  test:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: read' \
+   && grep -A4 '^  release:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: write' \
+   && ! grep -A2 '^permissions:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: write'; then
+  ok "only the release job receives contents: write"
+else
+  bad "only the release job receives contents: write"
+fi
+
+grep -Fq "printf '# tag=%s commit=%s\\n' \"\$VERSION\" \"\$GITHUB_SHA\"" \
+  "$REPO/.github/workflows/release.yml" \
+  && ok "CI puts the tag and commit in every release manifest" \
+  || bad "CI puts the tag and commit in every release manifest"
 
 # ── syntax ────────────────────────────────────────────────────
 group "syntax"

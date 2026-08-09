@@ -58,11 +58,11 @@ available, falling through tiers on any failure:
    (`${XDG_CACHE_HOME:-$HOME/.cache}/dots/`)
 2. **download a release binary** for this OS/arch from the repo's
    [GitHub Releases](https://github.com/TowardInfinity/dotfiles/releases),
-   verifying the offline Ed25519 signature over the tag-bound
-   `checksums.txt`, then verifying the asset's `sha256`. Signature verification
-   is mandatory by default (`DOTS_SIGNATURE_MODE=require`): a missing or bad
-   signature, wrong manifest tag, absent digest, or unavailable checksum tool
-   discards the download and runs the next tier. See
+   verifying the offline Ed25519 signature over `checksums.txt`, then the
+   asset's `sha256`. Signature verification is mandatory by default
+   (`DOTS_SIGNATURE_MODE=require`): a missing or bad
+   signature, absent digest, or unavailable checksum tool discards the download
+   and runs the next tier. See
    [release signing](docs/signing.md) for the trust boundary and recovery mode.
 3. **`go build` from source** into `bin/dots-bin`, if a Go toolchain is on
    the machine

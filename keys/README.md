@@ -6,8 +6,8 @@ It is embedded into the `dots` binary (see `embed.go`), so a machine with no
 checkout still carries the key it trusts.
 
 The **private** key is never here, never in CI, and never in a GitHub secret.
-It lives encrypted on one machine plus two removable copies; see
-`docs/signing.md`.
+It currently lives encrypted on one Mac and has no backup yet. `docs/signing.md`
+is the single source of truth for its custody and recovery status.
 
 ## Why this directory exists with only a README in it
 

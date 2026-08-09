@@ -16,9 +16,18 @@ who published it: anything able to replace the binary — a stolen token, a
 compromised Actions run, a bad workflow edit — can replace its checksum line in
 the same breath, and four machines would install it without a complaint.
 
-The detached Ed25519 signature closes that. The private key never touches
-GitHub. It is generated offline, stored encrypted, and used by hand. So a
-release the fleet will execute requires something GitHub does not have.
+The detached Ed25519 signature protects against someone who can alter release
+assets without also altering the checkout: a stolen token used against the
+release page, a tampered Actions artifact, or a corrupted/MITM'd download. The
+private key never touches GitHub; it is generated offline, stored encrypted,
+and used by hand.
+
+The checkout's `keys/release.pub` is still the root of trust. A compromised
+checkout can replace that key and the release it verifies, so this design does
+not defend against a compromised repository. `dots doctor` does make a changed
+checkout key visible: the running Go binary embeds its build-time key and
+compares it with the checkout's copy. A mismatch is reported as divergence, but
+it is advisory — it does not stop `dots update` or the resolver.
 
 `openssl` is the verifier because it is the only such tool present on every
 machine here — the low-memory boxes have no `gh`, no `cosign`, no `minisign`.
@@ -107,9 +116,10 @@ manager is that the media and the passphrase never sit together.
 
 `sign-release.sh` downloads **CI's own** `checksums.txt` rather than rebuilding
 locally — Go output is not guaranteed bit-identical across machines, and signing
-a local rebuild would sign bytes nobody tested. It then verifies its own
-signature against the committed public key before publishing, so signing with
-the wrong key fails here instead of failing simultaneously on four machines.
+a local rebuild would sign bytes nobody tested. It first checks that the
+working-tree key matches `keys/release.pub` at the tag, then verifies its own
+signature against that tagged key before publishing. Signing with the wrong key
+therefore fails here instead of failing simultaneously on four machines.
 
 A signed release has **six** assets: four binaries, `checksums.txt`, and
 `checksums.txt.sig`.
@@ -161,17 +171,20 @@ exact cost tier 1 exists to avoid.
 
 ## Recovery
 
-### Planned rotation
+### Planned rotation (single-key flag day)
 
-1. Generate the new key alongside the old one.
-2. Cut a compatibility release that trusts **both** keys, signed with the
-   **old** one — machines still verify it with the key they already have.
-3. Roll it out (`dots sync`), confirm `dots doctor` shows the new fingerprint
-   everywhere.
-4. Sign the next release with the new key and retire the old.
+The resolver accepts one public key, not a keyring. Rotate with the same
+ordering as key loss:
 
-Skipping step 2 means every machine rejects the release carrying its own
-replacement key.
+1. Generate the new key and commit its `keys/release.pub`.
+2. Tag a release containing that key and sign it with the new private key.
+3. On one machine, run **`dots update` first** and confirm `dots doctor` shows
+   the new fingerprint. The pull must happen before `install.sh` asks the
+   resolver for the release, so the resolver reads the new checkout key.
+4. Roll the same `dots update` ordering out to the remaining machines.
+
+Dry-run step 3 before the fleet. Running the resolver before the pull makes it
+verify the new release against the old key and refuse it.
 
 ### Key loss
 

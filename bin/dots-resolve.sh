@@ -70,11 +70,12 @@ CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/dots"
 # — it proves nothing about who published it. Anything able to replace the
 # binary can replace its checksum line in the same breath.
 #
-# The detached Ed25519 signature closes that: the private key never touches
-# GitHub (it lives encrypted on one machine), so compromising the repo or a
-# token yields a release the fleet will not execute. The public key is
-# committed here, which makes this checkout the root of trust rather than the
-# release page.
+# The detached Ed25519 signature protects against someone who can alter release
+# assets without also altering this checkout: a stolen release-page token, a
+# tampered Actions artifact, or a corrupted/MITM'd download. The public key is
+# committed here, so this checkout is the root of trust rather than the release
+# page. A compromised checkout can replace the key too and defeats this check
+# by construction.
 #
 # openssl is the verifier because it is the one tool present on every machine
 # here — the low-memory boxes have no gh, no cosign and no minisign. Verified

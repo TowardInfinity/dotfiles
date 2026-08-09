@@ -750,8 +750,8 @@ policy_key '.model' sonnet \
   "the default would go back to the dearer tier on every new session"
 policy_key '.effortLevel' high \
   "effort is the only reasoning lever left on Opus 5 and Sonnet 5"
-policy_key '.alwaysThinkingEnabled' false \
-  "forcing extended thinking on every turn is spend the model did not ask for"
+policy_key '.alwaysThinkingEnabled' null \
+  "must stay absent: fbec4b3 proved false is a kill switch that disables thinking before effortLevel applies"
 policy_key '.fallbackModel[0]' haiku \
   "without it an overloaded Sonnet escalates instead of falling back cheap"
 policy_key '.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' 250000 \

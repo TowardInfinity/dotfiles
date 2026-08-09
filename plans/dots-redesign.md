@@ -725,6 +725,11 @@ Implementation rules:
 - Track `current-version` and `previous-version` explicitly; do not infer order
   from lexical filename sorting (`v0.1.10` sorts before `v0.1.9`) or from
   platform-specific `stat` flags.
+- On every successful tier-1 hit, run best-effort pruning after the cached
+  binary passes both digest and signature-provenance checks and before returning
+  it. This path is entirely local and must not invoke `curl`; a warm cache
+  therefore reclaims old releases without waiting for another release or first
+  needing free space for a download.
 - Before a download, a best-effort cleanup may remove stale entries to make room
   but must preserve `current-version` and the actual target of
   `~/.local/bin/dots`. On the first migration, having only the current entry
@@ -737,12 +742,13 @@ Implementation rules:
 - Remove only the recognised binary and matching `.sha256`/`.sig-ok` files for
   discarded versions. Never touch unrelated cache files, source builds, the
   checked-in Bash fallback, or a binary targeted by the installed symlink.
-- Cleanup failure warns but does not turn a verified install into failure. A
-  dangling installed symlink is never an acceptable way to meet N=2.
+- Cleanup failure warns but does not turn a verified tier-1 hit or install into
+  failure. A dangling installed symlink is never an acceptable way to meet N=2.
 
-Regression tests populate a fake cache with several versions and cover first
-migration, same-version resolution, failed download, live-symlink protection,
-matched metadata removal, and preservation of unrelated files. After a normal
+Regression tests populate a fake cache with several versions and cover seven
+cases: a successful tier-1 hit prunes without network access, first migration,
+same-version resolution, failed download, live-symlink protection, matched
+metadata removal, and preservation of unrelated files. After a normal
 successful install the cache contains exactly the current and previous verified
 release families.
 

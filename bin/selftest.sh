@@ -447,6 +447,144 @@ else
   $VERBOSE && printf '  \033[90mskip\033[0m  release signatures (no openssl with ed25519)\n'
 fi
 
+# ── resolver cache retention ──────────────────────────────────
+group "dots-resolve: bounded release cache"
+
+PRUNE_ROOT="$WORK/prune-root"
+PRUNE_CACHE="$PRUNE_ROOT/dots"
+PRUNE_HOME="$WORK/prune-home"
+PRUNE_FIX="$WORK/prune-fixtures"
+PRUNE_KEY_ID="$(sha_of "$REPO/keys/release.pub")"
+
+reset_prune_cache() {
+  rm -rf "$PRUNE_ROOT" "$PRUNE_HOME" "$PRUNE_FIX"
+  mkdir -p "$PRUNE_CACHE" "$PRUNE_HOME/.local/bin" "$PRUNE_FIX"
+  : > "$WORK/prune-curl.log"
+}
+
+make_prune_family() { # make_prune_family <version>
+  _v="$1"
+  printf '#!/bin/sh\necho %s\n' "$_v" > "$PRUNE_CACHE/dots-$_v"
+  chmod +x "$PRUNE_CACHE/dots-$_v"
+  sha_of "$PRUNE_CACHE/dots-$_v" > "$PRUNE_CACHE/dots-$_v.sha256"
+  printf '%s\n' "$PRUNE_KEY_ID" > "$PRUNE_CACHE/dots-$_v.sig-ok"
+}
+
+set_prune_markers() { # set_prune_markers <current> [previous] [installed]
+  printf '%s\n' "$1" > "$PRUNE_CACHE/current-version"
+  [ -n "${2:-}" ] && printf '%s\n' "$2" > "$PRUNE_CACHE/previous-version"
+  ln -sf "$PRUNE_CACHE/dots-${3:-$1}" "$PRUNE_HOME/.local/bin/dots"
+}
+
+resolve_prune() { # resolve_prune <force-fetch 0|1> <signature-mode>
+  env HOME="$PRUNE_HOME" PATH="$WORK/bin:$PATH" \
+      XDG_CACHE_HOME="$PRUNE_ROOT" FIXTURES="$PRUNE_FIX" \
+      FIXTURE_VERSION="$FIXTURE_VERSION" CURL_LOG="$WORK/prune-curl.log" \
+      DOTS_RELEASE_BASE="https://example.invalid/releases/latest/download" \
+      DOTS_RELEASE_PUBKEY="$REPO/keys/release.pub" DOTS_SIGNATURE_MODE="$2" \
+      DOTS_FORCE_FETCH="$1" DOTS_NO_BUILD=1 \
+      sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/prune.err"
+}
+
+# Warm tier 1: no network, N=2, matching metadata removed, unrelated files kept.
+reset_prune_cache
+for v in v1.0.0 v1.1.0 v1.2.0; do make_prune_family "$v"; done
+set_prune_markers v1.2.0 v1.1.0
+printf 'keep me\n' > "$PRUNE_CACHE/unrelated.txt"
+FIXTURE_VERSION=v1.2.0
+out=$(resolve_prune 0 require)
+if [ "$out" = "$PRUNE_CACHE/dots-v1.2.0" ] &&
+   [ ! -e "$PRUNE_CACHE/dots-v1.0.0" ] &&
+   [ ! -e "$PRUNE_CACHE/dots-v1.0.0.sha256" ] &&
+   [ ! -e "$PRUNE_CACHE/dots-v1.0.0.sig-ok" ] &&
+   [ -e "$PRUNE_CACHE/dots-v1.1.0" ] && [ -e "$PRUNE_CACHE/unrelated.txt" ] &&
+   [ ! -s "$WORK/prune-curl.log" ]; then
+  ok "a verified tier-1 hit prunes to current+previous without curl"
+  ok "pruning removes the discarded family's matching metadata"
+  ok "pruning leaves unrelated cache files alone"
+else
+  bad "a verified tier-1 hit prunes to current+previous without curl" \
+      "out=$out; cache=$(find "$PRUNE_CACHE" -maxdepth 1 -type f -print | sort | tr '\n' ' ')"
+fi
+
+# A live installed symlink is protected even when markers disagree. This may
+# temporarily leave three versions; dangling the command to satisfy N=2 is not
+# an acceptable cleanup strategy.
+reset_prune_cache
+for v in v1.0.0 v1.1.0 v1.2.0 v1.3.0; do make_prune_family "$v"; done
+set_prune_markers v1.3.0 v1.2.0 v1.1.0
+FIXTURE_VERSION=v1.3.0
+resolve_prune 0 require >/dev/null
+[ -x "$PRUNE_CACHE/dots-v1.1.0" ] && [ ! -e "$PRUNE_CACHE/dots-v1.0.0" ] \
+  && ok "pruning protects the binary targeted by the installed symlink" \
+  || bad "pruning protects the binary targeted by the installed symlink"
+
+# Re-resolving the current release must preserve its predecessor.
+reset_prune_cache
+make_prune_family v1.1.0; make_prune_family v1.2.0
+set_prune_markers v1.2.0 v1.1.0
+cp "$PRUNE_CACHE/dots-v1.2.0" "$PRUNE_FIX/$ASSET"
+FIXTURES="$PRUNE_FIX"; FIXTURE_VERSION=v1.2.0
+write_manifest "$(sha_of "$PRUNE_FIX/$ASSET")" "$ASSET"
+resolve_prune 1 require >/dev/null
+[ "$(cat "$PRUNE_CACHE/current-version")" = v1.2.0 ] &&
+[ "$(cat "$PRUNE_CACHE/previous-version")" = v1.1.0 ] &&
+[ -x "$PRUNE_CACHE/dots-v1.1.0" ] \
+  && ok "re-resolving the same version preserves its predecessor" \
+  || bad "re-resolving the same version preserves its predecessor"
+
+# First migration has no guessed predecessor. A successful new download moves
+# the known old current into previous only after verification succeeds.
+reset_prune_cache
+make_prune_family v1.0.0; make_prune_family v1.1.0
+set_prune_markers v1.1.0
+printf '#!/bin/sh\necho v1.2.0\n' > "$PRUNE_FIX/$ASSET"; chmod +x "$PRUNE_FIX/$ASSET"
+FIXTURES="$PRUNE_FIX"; FIXTURE_VERSION=v1.2.0
+write_manifest "$(sha_of "$PRUNE_FIX/$ASSET")" "$ASSET"
+out=$(resolve_prune 1 warn)
+[ "$out" = "$PRUNE_CACHE/dots-v1.2.0" ] &&
+[ "$(cat "$PRUNE_CACHE/current-version")" = v1.2.0 ] &&
+[ "$(cat "$PRUNE_CACHE/previous-version")" = v1.1.0 ] &&
+[ ! -e "$PRUNE_CACHE/dots-v1.0.0" ] \
+  && ok "first migration records a predecessor only after a verified download" \
+  || bad "first migration records a predecessor only after a verified download" \
+      "out=$out; current=$(cat "$PRUNE_CACHE/current-version" 2>/dev/null); previous=$(cat "$PRUNE_CACHE/previous-version" 2>/dev/null)"
+
+# A corrupt current entry is not a rollback candidate. Keep the older verified
+# predecessor rather than giving the newest-looking filename special status.
+reset_prune_cache
+make_prune_family v1.0.0; make_prune_family v1.1.0
+set_prune_markers v1.1.0 v1.0.0 v1.0.0
+printf 'tampered\n' >> "$PRUNE_CACHE/dots-v1.1.0"
+printf '#!/bin/sh\necho v1.2.0\n' > "$PRUNE_FIX/$ASSET"; chmod +x "$PRUNE_FIX/$ASSET"
+FIXTURES="$PRUNE_FIX"; FIXTURE_VERSION=v1.2.0
+write_manifest "$(sha_of "$PRUNE_FIX/$ASSET")" "$ASSET"
+out=$(resolve_prune 1 warn)
+[ "$out" = "$PRUNE_CACHE/dots-v1.2.0" ] &&
+[ "$(cat "$PRUNE_CACHE/current-version")" = v1.2.0 ] &&
+[ "$(cat "$PRUNE_CACHE/previous-version")" = v1.0.0 ] \
+  && ok "a corrupt former current is never promoted to rollback" \
+  || bad "a corrupt former current is never promoted to rollback" "out=$out"
+
+# A failed replacement may reclaim stale entries, but it cannot advance either
+# marker or remove the current/previous rollback pair.
+reset_prune_cache
+for v in v0.9.0 v1.0.0 v1.1.0; do make_prune_family "$v"; done
+set_prune_markers v1.1.0 v1.0.0
+printf '#!/bin/sh\necho unavailable\n' > "$PRUNE_FIX/$ASSET"
+FIXTURES="$PRUNE_FIX"; FIXTURE_VERSION=v1.2.0
+out=$(resolve_prune 1 require)
+[ "$out" = "$PRUNE_CACHE/dots-v1.1.0" ] &&
+[ "$(cat "$PRUNE_CACHE/current-version")" = v1.1.0 ] &&
+[ "$(cat "$PRUNE_CACHE/previous-version")" = v1.0.0 ] &&
+[ -x "$PRUNE_CACHE/dots-v1.0.0" ] && [ ! -e "$PRUNE_CACHE/dots-v0.9.0" ] \
+  && ok "a failed download preserves current and predecessor" \
+  || bad "a failed download preserves current and predecessor" "out=$out"
+
+# Restore the main fixture variables for the later groups.
+FIXTURES="$WORK/fx"
+FIXTURE_VERSION="v9.9.9"
+
 # ── sign-release.sh: refuses before it publishes ──────────────
 # Everything this script guards against is unrecoverable once it has run:
 # publishing is not undoable, and a release signed with the wrong key bricks

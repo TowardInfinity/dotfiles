@@ -203,6 +203,99 @@ cached_digest_ok() {
   [ "$want" = "$got" ]
 }
 
+# ── Bounded release cache ─────────────────────────────────────
+# Keep the current verified release and one verified predecessor. Version
+# strings are never sorted: v0.1.10 sorts before v0.1.9, and filesystem mtimes
+# answer a different question. The two marker files are the ordering.
+atomic_marker() { # atomic_marker <path> <value>
+  _marker_tmp="$1.tmp.$$"
+  if printf '%s\n' "$2" > "$_marker_tmp" 2>/dev/null &&
+     mv -f "$_marker_tmp" "$1" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$_marker_tmp" 2>/dev/null || true
+  return 1
+}
+
+installed_cache_version() {
+  _installed="$HOME/.local/bin/dots"
+  [ -L "$_installed" ] || return 1
+  _target=$(readlink "$_installed" 2>/dev/null) || return 1
+  case "$_target" in
+    /*) : ;;
+    *) _target=$(dirname "$_installed")/$_target ;;
+  esac
+  _name=$(basename "$_target")
+  case "$_name" in
+    dots-v*) printf '%s\n' "${_name#dots-}" ;;
+    *) return 1 ;;
+  esac
+}
+
+record_current_version() { # record_current_version <new-version>
+  _new="$1"
+  _old=""
+  [ -f "$CACHE_DIR/current-version" ] &&
+    _old=$(cat "$CACHE_DIR/current-version" 2>/dev/null) || true
+
+  # Resolving the same release again must not evict its own rollback target.
+  if [ -n "$_old" ] && [ "$_old" != "$_new" ]; then
+    _old_bin="$CACHE_DIR/dots-$_old"
+    _old_digest="$CACHE_DIR/dots-$_old.sha256"
+    if [ -x "$_old_bin" ] && cached_digest_ok "$_old_bin" "$_old_digest" &&
+       cache_provenance_ok "$_old"; then
+      atomic_marker "$CACHE_DIR/previous-version" "$_old" || {
+        log "dots-resolve: could not record the previous cached release"
+        return 1
+      }
+    else
+      # Never promote a corrupt or no-longer-admitted cache entry into the
+      # rollback slot. An older verified predecessor is more useful than a
+      # newer file that the resolver itself would refuse to execute.
+      log "dots-resolve: previous current $_old is not a verified rollback; keeping the existing predecessor"
+    fi
+  fi
+  atomic_marker "$CACHE_DIR/current-version" "$_new" || {
+    log "dots-resolve: warning: could not update current-version"
+    return 1
+  }
+}
+
+prune_release_cache() {
+  _keep_current=""; _keep_previous=""; _keep_installed=""
+  [ -f "$CACHE_DIR/current-version" ] &&
+    _keep_current=$(cat "$CACHE_DIR/current-version" 2>/dev/null) || true
+  [ -f "$CACHE_DIR/previous-version" ] &&
+    _keep_previous=$(cat "$CACHE_DIR/previous-version" 2>/dev/null) || true
+  _keep_installed=$(installed_cache_version 2>/dev/null) || true
+
+  # A stale predecessor marker is not a rollback. Remove the marker rather
+  # than pretending a missing binary satisfies N=2.
+  if [ -n "$_keep_previous" ] && [ ! -f "$CACHE_DIR/dots-$_keep_previous" ]; then
+    rm -f "$CACHE_DIR/previous-version" 2>/dev/null ||
+      log "dots-resolve: warning: could not remove a stale previous-version marker"
+    _keep_previous=""
+  fi
+
+  for _candidate in "$CACHE_DIR"/dots-v*; do
+    [ -e "$_candidate" ] || continue
+    case "$_candidate" in *.sha256|*.sig-ok) continue ;; esac
+    [ -f "$_candidate" ] || continue
+    _candidate_version=${_candidate##*/dots-}
+    printf '%s\n' "$_candidate_version" |
+      awk '/^v[0-9]+\.[0-9]+\.[0-9]+$/{ok=1} END{exit !ok}' || continue
+    case "$_candidate_version" in
+      "$_keep_current"|"$_keep_previous"|"$_keep_installed") continue ;;
+    esac
+    if ! rm -f "$_candidate" \
+         "$CACHE_DIR/dots-$_candidate_version.sha256" \
+         "$CACHE_DIR/dots-$_candidate_version.sig-ok" 2>/dev/null; then
+      log "dots-resolve: warning: could not prune cached $_candidate_version"
+    fi
+  done
+  return 0
+}
+
 # ── Tier 1: cached release binary ─────────────────────────────
 # `try_download` (tier 2) records the version it verified in
 # $CACHE_DIR/current-version and the digest it verified in dots-<v>.sha256.
@@ -241,6 +334,10 @@ try_cached() {
     return 1
   fi
 
+  # A warm cache is exactly where old binaries otherwise live forever. This
+  # is local-only and best effort: no curl, no release lookup, and cleanup can
+  # never turn a verified tier-1 hit into failure.
+  prune_release_cache
   printf '%s\n' "$bin"
 }
 
@@ -296,6 +393,11 @@ try_download() {
 
   mkdir -p "$CACHE_DIR" 2>/dev/null || { log "dots-resolve: cannot create cache dir $CACHE_DIR — skipping"; return 1; }
 
+  # Reclaim dead releases before asking a constrained box to make room for a
+  # new download. The current marker and installed symlink are always kept;
+  # on first migration there is deliberately no guessed predecessor.
+  prune_release_cache
+
   # Already have this exact version cached? Re-check its digest rather than
   # trusting that an executable of the right name is the file we verified —
   # the same check try_cached does, for the same reason (a truncated or
@@ -318,7 +420,8 @@ try_download() {
   if [ -x "$dest" ]; then
     if cached_digest_ok "$dest" "$CACHE_DIR/dots-$version.sha256"; then
       if cache_provenance_ok "$version"; then
-        printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
+        record_current_version "$version" || return 1
+        prune_release_cache
         printf '%s\n' "$dest"
         return 0
       fi
@@ -419,13 +522,23 @@ try_download() {
   mv -f "$tmp" "$dest" 2>/dev/null || { log "dots-resolve: could not install to $dest"; rm -f "$tmp"; return 1; }
   # Record the digest of what actually landed on disk, so tier 1 can tell a
   # corrupted cache from a good one on the next run.
-  sha256_of "$dest" > "$CACHE_DIR/dots-$version.sha256" 2>/dev/null || true
+  landed_digest=$(sha256_of "$dest") || {
+    log "dots-resolve: could not record the digest for cached $version"
+    return 1
+  }
+  atomic_marker "$CACHE_DIR/dots-$version.sha256" "$landed_digest" || {
+    log "dots-resolve: could not record the digest for cached $version"
+    return 1
+  }
   # Record HOW it was verified, not just that it was. dots-<v>.sha256 is
   # computed from the file that landed here, so it proves the cache has not
   # rotted — it says nothing about provenance, and a binary admitted on
   # checksum alone during the warn window is indistinguishable from a signed
   # one once cached. This marker is what lets require mode tell them apart.
-  rm -f "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
+  if ! rm -f "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null; then
+    log "dots-resolve: could not clear stale provenance for cached $version"
+    return 1
+  fi
   if [ "${sig_verified:-0}" = "1" ]; then
     # Record WHICH key verified it, not merely that something did. Re-checking
     # the signature on every cache hit would cost a network round-trip per
@@ -433,9 +546,20 @@ try_download() {
     # a marker that does not name a key would keep trusting binaries admitted
     # under a key that has since been rotated away, which is the one moment
     # that trust most needs withdrawing.
-    key_id_of "$PUBKEY" > "$CACHE_DIR/dots-$version.sig-ok" 2>/dev/null || true
+    admitted_key=$(key_id_of "$PUBKEY") || {
+      log "dots-resolve: could not identify the key that admitted $version"
+      return 1
+    }
+    atomic_marker "$CACHE_DIR/dots-$version.sig-ok" "$admitted_key" || {
+      log "dots-resolve: could not record signed provenance for cached $version"
+      return 1
+    }
   fi
-  printf '%s\n' "$version" > "$CACHE_DIR/current-version" 2>/dev/null || true
+  # Only advance cache ordering after the binary and digest have landed, and
+  # (for a signed release) the current key's provenance marker has landed. A
+  # failed download therefore leaves both rollback pointers unchanged.
+  record_current_version "$version" || return 1
+  prune_release_cache
   printf '%s\n' "$dest"
 }
 

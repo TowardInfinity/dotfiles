@@ -492,7 +492,13 @@ case "${1:-} ${2:-}" in
     [ -n "$dest" ] || exit 2
     cp "$SIGN_MANIFEST" "$dest/checksums.txt"
     ;;
-  api*) printf '%s\n' "${GH_UPLOADER:-github-actions[bot]}" ;;
+  api*)
+    case " $* " in
+      *" -H Accept: application/vnd.github+json "*)
+        printf '%s\n' "${GH_UPLOADER:-github-actions[bot]}" ;;
+      *) exit 2 ;;
+    esac
+    ;;
   *) exit 2 ;;
 esac
 STUB

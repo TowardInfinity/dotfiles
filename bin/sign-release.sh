@@ -152,7 +152,11 @@ for a in checksums.txt dots_darwin_arm64 dots_darwin_amd64 dots_linux_arm64 dots
   [ -n "$meta" ] || die "the draft is missing asset $a"
   api_url=$(printf '%s\n' "$meta" | cut -f2)
   release_digest=$(printf '%s\n' "$meta" | cut -f3)
-  uploader=$(gh api "$api_url" --jq .uploader.login 2>/dev/null) \
+  # Binary release assets default to their raw bytes under content negotiation;
+  # checksums.txt happens to look like text/JSON-capable metadata, which hid
+  # this until the first real binary. Force the REST metadata representation.
+  uploader=$(gh api -H 'Accept: application/vnd.github+json' "$api_url" \
+    --jq .uploader.login 2>/dev/null) \
     || die "could not verify who uploaded $a"
   [ "$uploader" = "github-actions[bot]" ] \
     || die "$a was uploaded by $uploader, not github-actions[bot] — refusing to sign mutable draft assets"

@@ -652,6 +652,34 @@ not the safety gate. A cached older binary keeps its old command meanings until
 that machine is explicitly reinstalled and relinked. Each transition completes
 only when the Mac, a1, v1, and v2 pass the same version-and-provenance probe.
 
+### Transition release procedure
+
+Use this sequence for both the compatibility and semantic-flip releases:
+
+1. Push every commit intended for the release and confirm the macOS/Linux CI
+   gates are green.
+2. Create and push the version tag. The no-advance window for `main` begins at
+   tag creation and lasts through the fleet probe; signing is inside this
+   window, not before it.
+3. Wait for tag CI to test, cross-compile, checksum, and create a **draft**
+   release. A draft is excluded from `/releases/latest/download/` and cannot be
+   rolled out through the resolver.
+4. From an interactive TTY on the Mac, with the offline key available, run
+   `bin/sign-release.sh <tag>`. It downloads CI's manifest, signs and verifies
+   it, uploads `checksums.txt.sig`, then changes the draft to published and
+   Latest. This step cannot be delegated to a non-interactive agent or folded
+   into the automated rollout.
+5. Confirm the release is no longer a draft, is Latest, and contains the four
+   binaries, `checksums.txt`, and `checksums.txt.sig`. Do not start rollout
+   merely because tag CI succeeded.
+6. Canary the published release on the Mac, then roll it out to a1 and v1/v2.
+7. Run the fleet convergence probe below on all four machines.
+8. End the no-advance window only after every probe passes.
+
+If step 4 or 5 is skipped, every resolver correctly selects the previous Latest
+release. The later version mismatch is then a publication failure, not a
+rollout failure; diagnose the release state before retrying machines.
+
 ### Compatibility release
 
 - Complete the mutation operation engine: typed actions, plans, steps, results,
@@ -664,8 +692,8 @@ only when the Mac, a1, v1, and v2 pass the same version-and-provenance probe.
 - Keep old `update` and `sync` behavior temporarily, but print exact migration
   messages before they act.
 - Update docs and the shell fallback in the same release.
-- Publish, roll out, and run the fleet convergence probe below. Do not begin the
-  semantic flip until all four machines pass.
+- Complete the transition release procedure above. Do not begin the semantic
+  flip until all four machines pass.
 
 ### Semantic-flip release
 
@@ -683,7 +711,7 @@ dots sync --remotes-only       → dots rollout
 - Bare old `dots sync` cannot be safely aliased because its old outward scope
   is exactly what is changing. The new safer behavior wins, with a prominent
   release note.
-- Publish, canary, roll out, and run the identical convergence probe again.
+- Complete the identical transition release procedure again.
 
 ### Shell fallback contract
 
@@ -1080,8 +1108,8 @@ the new shell. This prevents implementing them twice.
    fallthrough.
 7. In an isolated **S** commit, implement and regression-test the resolver's
    N=2 cache-retention contract before producing the compatibility release.
-8. Publish a signed compatibility release, canary it, roll it to all four
-   machines, and require the fleet convergence probe to pass.
+8. Complete the transition release procedure for the signed compatibility tag
+   and require the fleet convergence probe to pass.
 
 Exit gate: CLI and the existing TUI produce the same Plans and Results for every
 shared mutation; all four machines run the signed compatibility binary admitted
@@ -1099,8 +1127,9 @@ only with a prominent outbound-scope warning.
    `update` as a deprecated inbound alias.
 3. Make fallback bare `sync` call its inbound pull/install recovery path and
    reject every old or unsupported mutation flag explicitly.
-4. Publish a second signed release, canary it, roll it out, and require the same
-   convergence probe to pass before any UI-framework work begins.
+4. Complete the transition release procedure for the second signed tag and
+   require the same convergence probe to pass before any UI-framework work
+   begins.
 
 Exit gate: no binary or fallback reachable on the fleet gives bare `sync`
 outbound behavior.

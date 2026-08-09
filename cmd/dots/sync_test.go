@@ -62,6 +62,7 @@ func TestSSHHostsSkipsWildcards(t *testing.T) {
 
 func TestSyncRefusesDetachedHEADBeforeStagingOrPushing(t *testing.T) {
 	repo := newTestRepo(t)
+	makeDiscoverableCheckout(t, repo)
 	remote := filepath.Join(filepath.Dir(repo), "remote.git")
 
 	git := func(args ...string) string {
@@ -93,6 +94,7 @@ func TestSyncRefusesDetachedHEADBeforeStagingOrPushing(t *testing.T) {
 
 func TestSyncDecliningLocalCommitStopsWorkflow(t *testing.T) {
 	repo := newTestRepo(t)
+	makeDiscoverableCheckout(t, repo)
 	if err := os.WriteFile(filepath.Join(repo, "declined.txt"), []byte("keep local\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -135,5 +137,34 @@ func TestSyncDecliningLocalCommitStopsWorkflow(t *testing.T) {
 		t.Fatal(err)
 	} else if strings.TrimSpace(string(staged)) != "" {
 		t.Errorf("declined sync staged files: %q", staged)
+	}
+}
+
+// findRepo deliberately rejects arbitrary Git repositories: a dotfiles
+// checkout must also contain the installer and docs. Integration tests that
+// exercise the public CLI path need those markers or they can fall through to
+// a developer's real checkout and turn a test into a live sync.
+func makeDiscoverableCheckout(t *testing.T, repo string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(repo, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"install.sh":   "#!/bin/sh\n",
+		"docs/test.md": "# test\n",
+	} {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{
+		{"add", "install.sh", "docs/test.md"},
+		{"commit", "-m", "make test checkout discoverable"},
+		{"push", "-q", "origin", "main"},
+	} {
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
 	}
 }

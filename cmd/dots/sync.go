@@ -244,6 +244,9 @@ func commitsAhead(repo, branch string) int {
 // sshHosts is the Sync view of the shared parsed SSH configuration.
 func sshHosts() []string {
 	hosts := parseSSHConfig()
+	if len(hosts) == 0 {
+		return nil
+	}
 	out := make([]string, 0, len(hosts))
 	for _, host := range hosts {
 		out = append(out, host.alias)

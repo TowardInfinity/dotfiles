@@ -21,6 +21,7 @@
 #
 # Env overrides (mainly for testing/CI, none required for normal use):
 #   DOTS_FORCE_BUILD=1   skip tiers 1-2, go straight to tier 3
+#   DOTS_NO_BUILD=1      skip tier 3 (hermetic tests; not a user-facing mode)
 #   DOTS_RELEASE_BASE    override the GitHub "latest" release base URL
 #   DOTS_RESOLVE_TIMEOUT curl --max-time in seconds (default 10)
 #
@@ -473,6 +474,12 @@ enough_memory_to_build() {
 }
 
 try_build() {
+  # The resolver's hermetic refusal tests set this so a failed download reaches
+  # the checked-in fallback immediately. It existed at every call site but was
+  # never honored, making each Linux negative case compile the full Go TUI and
+  # stretching the release gate from seconds to minutes.
+  [ "${DOTS_NO_BUILD:-}" != "1" ] || return 1
+
   enough_memory_to_build || return 1
 
   go_bin=""

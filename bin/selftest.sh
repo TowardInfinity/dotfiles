@@ -146,6 +146,15 @@ refused "asset missing from checksums.txt is refused" "not listed" "$(resolve)"
 write_manifest "0000000000000000000000000000000000000000000000000000000000000000" "$ASSET"
 refused "checksum mismatch is refused" "mismatch" "$(resolve)"
 
+# DOTS_NO_BUILD is the seam that keeps every refusal above hermetic. It was set
+# by this suite for months but ignored by the resolver, so Linux compiled the
+# whole Go TUI after every negative case while macOS's warm cache hid the cost.
+out=$(env PATH="$WORK/bin:$PATH" DOTS_FORCE_BUILD=1 DOTS_NO_BUILD=1 \
+      sh "$REPO/bin/dots-resolve.sh" 2>"$WORK/err")
+[ "$out" = "$REPO/bin/dots" ] && ! grep -q "building dots" "$WORK/err" \
+  && ok "DOTS_NO_BUILD goes straight to the shell fallback" \
+  || bad "DOTS_NO_BUILD goes straight to the shell fallback" "out=[$out] err=[$(cat "$WORK/err")]"
+
 # 5. A corrupted cache is discarded rather than reused forever.
 write_manifest "$GOOD_SHA" "$ASSET"
 got="$(resolve)"

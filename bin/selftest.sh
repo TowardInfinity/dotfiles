@@ -1500,7 +1500,7 @@ STUB
 chmod +x "$PTBIN/tmux"
 
 PT_MARKS="$WORK/pane-theme-marks"; mkdir -p "$PT_MARKS"
-printf '%%1\n%%2\n' > "$PT_PANES_FILE"     # %1 runs claude, %2 runs nothing
+printf '%%1 zsh\n%%2 zsh\n' > "$PT_PANES_FILE"     # %1 runs claude, %2 runs nothing
 printf 'claude\t%s\tlabel\n' "$$" > "$PT_MARKS/1"
 
 run_pt() {
@@ -1539,11 +1539,45 @@ grep -q 'select-pane -t %1 -P fg=#55b571' "$PT_LOG" \
   || ok "a marker naming a dead pid is not trusted"
 
 printf 'none' > "$PT_MARKS/1.theme"   # a cache entry from when %1 still existed
-printf '%%2\n' > "$PT_PANES_FILE"     # %1's session has since closed
+printf '%%2 zsh\n' > "$PT_PANES_FILE" # %1's session has since closed
 run_pt
 [ ! -e "$PT_MARKS/1.theme" ] \
   && ok "a closed pane's cached theme state is swept" \
   || bad "a closed pane's cached theme state is swept"
+
+# ── Codex gets the same treatment, with its own trust rule ──────
+#
+# model.sh already established the shape: a codex marker is only trusted
+# while tmux's own view of the pane still says "codex" (the zsh wrapper
+# cannot clean up after a killed terminal), and a bare `command codex` with
+# no wrapper at all still counts. Fresh pane set, fresh marks dir, so none
+# of this depends on cache state left over from the claude scenarios above.
+rm -rf "$PT_MARKS"; mkdir -p "$PT_MARKS"
+printf '%%1 codex\n%%2 zsh\n' > "$PT_PANES_FILE"
+printf 'codex\t%s\tlabel\n' "$$" > "$PT_MARKS/1"
+
+run_pt
+grep -Fq 'select-pane -t %1 -P fg=#55b571,bg=#151628' "$PT_LOG" \
+  && ok "a live codex pane is recoloured the same as a claude one" \
+  || bad "a live codex pane is recoloured the same as a claude one" "$(cat "$PT_LOG")"
+
+run_pt
+grep -q 'select-pane' "$PT_LOG" \
+  && bad "an unchanged codex pane is not recoloured again" "$(cat "$PT_LOG")" \
+  || ok "an unchanged codex pane is not recoloured again"
+
+printf '%%1 zsh\n%%2 zsh\n' > "$PT_PANES_FILE"   # codex exited without the wrapper's cleanup
+run_pt
+grep -Fq 'select-pane -t %1 -P fg=default,bg=default' "$PT_LOG" \
+  && ok "a codex marker is not trusted once the pane is no longer running codex" \
+  || bad "a codex marker is not trusted once the pane is no longer running codex" "$(cat "$PT_LOG")"
+
+rm -f "$PT_MARKS/1"                              # no wrapper: bare `command codex`, no marker at all
+printf '%%1 codex\n%%2 zsh\n' > "$PT_PANES_FILE"
+run_pt
+grep -Fq 'select-pane -t %1 -P fg=#55b571,bg=#151628' "$PT_LOG" \
+  && ok "a bare codex pane with no marker still gets themed" \
+  || bad "a bare codex pane with no marker still gets themed" "$(cat "$PT_LOG")"
 
 if [ "$(grep -c '^    permissions:$' "$REPO/.github/workflows/release.yml")" = 2 ] \
    && grep -A2 '^  test:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: read' \

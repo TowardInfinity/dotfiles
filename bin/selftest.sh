@@ -1467,6 +1467,84 @@ $safe_jobs \
   && ok "all four status jobs keep pane paths out of shell source" \
   || bad "all four status jobs keep pane paths out of shell source"
 
+# ── tmux pane theme (Claude Code) ────────────────────────────
+#
+# Recolours a pane while Claude Code runs in it, using the same marker file
+# model.sh already trusts. It walks every pane itself (a #() job only ever
+# sees the current one), so — like the picker test above — a fake tmux on
+# PATH stands in for a live server: it answers list-panes and logs every
+# select-pane call instead of touching a real terminal.
+group "tmux: pane theme (Claude Code)"
+
+PT_SH="$REPO/common/tmux/pane-theme.sh"
+for c in macos linux; do
+  grep -q 'tmux-pane-theme' "$REPO/$c/tmux/tmux.conf" \
+    && ok "$c tmux.conf calls tmux-pane-theme" \
+    || bad "$c tmux.conf calls tmux-pane-theme"
+done
+grep -q 'link common/tmux/pane-theme.sh' "$REPO/install.sh" \
+  && ok "install.sh puts tmux-pane-theme on PATH" \
+  || bad "install.sh puts tmux-pane-theme on PATH"
+
+PTBIN="$WORK/pane-theme-bin"; mkdir -p "$PTBIN"
+PT_LOG="$WORK/pane-theme.log"
+PT_PANES_FILE="$WORK/pane-theme-panes"
+cat > "$PTBIN/tmux" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$PT_LOG"
+if [ "$1 $2" = "list-panes -a" ]; then
+  cat "$PT_PANES_FILE" 2>/dev/null
+fi
+exit 0
+STUB
+chmod +x "$PTBIN/tmux"
+
+PT_MARKS="$WORK/pane-theme-marks"; mkdir -p "$PT_MARKS"
+printf '%%1\n%%2\n' > "$PT_PANES_FILE"     # %1 runs claude, %2 runs nothing
+printf 'claude\t%s\tlabel\n' "$$" > "$PT_MARKS/1"
+
+run_pt() {
+  : > "$PT_LOG"
+  env PATH="$PTBIN:$PATH" DOTS_PANE_DIR="$PT_MARKS" PT_LOG="$PT_LOG" \
+    PT_PANES_FILE="$PT_PANES_FILE" sh "$PT_SH"
+}
+
+run_pt
+if grep -Fq 'select-pane -t %1 -P fg=#55b571,bg=#151628' "$PT_LOG" \
+   && ! grep -q 'select-pane -t %2' "$PT_LOG"; then
+  ok "a live claude pane is recoloured and an idle pane is left alone"
+else
+  bad "a live claude pane is recoloured and an idle pane is left alone" "$(cat "$PT_LOG")"
+fi
+[ "$(cat "$PT_MARKS/1.theme" 2>/dev/null)" = "claude" ] \
+  && ok "the applied theme is cached per pane" \
+  || bad "the applied theme is cached per pane"
+
+run_pt
+grep -q 'select-pane' "$PT_LOG" \
+  && bad "an unchanged pane is not recoloured again" "$(cat "$PT_LOG")" \
+  || ok "an unchanged pane is not recoloured again"
+
+rm -f "$PT_MARKS/1"     # claude exited: statusline.sh would remove this itself
+run_pt
+grep -Fq 'select-pane -t %1 -P fg=default,bg=default' "$PT_LOG" \
+  && ok "a pane reverts once its claude marker is gone" \
+  || bad "a pane reverts once its claude marker is gone" "$(cat "$PT_LOG")"
+
+rm -f "$PT_MARKS/1.theme"   # force a fresh decision, not a cached "none"
+printf 'claude\t99999999\tlabel\n' > "$PT_MARKS/1"   # a pid that cannot exist
+run_pt
+grep -q 'select-pane -t %1 -P fg=#55b571' "$PT_LOG" \
+  && bad "a marker naming a dead pid is not trusted" "$(cat "$PT_LOG")" \
+  || ok "a marker naming a dead pid is not trusted"
+
+printf 'none' > "$PT_MARKS/1.theme"   # a cache entry from when %1 still existed
+printf '%%2\n' > "$PT_PANES_FILE"     # %1's session has since closed
+run_pt
+[ ! -e "$PT_MARKS/1.theme" ] \
+  && ok "a closed pane's cached theme state is swept" \
+  || bad "a closed pane's cached theme state is swept"
+
 if [ "$(grep -c '^    permissions:$' "$REPO/.github/workflows/release.yml")" = 2 ] \
    && grep -A2 '^  test:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: read' \
    && grep -A4 '^  release:$' "$REPO/.github/workflows/release.yml" | grep -q 'contents: write' \
@@ -1484,7 +1562,7 @@ grep -Fq "printf '# tag=%s commit=%s\\n' \"\$VERSION\" \"\$GITHUB_SHA\"" \
 # ── syntax ────────────────────────────────────────────────────
 group "syntax"
 for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
-         common/tmux/model.sh common/claude/statusline.sh \
+         common/tmux/model.sh common/tmux/pane-theme.sh common/claude/statusline.sh \
          common/claude/session-start.sh; do
   if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi
   $sh_bin -n "$REPO/$f" 2>/dev/null && ok "$f parses" || bad "$f parses"

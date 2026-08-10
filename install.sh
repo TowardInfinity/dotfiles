@@ -347,6 +347,9 @@ link "$OS/tmux/tmux.conf" "$HOME/.config/tmux/tmux.conf"
 # is whatever it was when the server started — not necessarily one that can find
 # the checkout.
 link common/tmux/model.sh "$HOME/.local/bin/tmux-model"
+# Recolours a pane while Claude Code is running in it. Same PATH reasoning as
+# tmux-model above, and it piggybacks the same status-interval tick.
+link common/tmux/pane-theme.sh "$HOME/.local/bin/tmux-pane-theme"
 
 # ── Shell ─────────────────────────────────────────────────────
 link "$OS/zsh/.zshrc" "$HOME/.zshrc"

@@ -124,8 +124,8 @@ func usage() {
   dots publish         validate, commit selected paths, and push; never rollout
   dots rollout         apply one published revision to selected machines
   dots install         compatibility alias for apply; --deps routes to deps
-  dots update          inbound compatibility command: pull, resolve, and apply
-  dots sync            LEGACY compatibility: pushes and updates the fleet
+  dots update          deprecated alias for inbound sync
+  dots sync            safely fetch, fast-forward, and apply this machine
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

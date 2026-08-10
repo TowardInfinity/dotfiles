@@ -15,10 +15,10 @@ import (
 
 func TestMutationActionMatrixIsRegistered(t *testing.T) {
 	want := map[ops.ActionID]bool{
-		actionApply: true, actionDeps: true, actionUpdateLegacy: true,
+		actionApply: true, actionDeps: true,
 		actionNvimRestore: true, actionTPMRepair: true, actionDoctorRepair: true,
 		actionService: true, actionPackage: true, actionRemoteDoctor: true,
-		actionSyncLegacy: true, actionSyncInbound: true, actionPublish: true, actionRollout: true,
+		actionSyncInbound: true, actionPublish: true, actionRollout: true,
 	}
 	for _, def := range operationRegistry.Definitions() {
 		delete(want, def.ID)
@@ -191,29 +191,26 @@ func TestInboundProviderRefusesBranchChangeAfterPlanning(t *testing.T) {
 	}
 }
 
-func TestLegacySyncRefusesBranchChangeBeforeStaging(t *testing.T) {
+func TestInboundSyncNeverStagesOrPushes(t *testing.T) {
 	repo := newTestRepo(t)
 	file := filepath.Join(repo, "local.txt")
 	if err := os.WriteFile(file, []byte("local\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := buildOperation(syncLegacyRequest{Repo: repo, PushOnly: true})
+	plan, err := buildOperation(syncInboundRequest{Repo: repo})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out, err := exec.Command("git", "-C", repo, "switch", "-c", "other").CombinedOutput(); err != nil {
-		t.Fatalf("switch branch: %v\n%s", err, out)
-	}
 	result := ops.NewRunner().Run(context.Background(), plan, ops.IO{})
-	if result.OK() || !strings.Contains(result.Error, "branch changed from main to other") {
-		t.Fatalf("branch-change result = %#v", result)
+	if result.OK() || !strings.Contains(result.Error, "dirty") {
+		t.Fatalf("dirty inbound result = %#v", result)
 	}
 	staged, err := exec.Command("git", "-C", repo, "diff", "--cached", "--name-only").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(string(staged)) != "" {
-		t.Fatalf("legacy refusal staged files: %q", staged)
+		t.Fatalf("inbound sync staged files: %q", staged)
 	}
 }
 
@@ -361,7 +358,7 @@ func TestStatusTreatsUnanswerableConfigCheckAsWarning(t *testing.T) {
 }
 
 func TestFallbackLifecycleVerbsRefuseExplicitly(t *testing.T) {
-	for _, verb := range []string{"sync", "publish", "rollout", "deps", "apply", "install"} {
+	for _, verb := range []string{"publish", "rollout", "deps", "apply", "install"} {
 		cmd := exec.Command("bash", filepath.Join("..", "..", "bin", "dots"), verb)
 		out, err := cmd.CombinedOutput()
 		if err == nil {
@@ -371,6 +368,21 @@ func TestFallbackLifecycleVerbsRefuseExplicitly(t *testing.T) {
 		text := string(out)
 		if !strings.Contains(text, "signed Go binary") || !strings.Contains(text, "dots update") {
 			t.Errorf("fallback %s gave an ambiguous refusal:\n%s", verb, text)
+		}
+	}
+}
+
+func TestFallbackSyncRefusesRetiredOutboundFlags(t *testing.T) {
+	for _, args := range [][]string{{"--push-only"}, {"-m", "message"}, {"--remotes-only"}, {"--yes"}} {
+		cmd := exec.Command("bash", append([]string{filepath.Join("..", "..", "bin", "dots"), "sync"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Errorf("fallback sync %v succeeded", args)
+			continue
+		}
+		text := string(out)
+		if !strings.Contains(text, "retired") || (!strings.Contains(text, "dots publish") && !strings.Contains(text, "dots rollout")) {
+			t.Errorf("fallback sync %v gave an ambiguous refusal:\n%s", args, text)
 		}
 	}
 }

@@ -10,11 +10,13 @@ summary: Pulling updates and rolling them out
 ## The short version
 
 ```sh
-dots update
+dots sync
 ```
 
-Pulls, relinks, and prints the commits you just picked up. Safe to run any
-time — correct symlinks are left alone and nothing is overwritten silently.
+Fetches, fast-forwards when the checkout can advance, applies the new
+configuration, and prints the commits you just picked up. A current checkout is
+only verified; correct symlinks are left alone and nothing is overwritten
+silently.
 
 Then, to make a running session notice:
 
@@ -26,56 +28,39 @@ tmux source-file ~/.config/tmux/tmux.conf
 Never `tmux kill-server` on a box with live sessions. `source-file` applies
 the config in place and leaves your sessions running.
 
-`dots update` is the inbound compatibility spelling during the transition. New
-work should use `dots publish` to push a reviewed selection and `dots rollout`
-to update named machines. Bare `dots sync` still performs both old outbound
-halves for one release and prints a warning; `dots operations` records the
-exact boundaries and the later inbound semantic flip.
+`dots sync` updates only this machine. `dots update` is a deprecated alias for
+it, kept for scripts and muscle memory. Publishing a reviewed change and
+rolling it out are separate, explicit operations; `dots operations` records
+their exact boundaries.
 
 ## Changing a config
 
 The live files are symlinks into the repo, so your edit is already live —
-there is nothing to copy. What remains is committing it:
+there is nothing to copy. Publish the paths you reviewed, rather than staging
+the whole working tree by default:
 
 ```sh
-cd "$(dots path)"
-git add -A && git commit -m "..."
-git push
+dots publish common/nvim/lua/options.lua -m "nvim: tune options"
 ```
 
-Then on any other machine, `dots update`.
+Then roll it out deliberately.
 
 ## Rolling a change out to every machine
 
-```sh
-dots sync
-```
-
-Commits and pushes whatever changed here, then runs `dots update` on each host
-from `~/.ssh/config`. During this compatibility release it renders both halves
-as one typed plan and asks once for the complete outbound scope. A failed push
-stops before SSH; a failed host is reported while the remaining hosts continue.
-
-| | |
-|---|---|
-| `dots sync -m "message"` | your own commit message |
-| `dots sync --push-only` | commit and push, touch no remotes |
-| `dots sync --remotes-only` | update the remotes, never write to the repo |
-| `dots sync -y` | do not ask — for scripts |
-
-With no terminal it declines rather than assuming yes, so an unattended run
-never pushes on its own. Failed hosts are not retried, and a failed local push
-stops the run before any remote is touched — otherwise the remotes would pull a
-change that is not there.
-
-This block documents the temporary compatibility behavior. The replacement is
-explicit and separable:
+`dots sync` no longer commits, pushes, or contacts other machines. It fetches,
+checks for local drift or divergence, fast-forwards safely, and applies this
+checkout. To change other machines, publish a reviewed selection and then
+choose the rollout targets:
 
 ```sh
 dots publish common/nvim/lua/options.lua -m "nvim: tune options"
 dots rollout a1                         # canary
 dots rollout v1 v2                      # remaining servers
 ```
+
+The former `dots sync -m` / `--push-only` flags now fail and direct you to
+`dots publish`; `--remotes-only` directs you to `dots rollout`. A bare `dots
+update` remains the same safe inbound operation for older habits and scripts.
 
 ### Being reminded
 

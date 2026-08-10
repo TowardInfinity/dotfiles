@@ -350,6 +350,40 @@ ${DIM}Config files are symlinks, so edits are already live. To pick up changes:$
 EOF
 }
 
+# ── Inbound sync ──────────────────────────────────────────────
+# The fallback deliberately has no publish or rollout implementation. It can
+# nevertheless recover a machine stranded on this Bash tier: update pulls the
+# checkout and install.sh re-resolves the signed Go binary. Keep sync as the
+# short spelling for that same safe recovery path.
+sync() {
+  case "${1:-}" in
+    "")
+      warn "'dots sync' is now inbound-only; using the update recovery path"
+      update
+      ;;
+    -m|--message|--push-only)
+      warn "'$1' was retired from dots sync; use 'dots publish' with an explicit selection"
+      return 2
+      ;;
+    --remotes-only)
+      warn "'--remotes-only' was retired from dots sync; use 'dots rollout --all' or name machines"
+      return 2
+      ;;
+    -y|--yes)
+      warn "'$1' was for the retired combined operation; use it with dots publish or dots rollout explicitly"
+      return 2
+      ;;
+    --check|--dry-run)
+      warn "'$1' needs the signed Go binary; recover it with 'dots sync' or 'dots update'"
+      return 1
+      ;;
+    *)
+      warn "unknown dots sync option: $1"
+      return 2
+      ;;
+  esac
+}
+
 # ── Doctor ────────────────────────────────────────────────────
 # Checks what the CONFIGS call, not what --deps happens to install. Those are
 # different lists, and conflating them is why a missing tool went unnoticed
@@ -447,8 +481,9 @@ case "${1:-}" in
   ""|browse)      browse ;;
   -h|--help|help) usage ;;
   search|-s)      shift; search "${1:-}" ;;
-  update|-u)      update ;;
-  sync|publish|rollout|deps|apply|install)
+  update|-u)      warn "'dots update' is deprecated; prefer 'dots sync'"; update ;;
+  sync)           shift; sync "$@" ;;
+  publish|rollout|deps|apply|install)
                   unsupported_lifecycle "$1" ;;
   doctor|-d)      doctor ;;
   edit|-e)        shift; edit "${1:-}" ;;

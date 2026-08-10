@@ -9,29 +9,32 @@ import (
 	"testing"
 )
 
-// Without a terminal, sync must decline rather than assume yes. An unattended
-// run pushing to origin on its own is not a thing anyone asked for.
-func TestSyncDeclinesWithoutTTY(t *testing.T) {
+// Retired outbound switches must fail before discovering a checkout or touching
+// Git. A safe default must not silently retain the old push behavior.
+func TestSyncRejectsRetiredOutboundFlagsWithoutSideEffects(t *testing.T) {
 	bin := buildDots(t)
-	cmd := exec.Command(bin, "sync", "--push-only")
-	cmd.Env = append(os.Environ(), "DOTS_TEST=1")
-	out, _ := cmd.CombinedOutput()
-	got := string(out)
-	// Either there is nothing to do, or it declined for want of a terminal.
-	// What must NOT appear is evidence of a push.
-	if strings.Contains(got, "To github.com") || strings.Contains(got, "-> main") {
-		t.Fatalf("sync pushed with no terminal and no -y:\n%s", got)
+	for _, args := range [][]string{{"--push-only"}, {"-m", "message"}, {"--remotes-only"}, {"--yes"}} {
+		cmd := exec.Command(bin, append([]string{"sync"}, args...)...)
+		cmd.Env = noRepoEnv()
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			t.Errorf("dots sync %v succeeded", args)
+			continue
+		}
+		got := string(out)
+		if !strings.Contains(got, "retired") || (!strings.Contains(got, "dots publish") && !strings.Contains(got, "dots rollout")) {
+			t.Errorf("dots sync %v gave an unhelpful migration error:\n%s", args, got)
+		}
 	}
-	t.Logf("output: %s", strings.TrimSpace(got))
 }
 
-func TestSyncRejectsContradictoryFlags(t *testing.T) {
+func TestSyncRejectsOldFlagCombinationWithExplicitMapping(t *testing.T) {
 	bin := buildDots(t)
 	out, err := exec.Command(bin, "sync", "--push-only", "--remotes-only").CombinedOutput()
 	if err == nil {
-		t.Error("expected non-zero for contradictory flags")
+		t.Error("expected non-zero for retired flags")
 	}
-	if !strings.Contains(string(out), "contradictory") {
+	if !strings.Contains(string(out), "dots publish") {
 		t.Errorf("unhelpful message: %s", out)
 	}
 }
@@ -121,7 +124,7 @@ func TestSyncRefusesDetachedHEADBeforeStagingOrPushing(t *testing.T) {
 	}
 
 	t.Setenv("DOTFILES_DIR", repo)
-	if code := runSyncCLI([]string{"--yes"}); code == 0 {
+	if code := runSyncCLI(nil); code == 0 {
 		t.Fatal("dots sync accepted a detached HEAD")
 	}
 	if staged := git("-C", repo, "diff", "--cached", "--name-only"); staged != "" {
@@ -132,7 +135,7 @@ func TestSyncRefusesDetachedHEADBeforeStagingOrPushing(t *testing.T) {
 	}
 }
 
-func TestSyncDecliningLocalCommitStopsWorkflow(t *testing.T) {
+func TestSyncRefusesDirtyWorktreeWithoutContactingRemotes(t *testing.T) {
 	repo := newTestRepo(t)
 	makeDiscoverableCheckout(t, repo)
 	if err := os.WriteFile(filepath.Join(repo, "declined.txt"), []byte("keep local\n"), 0o644); err != nil {
@@ -152,31 +155,16 @@ func TestSyncDecliningLocalCommitStopsWorkflow(t *testing.T) {
 	t.Setenv("DOTS_SSH_MARKER", marker)
 	t.Setenv("DOTFILES_DIR", repo)
 
-	// Force the no-terminal path even when a developer runs `go test` from an
-	// interactive shell. A declined local half must end the whole workflow;
-	// reaching syncRemotes would execute the fake ssh and create marker.
-	oldStdin := os.Stdin
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = w.Close()
-	os.Stdin = r
-	t.Cleanup(func() {
-		os.Stdin = oldStdin
-		_ = r.Close()
-	})
-
-	if code := runSyncCLI(nil); code != 0 {
-		t.Fatalf("declining local sync returned %d, want 0", code)
+	if code := runSyncCLI(nil); code == 0 {
+		t.Fatal("dirty sync succeeded")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("remote sync ran after local decline; marker stat = %v", err)
+		t.Fatalf("remote sync ran after dirty refusal; marker stat = %v", err)
 	}
 	if staged, err := exec.Command("git", "-C", repo, "diff", "--cached", "--name-only").Output(); err != nil {
 		t.Fatal(err)
 	} else if strings.TrimSpace(string(staged)) != "" {
-		t.Errorf("declined sync staged files: %q", staged)
+		t.Errorf("dirty sync staged files: %q", staged)
 	}
 }
 

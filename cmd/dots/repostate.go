@@ -1,10 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
 
 // repoState is what the checkout has that the other machines do not.
 //

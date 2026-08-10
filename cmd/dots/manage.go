@@ -387,12 +387,7 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 			m.dfMsg = "no checkout to update"
 			return m, nil
 		}
-		branch, ok := currentBranch(m.repo)
-		if !ok {
-			m.dfMsg = "detached HEAD — check out a branch before updating"
-			return m, nil
-		}
-		return m, requestAction(updateLegacyRequest{Repo: m.repo, Branch: branch})
+		return m, requestAction(syncInboundRequest{Repo: m.repo})
 	case "L":
 		if m.repo == "" {
 			m.dfMsg = "no checkout to relink"

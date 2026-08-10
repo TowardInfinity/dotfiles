@@ -7,101 +7,42 @@ import (
 	"strings"
 )
 
-// dots sync — push this machine's config changes, then update every other one.
-//
-// The workflow this replaces: edit a config, commit, push, then ssh into a1,
-// v1 and v2 in turn and run dots update on each. Four steps that must not be
-// forgotten, on a four-machine setup, which is exactly the kind of thing that
-// drifts.
-//
-// The compatibility action now renders both halves as one typed plan and asks
-// once for that full outbound scope. Phase -1B removes this action entirely;
-// new work uses separate publish and rollout plans and confirmations.
+// dots sync is deliberately inbound-only. Publishing local changes and applying
+// a published revision to machines are separate operations because combining
+// them made a harmless-looking command commit, push, and SSH into the fleet.
 
 func runSyncCLI(args []string) int {
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-m" || args[i] == "--message" {
-			i++ // the message may itself be "--check"; it is still data
-			continue
-		}
-		if args[i] == "--check" || args[i] == "--dry-run" {
-			return runInboundCheckCLI(args)
-		}
-	}
-	message := ""
-	assumeYes := false
-	pushOnly := false
-	remotesOnly := false
-
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-h", "--help":
-			fmt.Print(`dots sync — push local config changes, then update every machine
-
-  dots sync                 commit + push here, then update each reachable host
-  dots sync -m "message"    use your own commit message
-  dots sync --push-only     commit and push, touch no remotes
-  dots sync --remotes-only  update the remotes, never write to the repo
-  dots sync -y              do not ask (for scripts; it still prints what it did)
-  dots sync --check         preview the new inbound-only behavior (safe now)
-  dots sync --dry-run       fetch and render the inbound plan; change nothing
-
-Hosts come from ~/.ssh/config. Unreachable ones are skipped, not retried.
-`)
-			return 0
-		case "-m", "--message":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "dots sync: -m needs a message")
-				return 1
-			}
-			i++
-			message = args[i]
-		case "-y", "--yes":
-			assumeYes = true
-		case "--push-only":
-			pushOnly = true
-		case "--remotes-only":
-			remotesOnly = true
-		default:
-			fmt.Fprintf(os.Stderr, "dots sync: unknown option: %s\n", args[i])
-			return 1
-		}
-	}
-
-	if pushOnly && remotesOnly {
-		fmt.Fprintln(os.Stderr, "dots sync: --push-only and --remotes-only are contradictory")
-		return 1
-	}
-
-	repo, ok := needRepo("sync")
-	if !ok {
-		return 1
-	}
-
-	plan, err := buildOperation(syncLegacyRequest{
-		Repo: repo, Message: message, PushOnly: pushOnly, RemotesOnly: remotesOnly,
-	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dots sync: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(os.Stderr, "WARNING: `dots sync` still has legacy OUTBOUND scope in this compatibility release.")
-	fmt.Fprintln(os.Stderr, "         Use `dots publish` and `dots rollout` separately; bare sync becomes inbound after fleet convergence.")
-	return runPlanCLI(plan, cliPlanOptions{AssumeYes: assumeYes, AskConfirm: true, CancelIsSuccess: true})
+	return runInboundSyncCLI(args)
 }
 
-func runInboundCheckCLI(args []string) int {
+func runInboundSyncCLI(args []string) int {
+	check := false
 	dryRun := false
 	for _, arg := range args {
 		switch arg {
+		case "-h", "--help":
+			fmt.Print(`dots sync — safely update this machine from origin
+
+  dots sync             fetch origin, refuse local drift, fast-forward, then apply
+  dots sync --check     fetch and report whether this checkout can advance
+  dots sync --dry-run   fetch and render the remaining plan without changing files
+
+Publishing is explicit: dots publish <paths> -m "message"
+Fleet rollout is explicit: dots rollout <hosts>|--all
+`)
+			return 0
 		case "--check":
+			check = true
 		case "--dry-run":
 			dryRun = true
 		case "-m", "--message", "--push-only":
-			fmt.Fprintln(os.Stderr, "dots sync: outbound options belong to `dots publish`")
+			fmt.Fprintln(os.Stderr, "dots sync: this outbound option was retired; use `dots publish` to validate, commit, and push selected paths")
 			return 2
-		case "--remotes-only", "-y", "--yes":
-			fmt.Fprintln(os.Stderr, "dots sync: fleet options belong to `dots rollout`")
+		case "--remotes-only":
+			fmt.Fprintln(os.Stderr, "dots sync: --remotes-only was retired; use `dots rollout --all` or name the machines")
+			return 2
+		case "-y", "--yes":
+			fmt.Fprintln(os.Stderr, "dots sync: -y was for the retired combined operation; use -y with `dots publish` or `dots rollout` explicitly")
 			return 2
 		default:
 			fmt.Fprintf(os.Stderr, "dots sync: unknown option: %s\n", arg)
@@ -112,12 +53,16 @@ func runInboundCheckCLI(args []string) int {
 	if !ok {
 		return 1
 	}
-	plan, err := buildOperation(syncInboundRequest{Repo: repo, Check: true})
+	// --check and --dry-run make the fetch/inspection phase explicit. Bare
+	// sync carries that same inspection forward into a fast-forward and apply.
+	plan, err := buildOperation(syncInboundRequest{Repo: repo, Check: check || dryRun})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "dots sync: %v\n", err)
 		return 1
 	}
-	fmt.Fprintln(os.Stderr, "preview: inbound-only sync; fetches and reports, but does not change the checkout or configs")
+	if check || dryRun {
+		fmt.Fprintln(os.Stderr, "preview: inbound-only sync; fetches and reports, but does not change the checkout or configs")
+	}
 	if code := runPlanCLI(plan, cliPlanOptions{}); code != 0 || !dryRun {
 		return code
 	}
@@ -173,11 +118,4 @@ func sshHosts() []string {
 // side, which is what we want — the remote home is not necessarily ours.
 func remoteDots(args ...string) string {
 	return `PATH="$HOME/.local/bin:$PATH" dots ` + strings.Join(args, " ")
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, one)
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }

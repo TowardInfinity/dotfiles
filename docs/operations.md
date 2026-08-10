@@ -21,7 +21,8 @@ only mutation boundary, and it admits one operation at a time.
 | `dots status` | nothing | repair, install, commit, push |
 | `dots apply` | local links, backups, managed policy | network, package managers, plugin installers |
 | `dots deps` | local packages and third-party tools | commit, push, SSH rollout |
-| `dots update` | current checkout, configs, installed `dots` | commit, push, SSH rollout |
+| `dots sync` | current checkout, configs, installed `dots` | commit, push, SSH rollout |
+| `dots update` | same as `dots sync` (deprecated alias) | commit, push, SSH rollout |
 | `dots publish` | selected paths, one local commit, `origin/<branch>` | stage an unselected path, SSH, remote Apply |
 | `dots rollout` | explicitly selected SSH hosts at one pinned released revision | stage, commit, or push |
 | `dots sync --check` | the remote-tracking ref only | worktree changes, Apply, add, commit, push, SSH |
@@ -32,20 +33,25 @@ by saying the fleet was not changed. Rollout accepts only a revision carrying a
 dirty remote checkout, and verifies the revision, applied configuration,
 release-binary version, installed symlink, and signing-key provenance marker.
 
-## Compatibility window
+## Explicit outbound work
 
-Bare `dots sync` still has its old **outbound** meaning for one compatibility
-release: it stages every local change, commits, pushes, and then invokes the
-inbound recovery command on configured hosts. It prints an explicit warning and
-renders that entire scope before asking. Use `dots publish` and `dots rollout`
-instead now.
+`dots sync` is inbound-only: it fetches, refuses local drift or divergence,
+fast-forwards when safe, then applies this checkout. It never stages, commits,
+pushes, or opens SSH connections.
 
-After every machine is proven to run the compatibility binary admitted by the
-expected signing key, bare `dots sync` flips to the inbound-only planner. Old
-`-m`/`--push-only` flags will point to `dots publish`; `--remotes-only` will
-point to `dots rollout`. The checked-in Bash fallback cannot publish, roll out,
-install dependencies, or Apply: it refuses those verbs and keeps only `dots
-update`, because that is the recovery path back to the signed Go binary.
+Publishing and fleet changes are separate because they have separate scopes:
+
+```sh
+dots publish common/nvim/lua/options.lua -m "nvim: tune options"
+dots rollout a1                 # canary
+dots rollout v1 v2              # remaining machines
+```
+
+`dots update` is retained as a deprecated alias for `dots sync`. The former
+`sync` flags fail with an explicit replacement: `-m` and `--push-only` belong
+to `dots publish`; `--remotes-only` belongs to `dots rollout`. The checked-in
+Bash fallback keeps inbound `sync`/`update` as its recovery path back to the
+signed Go binary, and explicitly refuses lifecycle verbs it cannot perform.
 
 ## Apply versus dependencies
 

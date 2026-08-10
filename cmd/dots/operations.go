@@ -18,14 +18,12 @@ import (
 const (
 	actionApply        ops.ActionID = "config.apply"
 	actionDeps         ops.ActionID = "dependencies.install"
-	actionUpdateLegacy ops.ActionID = "repo.update.legacy"
 	actionNvimRestore  ops.ActionID = "nvim.restore"
 	actionTPMRepair    ops.ActionID = "tmux.tpm.repair"
 	actionDoctorRepair ops.ActionID = "doctor.dependencies.repair"
 	actionService      ops.ActionID = "service.change"
 	actionPackage      ops.ActionID = "package.upgrade"
 	actionRemoteDoctor ops.ActionID = "machine.doctor"
-	actionSyncLegacy   ops.ActionID = "fleet.sync.legacy"
 )
 
 const (
@@ -39,10 +37,6 @@ const (
 
 type applyRequest struct{ Repo string }
 type depsRequest struct{ Repo string }
-type updateLegacyRequest struct {
-	Repo   string
-	Branch string
-}
 type nvimRestoreRequest struct{}
 type tpmRepairRequest struct{ Repo string }
 type doctorRepairRequest struct {
@@ -56,23 +50,15 @@ type serviceRequest struct {
 }
 type packageRequest struct{ Package pkg }
 type remoteDoctorRequest struct{ Alias string }
-type syncLegacyRequest struct {
-	Repo        string
-	Message     string
-	PushOnly    bool
-	RemotesOnly bool
-}
 
 func (applyRequest) ActionID() ops.ActionID        { return actionApply }
 func (depsRequest) ActionID() ops.ActionID         { return actionDeps }
-func (updateLegacyRequest) ActionID() ops.ActionID { return actionUpdateLegacy }
 func (nvimRestoreRequest) ActionID() ops.ActionID  { return actionNvimRestore }
 func (tpmRepairRequest) ActionID() ops.ActionID    { return actionTPMRepair }
 func (doctorRepairRequest) ActionID() ops.ActionID { return actionDoctorRepair }
 func (serviceRequest) ActionID() ops.ActionID      { return actionService }
 func (packageRequest) ActionID() ops.ActionID      { return actionPackage }
 func (remoteDoctorRequest) ActionID() ops.ActionID { return actionRemoteDoctor }
-func (syncLegacyRequest) ActionID() ops.ActionID   { return actionSyncLegacy }
 
 var operationRegistry = buildOperationRegistry()
 
@@ -85,14 +71,12 @@ func buildOperationRegistry() *ops.Registry {
 	}
 	must(ops.Definition{ID: actionApply, Summary: "Relink and merge local configuration", Scope: ops.ScopeLocal, Risk: ops.RiskReversible, Plan: planApply})
 	must(ops.Definition{ID: actionDeps, Summary: "Install configured dependencies", Scope: ops.ScopeLocal, Risk: ops.RiskDisruptive, Plan: planDeps})
-	must(ops.Definition{ID: actionUpdateLegacy, Summary: "Pull and relink (compatibility alias)", Scope: ops.ScopeLocal, Risk: ops.RiskReversible, Plan: planLegacyUpdate})
 	must(ops.Definition{ID: actionNvimRestore, Summary: "Restore Neovim plugins", Scope: ops.ScopeLocal, Risk: ops.RiskReversible, Plan: planNvimRestore})
 	must(ops.Definition{ID: actionTPMRepair, Summary: "Install or repair TPM", Scope: ops.ScopeLocal, Risk: ops.RiskReversible, Plan: planTPMRepair})
 	must(ops.Definition{ID: actionDoctorRepair, Summary: "Repair missing dependencies", Scope: ops.ScopeLocal, Risk: ops.RiskDisruptive, Plan: planDoctorRepair})
 	must(ops.Definition{ID: actionService, Summary: "Change service state", Scope: ops.ScopeLocal, Risk: ops.RiskDisruptive, Plan: planService})
 	must(ops.Definition{ID: actionPackage, Summary: "Upgrade one package", Scope: ops.ScopeLocal, Risk: ops.RiskDisruptive, Plan: planPackage})
 	must(ops.Definition{ID: actionRemoteDoctor, Summary: "Inspect a remote machine", Scope: ops.ScopeFleet, Risk: ops.RiskReadOnly, Plan: planRemoteDoctor})
-	must(ops.Definition{ID: actionSyncLegacy, Summary: "LEGACY: publish every local change and update every machine", Scope: ops.ScopeFleet, Risk: ops.RiskOutbound, Plan: planLegacySync})
 	registerLifecycleOperations(r)
 	return r
 }
@@ -173,29 +157,6 @@ func planDeps(req ops.Request) (ops.Plan, error) {
 		Steps:   []ops.Step{processStep("deps", "Install configured dependencies", in.Repo, argv...)},
 		Affects: []ops.ResourceID{resourceDoctor, resourcePackages, resourceConfig},
 		Timeout: 30 * time.Minute,
-	}, nil
-}
-
-func planLegacyUpdate(req ops.Request) (ops.Plan, error) {
-	in, err := requestAs[updateLegacyRequest](req, actionUpdateLegacy)
-	if err != nil {
-		return ops.Plan{}, err
-	}
-	if in.Repo == "" || in.Branch == "" {
-		return ops.Plan{}, fmt.Errorf("update requires a checkout on a branch")
-	}
-	installer := filepath.Join(in.Repo, "install.sh")
-	return ops.Plan{
-		Title:   "Update dotfiles",
-		Summary: "Compatibility command: pull the current branch, then apply configs",
-		Target:  in.Repo,
-		Steps: []ops.Step{
-			processStep("pull", "Fast-forward the checkout", in.Repo, "git", "-C", in.Repo, "pull", "--ff-only", "origin", in.Branch),
-			processStep("apply", "Resolve the release binary, then relink and merge configuration", in.Repo, installer),
-			processStep("verify", "Verify applied configuration", in.Repo, installer, "--apply", "--dry"),
-		},
-		Affects: []ops.ResourceID{resourceRepo, resourceConfig, resourceDoctor},
-		Timeout: 15 * time.Minute,
 	}, nil
 }
 
@@ -399,90 +360,9 @@ func planRemoteDoctor(req ops.Request) (ops.Plan, error) {
 	}, nil
 }
 
-func planLegacySync(req ops.Request) (ops.Plan, error) {
-	in, err := requestAs[syncLegacyRequest](req, actionSyncLegacy)
-	if err != nil {
-		return ops.Plan{}, err
-	}
-	if in.PushOnly && in.RemotesOnly {
-		return ops.Plan{}, fmt.Errorf("--push-only and --remotes-only are contradictory")
-	}
-	plan := ops.Plan{
-		Title:   "Legacy outbound sync",
-		Summary: "Compatibility behavior: stage every change, commit, push, then update configured SSH hosts",
-		Scope:   ops.ScopeFleet,
-		Risk:    ops.RiskOutbound,
-		Confirm: "LEGACY OUTBOUND SYNC: publish all local changes and update the selected machines?",
-		Affects: []ops.ResourceID{resourceRepo, resourceConfig, resourceMachines},
-		Timeout: 45 * time.Minute,
-	}
-	if !in.RemotesOnly {
-		if in.Repo == "" {
-			return ops.Plan{}, fmt.Errorf("no checkout found — nothing to publish")
-		}
-		branch, ok := currentBranch(in.Repo)
-		if !ok {
-			return ops.Plan{}, fmt.Errorf("detached HEAD — check out a branch before syncing")
-		}
-		plan.Steps = append(plan.Steps, ops.Step{
-			ID: "branch-guard", Title: "Verify the branch before publishing",
-			Exec: providers.Func{Label: "verify HEAD is still on " + branch, Do: func(context.Context, ops.IO) error {
-				return verifyCurrentBranch(in.Repo, branch)
-			}},
-		})
-		out, err := exec.Command("git", "-C", in.Repo, "status", "--porcelain").Output()
-		if err != nil {
-			return ops.Plan{}, fmt.Errorf("cannot read git status: %w", err)
-		}
-		changed := nonemptyLines(string(out))
-		if len(changed) > 0 {
-			message := in.Message
-			if message == "" {
-				message = fmt.Sprintf("sync: update %s", plural(len(changed), "config", "configs"))
-			}
-			plan.Steps = append(plan.Steps,
-				processStep("stage-all", "Stage every local change", in.Repo, "git", "-C", in.Repo, "add", "-A"),
-				processStep("commit", "Commit staged changes", in.Repo, "git", "-C", in.Repo, "commit", "-m", message),
-			)
-		}
-		// A no-op push is intentional: it also publishes commits left ahead by
-		// an earlier interrupted run, without mutating the worktree while planning.
-		plan.Steps = append(plan.Steps,
-			ops.Step{ID: "push-guard", Title: "Re-check the branch before pushing", Exec: providers.Func{Label: "verify HEAD is still on " + branch, Do: func(context.Context, ops.IO) error {
-				return verifyCurrentBranch(in.Repo, branch)
-			}}},
-			processStep("push", "Push the current branch", in.Repo, "git", "-C", in.Repo, "push", "origin", branch),
-		)
-	}
-	if !in.PushOnly {
-		hosts := sshHosts()
-		if len(hosts) == 0 {
-			plan.Steps = append(plan.Steps, ops.Step{ID: "no-hosts", Title: "No configured SSH hosts", Exec: providers.Message("No hosts in ~/.ssh/config; remote rollout skipped.")})
-		}
-		for _, host := range hosts {
-			if err := validateSSHHost(host); err != nil {
-				return ops.Plan{}, fmt.Errorf("legacy sync: %w", err)
-			}
-			plan.Steps = append(plan.Steps, ops.Step{
-				ID: "remote-" + host, Title: "Update " + host, ContinueOnError: true,
-				Exec: providers.SSHScript{
-					Host: host, Timeout: 8, Label: "ssh " + host + " <dots update>",
-					Script: remoteUpdateScript,
-				},
-			})
-		}
-	}
-	return plan, nil
-}
-
 const remoteDoctorScript = `set -eu
 export PATH="$HOME/.local/bin:$PATH"
 exec dots doctor
-`
-
-const remoteUpdateScript = `set -eu
-export PATH="$HOME/.local/bin:$PATH"
-exec dots update
 `
 
 func validateSSHHost(host string) error {

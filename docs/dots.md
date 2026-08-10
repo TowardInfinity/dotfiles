@@ -41,8 +41,8 @@ dots search copy  # find which page mentions it
 | `dots publish <paths…> -m "…"` | validate, commit only the selection, and push; never roll out |
 | `dots rollout <hosts…> [--revision …]` | apply one published revision to selected machines |
 | `dots install` | compatibility alias for Apply; `--deps` routes to `dots deps` |
-| `dots update` | inbound compatibility command: pull, resolve the binary, and apply |
-| `dots sync` | **temporary compatibility:** outbound publish + fleet update; prints a warning |
+| `dots sync [--check] [--dry-run]` | safely fetch, fast-forward, and apply this machine; never pushes or SSHes |
+| `dots update` | deprecated alias for `dots sync` |
 | `dots edit [topic]` | open a page in `$EDITOR` |
 | `dots path` | print the repo path |
 | `dots version` | print this binary's version |

@@ -29,7 +29,7 @@ work to a subagent or the other tool.
 | Codex | Terra, effort `medium` | `codex -p sol` |
 
 Both defaults live in the repo and travel through `dots publish` followed by
-`dots rollout` (or the temporary compatibility `dots sync`):
+`dots rollout`:
 `common/claude/settings.json` is symlinked into place, and
 `common/codex/config.policy.toml` is *merged* into `~/.codex/config.toml`
 between `# >>> dots: managed block` markers — Codex writes its own

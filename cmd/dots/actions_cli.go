@@ -196,16 +196,17 @@ To set up a machine that has none of this yet:
 	return runPlanCLI(plan, cliPlanOptions{DryRun: dry, AskConfirm: true})
 }
 
-// runUpdateCLI is the command-line twin of Manage's `u`: pull, then relink.
+// runUpdateCLI remains for scripts and muscle memory. It is intentionally only
+// an inbound alias now; bare sync owns the short, safe spelling.
 func runUpdateCLI(args []string) int {
 	for _, a := range args {
 		switch a {
 		case "-h", "--help":
-			fmt.Print(`dots update — pull the latest configs and relink
+			fmt.Print(`dots update — deprecated alias for inbound sync
 
-  dots update    git pull --ff-only, then re-run install.sh
+  dots update    same safe fetch, fast-forward, and apply as dots sync
 
-The docs page about updating is: dots docs update
+Prefer: dots sync
 `)
 			return 0
 		default:
@@ -214,28 +215,8 @@ The docs page about updating is: dots docs update
 		}
 	}
 
-	repo, ok := needRepo("update")
-	if !ok {
-		return 1
-	}
-
-	// Name the remote and branch explicitly. `git pull --ff-only` alone needs
-	// upstream tracking, which `git push origin main` does not set — a repo
-	// whose remote was re-added by hand has none, and the failure is a
-	// screenful of git's own help text.
-	branch, ok := currentBranch(repo)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "dots update: detached HEAD — check out a branch before updating")
-		return 1
-	}
-
-	plan, err := buildOperation(updateLegacyRequest{Repo: repo, Branch: branch})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dots update: %v\n", err)
-		return 1
-	}
-	fmt.Fprintln(os.Stderr, "notice: `dots update` is the inbound compatibility command; it will become `dots sync` after fleet convergence")
-	return runPlanCLI(plan, cliPlanOptions{})
+	fmt.Fprintln(os.Stderr, "notice: `dots update` is deprecated; use `dots sync`")
+	return runInboundSyncCLI(nil)
 }
 
 // runDocsCLI is the explicit way to reach a page whose name is also a verb.

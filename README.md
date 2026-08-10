@@ -34,7 +34,7 @@ dots status          # concise local state; --fleet and --json are available
 dots apply           # relink/merge locally, with no network
 dots publish …       # validate, commit selected paths, and push
 dots rollout a1      # apply one published revision to one selected machine
-dots update          # compatibility: pull, resolve, and apply
+dots sync            # safely pull, resolve, and apply this machine
 dots doctor          # check the tools these configs actually call
 ```
 

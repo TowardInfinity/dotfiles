@@ -1311,6 +1311,13 @@ func (m *shellModel) renderFooter() string {
 	if m.sync.needsSync() {
 		left += "  " + styPending.Render("! changes")
 	}
+	// The footer is the visible affordance for the palette/action layer. A
+	// click anywhere in it opens the same searchable action surface as `a`;
+	// this keeps the mouse path discoverable without trying to duplicate the
+	// variable-width key labels as separate coordinate math.
+	if m.h >= 2 {
+		m.hits = append(m.hits, shellHit{x: 0, y: m.h - 2, w: m.w, h: 2, kind: shellHitPalette})
+	}
 	return styStatus.Width(m.w).Render(truncate(left, m.w-2))
 }
 

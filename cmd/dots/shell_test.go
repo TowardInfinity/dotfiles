@@ -205,3 +205,13 @@ func TestShellHonorsNoColor(t *testing.T) {
 		t.Fatal("NO_COLOR view still contains ANSI styling")
 	}
 }
+
+func TestShellFooterClickOpensPalette(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	_ = m.View()
+	updated, _ := m.Update(tea.MouseClickMsg{X: 10, Y: 28, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.palette == nil {
+		t.Fatal("clicking the visible footer did not open the action palette")
+	}
+}

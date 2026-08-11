@@ -5,6 +5,7 @@ package main
 // is migrated; they do not get to create their own global navigation system.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -116,18 +117,26 @@ type shellModel struct {
 	man     manageModel
 	sp      spinner.Model
 
-	act     *actionModel
-	palette *shellPalette
-	help    bool
-	err     string
-	sync    repoState
-	fleet   fleetSnapshot
-	hits    []shellHit
+	act            *actionModel
+	palette        *shellPalette
+	help           bool
+	err            string
+	sync           repoState
+	fleet          fleetSnapshot
+	healthProblems bool
+	healthCursor   int
+	healthDetail   string
+	fleetCursor    int
+	fleetSelected  map[string]bool
+	fleetDetail    string
+	hits           []shellHit
 }
 
 func newShellModel() *shellModel {
 	repo := findRepo()
 	docs, source := loadDocs(repo)
+	man := newManageModel(repo)
+	man.embedded = true
 	return &shellModel{
 		repo:    repo,
 		source:  source,
@@ -136,13 +145,14 @@ func newShellModel() *shellModel {
 		docs:    newDocsModel(docs),
 		changes: newChangesModel(repo),
 		doc:     newDoctorModel(repo),
-		man:     newManageModel(repo),
+		man:     man,
 		sp: spinner.New(
 			spinner.WithSpinner(spinner.Dot),
 			spinner.WithStyle(styPending),
 		),
-		sync:  readRepoState(repo),
-		fleet: loadFleetSnapshot(),
+		sync:          readRepoState(repo),
+		fleet:         loadFleetSnapshot(),
+		fleetSelected: map[string]bool{},
 	}
 }
 
@@ -180,6 +190,19 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case fleetSnapshotMsg:
 		m.fleet = msg.snapshot
+		if m.fleetCursor >= len(m.fleet.Hosts) {
+			m.fleetCursor = max(0, len(m.fleet.Hosts)-1)
+		}
+		return m, nil
+	case doctorMsg:
+		m.doc, _ = m.doc.update(msg)
+		m.healthProblems = false
+		for _, check := range m.doc.checks {
+			if check.state == checkBad || check.state == checkWarn {
+				m.healthProblems = true
+				break
+			}
+		}
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
@@ -294,14 +317,13 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case routeChanges:
 		m.changes, cmd = m.changes.update(msg)
 	case routeHealth:
-		m.doc, cmd = m.doc.update(msg)
+		return m.updateHealthKey(msg)
 	case routeOverview:
 		if msg.String() == "r" {
 			return m, tea.Batch(fetchOverviewInfo(), fetchRepoState(m.repo), fetchFleetSnapshot())
 		}
 	case routeFleet:
-		m.man.section = secMachines
-		m.man, cmd = m.man.updateMachinesKey(msg)
+		return m.updateFleetKey(msg)
 	case routeServices:
 		m.man.section = secServices
 		m.man, cmd = m.man.updateServicesKey(msg)
@@ -327,6 +349,79 @@ func (m *shellModel) routeCapturesInput() bool {
 		return m.man.pkgFiltering
 	}
 	return false
+}
+
+func (m *shellModel) updateHealthKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "f" {
+		m.healthProblems = !m.healthProblems
+		m.healthCursor = 0
+		return m, nil
+	}
+	checks := m.visibleHealthChecks()
+	switch msg.String() {
+	case "j", "down":
+		if m.healthCursor < len(checks)-1 {
+			m.healthCursor++
+		}
+		return m, nil
+	case "k", "up":
+		if m.healthCursor > 0 {
+			m.healthCursor--
+		}
+		return m, nil
+	case "enter":
+		if len(checks) > 0 {
+			m.healthDetail = checks[m.healthCursor].name + " · " + checks[m.healthCursor].path
+		}
+		return m, nil
+	case "esc":
+		m.healthDetail = ""
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.doc, cmd = m.doc.update(msg)
+	return m, cmd
+}
+
+func (m *shellModel) visibleHealthChecks() []checkResult {
+	if !m.healthProblems {
+		return m.doc.checks
+	}
+	checks := make([]checkResult, 0, len(m.doc.checks))
+	for _, check := range m.doc.checks {
+		if check.state == checkBad || check.state == checkWarn {
+			checks = append(checks, check)
+		}
+	}
+	return checks
+}
+
+func (m *shellModel) updateFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		return m, fetchFleetSnapshot()
+	case "j", "down":
+		if m.fleetCursor < len(m.fleet.Hosts)-1 {
+			m.fleetCursor++
+		}
+	case "k", "up":
+		if m.fleetCursor > 0 {
+			m.fleetCursor--
+		}
+	case "space":
+		if len(m.fleet.Hosts) > 0 {
+			alias := m.fleet.Hosts[m.fleetCursor].Alias
+			m.fleetSelected[alias] = !m.fleetSelected[alias]
+		}
+	case "enter":
+		if len(m.fleet.Hosts) > 0 {
+			host := m.fleet.Hosts[m.fleetCursor]
+			m.fleetDetail = fmt.Sprintf("%s · %s · %s · %s", host.Alias, host.Outcome, host.Version, host.Revision)
+		}
+	case "esc":
+		m.fleetDetail = ""
+	}
+	return m, nil
 }
 
 func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
@@ -400,6 +495,20 @@ func (m *shellModel) syncLegacySection() {
 }
 
 func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.route == routeDocs {
+		var cmd tea.Cmd
+		m.docs, cmd = m.docs.update(msg)
+		return m, cmd
+	}
+	if m.route == routeChanges {
+		key := tea.KeyPressMsg{Code: tea.KeyDown}
+		if msg.Button == tea.MouseWheelUp {
+			key.Code = tea.KeyUp
+		}
+		var cmd tea.Cmd
+		m.changes, cmd = m.changes.update(key)
+		return m, cmd
+	}
 	if msg.Button == tea.MouseWheelUp {
 		return m.dispatchRouteKey(tea.KeyPressMsg{Code: tea.KeyUp})
 	}
@@ -437,29 +546,42 @@ func (m *shellModel) openPalette(actionsOnly bool) {
 }
 
 func shellPaletteItems(current routeID, actionsOnly bool) []paletteItem {
-	items := []paletteItem{
-		{label: "Go to Overview", detail: "route", route: routeOverview},
-		{label: "Go to Changes", detail: "route", route: routeChanges},
-		{label: "Go to Fleet", detail: "route", route: routeFleet},
-		{label: "Go to Health", detail: "route", route: routeHealth},
-		{label: "Go to Services", detail: "route", route: routeServices},
-		{label: "Go to Packages", detail: "route", route: routePackages},
-		{label: "Go to Projects", detail: "route", route: routeProjects},
-		{label: "Go to Docs", detail: "route", route: routeDocs},
+	var items []paletteItem
+	if !actionsOnly {
+		items = []paletteItem{
+			{label: "Go to Overview", detail: "route", route: routeOverview},
+			{label: "Go to Changes", detail: "route", route: routeChanges},
+			{label: "Go to Fleet", detail: "route", route: routeFleet},
+			{label: "Go to Health", detail: "route", route: routeHealth},
+			{label: "Go to Services", detail: "route", route: routeServices},
+			{label: "Go to Packages", detail: "route", route: routePackages},
+			{label: "Go to Projects", detail: "route", route: routeProjects},
+			{label: "Go to Docs", detail: "route", route: routeDocs},
+		}
 	}
-	if actionsOnly {
-		items = nil
+	switch current {
+	case routeChanges:
+		items = append(items,
+			paletteItem{label: "Sync this machine from origin", detail: "LOCAL · safe inbound", action: "sync"},
+			paletteItem{label: "Apply current configuration", detail: "LOCAL · no network", action: "apply"},
+			paletteItem{label: "Publish selected changes", detail: "REPOSITORY · reviewed commit and push", action: "publish"},
+		)
+	case routeHealth:
+		items = append(items,
+			paletteItem{label: "Recheck health", detail: "LOCAL · read-only", action: "health-refresh"},
+			paletteItem{label: "Install missing tools", detail: "LOCAL · package managers", action: "health-install"},
+			paletteItem{label: "Repair configuration links", detail: "LOCAL · no network", action: "health-config"},
+		)
+	case routeServices:
+		items = append(items, paletteItem{label: "Rescan services", detail: "LOCAL · read-only", action: "services-refresh"})
+	case routePackages:
+		items = append(items, paletteItem{label: "Rescan packages", detail: "LOCAL · read-only", action: "packages-refresh"})
+	case routeFleet:
+		items = append(items,
+			paletteItem{label: "Refresh fleet", detail: "FLEET · SSH read-only", action: "fleet-refresh"},
+			paletteItem{label: "Roll out selected machines", detail: "FLEET · exact published revision", action: "rollout"},
+		)
 	}
-	if !actionsOnly || current == routeChanges {
-		items = append(items, paletteItem{label: "Publish selected changes", detail: "REPOSITORY · reviewed commit and push", action: "publish"})
-	}
-	items = append(items,
-		paletteItem{label: "Sync this machine from origin", detail: "LOCAL · safe inbound", action: "sync"},
-		paletteItem{label: "Apply current configuration", detail: "LOCAL · no network", action: "apply"},
-		paletteItem{label: "Open publish workflow", detail: "REPO · Changes", route: routeChanges},
-		paletteItem{label: "Open rollout workflow", detail: "FLEET · Machines", route: routeFleet},
-	)
-	_ = current
 	return items
 }
 
@@ -507,6 +629,32 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
+		case "health-refresh":
+			return m, runDoctorChecks
+		case "health-install":
+			req, note, ok := m.doc.buildInstall()
+			m.doc.note = note
+			if ok {
+				return m, requestAction(req)
+			}
+		case "health-config":
+			req, note, ok := m.doc.buildConfigRepair()
+			m.doc.note = note
+			if ok {
+				return m, requestAction(req)
+			}
+		case "services-refresh":
+			m.route = routeServices
+			return m, discoverServices()
+		case "packages-refresh":
+			m.route = routePackages
+			return m, discoverPackages()
+		case "fleet-refresh":
+			m.route = routeFleet
+			return m, fetchFleetSnapshot()
+		case "rollout":
+			m.route = routeFleet
+			return m, m.prepareFleetRollout()
 		}
 		return m, nil
 	case "backspace":
@@ -623,13 +771,13 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeDocs:
 		return m.docs.view()
 	case routeHealth:
-		return m.doc.view(spin)
+		return m.renderHealth(w, h, spin)
 	case routeOverview:
 		return contentColumn(w, h, paneHeader("Overview", "Triage", "what needs attention now", measureFor(w)), m.renderOverview(w, h))
 	case routeChanges:
 		return contentColumn(w, h, paneHeader("Workspace", "Changes", m.changesSummary(), measureFor(w)), m.changes.view(w-4, h-3))
 	case routeFleet:
-		return contentColumn(w, h, paneHeader("Fleet", "Machines", fmt.Sprintf("%d configured hosts", len(m.man.machines)), measureFor(w)), m.man.viewMachines())
+		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), m.renderFleet(w, h))
 	case routeServices:
 		return contentColumn(w, h, paneHeader("This machine", "Services", m.man.servicesSummary(), measureFor(w)), m.man.viewServices(spin))
 	case routePackages:
@@ -639,6 +787,68 @@ func (m *shellModel) renderRoute(w, h int) string {
 	default:
 		return ""
 	}
+}
+
+func (m *shellModel) healthSummary() string {
+	if m.doc.loading {
+		return "checking tools, frameworks, and config"
+	}
+	ok, bad, warn := 0, 0, 0
+	for _, check := range m.doc.checks {
+		switch check.state {
+		case checkOK:
+			ok++
+		case checkBad:
+			bad++
+		case checkWarn:
+			warn++
+		}
+	}
+	if bad > 0 || warn > 0 {
+		return fmt.Sprintf("%d healthy · %d failed · %d warnings", ok, bad, warn)
+	}
+	return fmt.Sprintf("%d checks healthy", ok)
+}
+
+func (m *shellModel) renderHealth(w, h int, spin string) string {
+	if m.doc.loading {
+		return "\n  " + spin + styPending.Render(" checking")
+	}
+	checks := m.visibleHealthChecks()
+	if len(checks) == 0 {
+		return styOK.Render("✓ Everything the configs call is installed and healthy.")
+	}
+	rows := []string{}
+	filter := "PROBLEMS"
+	if !m.healthProblems {
+		filter = "ALL CHECKS"
+	}
+	rows = append(rows, styMuted.Render(filter+" · f toggles filter"))
+	lastGroup := ""
+	for i, check := range checks {
+		group := checkGroup(check.name)
+		if group != lastGroup {
+			rows = append(rows, "", styGroup.Render(strings.ToUpper(group)))
+			lastGroup = group
+		}
+		where := check.path
+		if where == "" && check.state == checkBad {
+			where = "not found"
+		}
+		line := checkDot(check.state) + " " + check.name
+		if where != "" {
+			line += "  " + styMuted.Render(where)
+		}
+		if i == m.healthCursor {
+			line = styItemOn.Render(padRight(truncate(line, max(1, w-4)), max(1, w-4)))
+		}
+		rows = append(rows, line)
+	}
+	if m.healthDetail != "" {
+		rows = append(rows, "", styTitle.Render("DETAIL"), styMuted.Render("  "+truncate(m.healthDetail, max(1, w-4))))
+	}
+	rows = append(rows, "", styMuted.Render("r recheck · i install missing · c repair config · Enter inspect"))
+	return strings.Join(rows, "\n")
 }
 
 func (m *shellModel) changesSummary() string {
@@ -656,6 +866,92 @@ func (m *shellModel) changesSummary() string {
 		parts = append(parts, m.changes.branch)
 	}
 	return strings.Join(parts, " · ")
+}
+
+func (m *shellModel) fleetSummary() string {
+	if len(m.fleet.Hosts) == 0 {
+		return "unknown · press r to check"
+	}
+	return m.fleet.summary() + " · " + formatAgeOrUnknown(m.fleet)
+}
+
+func formatAgeOrUnknown(snapshot fleetSnapshot) string {
+	age, ok := fleetSnapshotAge(snapshot)
+	if !ok {
+		return "never checked"
+	}
+	state := "fresh"
+	if !snapshot.fresh(time.Now()) {
+		state = "stale"
+	}
+	return state + " " + formatAge(age)
+}
+
+func (m *shellModel) renderFleet(w, h int) string {
+	if len(m.fleet.Hosts) == 0 {
+		return styMuted.Render("unknown · press r to check configured SSH hosts")
+	}
+	rows := []string{styMuted.Render("SPACE select · ENTER inspect · r refresh · a actions")}
+	for i, host := range m.fleet.Hosts {
+		mark := "○"
+		if m.fleetSelected[host.Alias] {
+			mark = "●"
+		}
+		state := styPending.Render(host.Outcome)
+		if host.Outcome == "ok" && host.ConfigOK {
+			state = styOK.Render("healthy")
+		} else if host.Outcome == "unreachable" {
+			state = styBad.Render("unreachable")
+		}
+		revision := shortSHA(host.Revision)
+		if revision == "" {
+			revision = "—"
+		}
+		line := fmt.Sprintf("%s %-10s %-12s %-8s %s", mark, host.Alias, state, host.Version, revision)
+		line = truncate(line, max(1, w-4))
+		if i == m.fleetCursor {
+			line = styItemOn.Render(padRight(line, max(1, w-4)))
+		} else {
+			line = styItem.Render(line)
+		}
+		rows = append(rows, line)
+	}
+	if m.fleetDetail != "" {
+		rows = append(rows, "", styTitle.Render("MACHINE DETAIL"), styMuted.Render("  "+truncate(m.fleetDetail, max(1, w-4))))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m *shellModel) selectedFleetHosts() []string {
+	hosts := make([]string, 0, len(m.fleetSelected))
+	for _, host := range m.fleet.Hosts {
+		if m.fleetSelected[host.Alias] {
+			hosts = append(hosts, host.Alias)
+		}
+	}
+	return hosts
+}
+
+func (m *shellModel) prepareFleetRollout() tea.Cmd {
+	hosts := m.selectedFleetHosts()
+	if len(hosts) == 0 {
+		m.err = "select at least one machine before rollout"
+		return nil
+	}
+	repo := m.repo
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		revision, err := gitOutputContext(ctx, repo, "rev-parse", "origin/main")
+		if err != nil {
+			return actionPlanErrorMsg{err: fmt.Errorf("resolve origin/main: %w", err)}
+		}
+		tag, err := latestReleaseTag()
+		if err != nil {
+			return actionPlanErrorMsg{err: fmt.Errorf("resolve Latest release: %w", err)}
+		}
+		return requestAction(rolloutRequest{Repo: repo, Hosts: hosts, Revision: strings.TrimSpace(revision), Version: tag})()
+	}
 }
 
 func (m *shellModel) renderOverview(w, h int) string {
@@ -737,6 +1033,22 @@ func formatAge(age time.Duration) string {
 
 func (m *shellModel) renderFooter() string {
 	left := "↑↓ move  tab focus  enter inspect  a actions  / palette  ? help"
+	switch m.route {
+	case routeChanges:
+		left = "↑↓ move  space select  enter inspect  u sync  p publish  a actions  ? help"
+	case routeFleet:
+		left = "↑↓ move  space select  enter inspect  r refresh  a actions  ? help"
+	case routeHealth:
+		left = "↑↓ move  enter inspect  f filter  r recheck  a repair  ? help"
+	case routeServices:
+		left = "↑↓ move  / filter  s start  x stop  R restart  a actions"
+	case routePackages:
+		left = "↑↓ move  / filter  u upgrade  s sort  m manager  a actions"
+	case routeProjects:
+		left = "↑↓ move  enter open  a actions  ? help"
+	case routeDocs:
+		left = "↑↓ topic  / filter  d/u scroll  a actions  ? help"
+	}
 	if m.sync.needsSync() {
 		left += "  " + styPending.Render("! changes")
 	}

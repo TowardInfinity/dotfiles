@@ -112,3 +112,40 @@ func TestShellMouseHitMapNavigatesRoutes(t *testing.T) {
 		t.Fatal("mouse route click did not focus content")
 	}
 }
+
+func TestShellHealthDefaultsToProblemsAndCanInspect(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeHealth
+	m.focus = shellFocusContent
+	m.doc.loading = false
+	m.doc.checks = []checkResult{
+		{name: "git", state: checkOK, path: "/usr/bin/git"},
+		{name: "pnpm", state: checkBad, path: "not found"},
+		{name: "release", state: checkWarn, path: "offline"},
+	}
+	m.healthProblems = true
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(*shellModel)
+	if m.healthDetail == "" || !strings.Contains(m.healthDetail, "pnpm") {
+		t.Fatalf("health inspection = %q, want pnpm detail", m.healthDetail)
+	}
+	assertShellFits(t, m, 100, 30)
+}
+
+func TestShellFleetSelectionUsesCacheRows(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeFleet
+	m.focus = shellFocusContent
+	m.fleet.Hosts = []fleetSnapshotHost{{Alias: "a1", Outcome: "ok", ConfigOK: true, Version: "v0.1.15"}, {Alias: "v1", Outcome: "unreachable"}}
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = updated.(*shellModel)
+	if !m.fleetSelected["a1"] {
+		t.Fatal("space did not select the focused fleet host")
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	m = updated.(*shellModel)
+	if m.fleetCursor != 1 {
+		t.Fatalf("fleet cursor = %d, want 1", m.fleetCursor)
+	}
+	assertShellFits(t, m, 100, 30)
+}

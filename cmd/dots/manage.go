@@ -77,6 +77,10 @@ type manageModel struct {
 	repo    string
 	w, h    int
 	section manageSection
+	// embedded is set by the unified shell. Legacy Manage used to reserve a
+	// nested rail inside its own width; route adapters already provide the
+	// global rail, so service/package prose must use the full content column.
+	embedded bool
 
 	ovInfo    overviewInfo
 	ovLoading bool
@@ -1180,7 +1184,10 @@ func (m manageModel) viewDotfiles() string {
 }
 
 func (m manageModel) viewServices(spin string) string {
-	measure := measureFor(m.w - railWidth - 1)
+	measure := measureFor(m.w)
+	if !m.embedded {
+		measure = measureFor(m.w - railWidth - 1)
+	}
 
 	if m.svcLoading {
 		return "\n  " + spin + styPending.Render(" discovering")
@@ -1334,7 +1341,10 @@ func (m manageModel) outdatedOverviewBlock(measure int) (string, int) {
 }
 
 func (m manageModel) viewPackages(spin string) string {
-	measure := measureFor(m.w - railWidth - 1)
+	measure := measureFor(m.w)
+	if !m.embedded {
+		measure = measureFor(m.w - railWidth - 1)
+	}
 
 	if m.pkgLoading {
 		return "\n  " + spin + styPending.Render(" checking package managers")
@@ -1498,7 +1508,10 @@ func (m manageModel) viewProjects() string {
 		// Wrap rather than truncate. This hint exists to be read and retyped,
 		// so cutting the end off the path defeats the whole point of showing
 		// it — the tail is the part you need.
-		measure := measureFor(m.w - railWidth - 1)
+		measure := measureFor(m.w)
+		if !m.embedded {
+			measure = measureFor(m.w - railWidth - 1)
+		}
 		for _, ln := range wrapPlain(m.projTmuxHint, measure) {
 			b.WriteString("\n" + styMuted.Render(ln))
 		}

@@ -328,7 +328,11 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "q":
 		if m.focus == shellFocusContent {
-			return m, tea.Quit
+			if m.hasRouteDetail() {
+				return m.dispatchRouteKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+			}
+			m.focus = shellFocusSidebar
+			return m, nil
 		}
 		return m, tea.Quit
 	case "ctrl+p", ":":
@@ -982,6 +986,9 @@ func (m *shellModel) View() tea.View {
 	if os.Getenv("NO_COLOR") != "" {
 		view = stripANSI(view)
 	}
+	if os.Getenv("DOTS_ASCII") != "" || os.Getenv("TERM") == "dumb" {
+		view = asciiize(view)
+	}
 	v := tea.NewView(view)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
@@ -1005,6 +1012,32 @@ func stripANSI(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func asciiize(s string) string {
+	return strings.NewReplacer(
+		"▌", ">", "●", "*", "○", "o", "✓", "OK", "×", "x",
+		"↑", "^", "↓", "v", "─", "-", "│", "|", "╭", "+", "╮", "+",
+		"╰", "+", "╯", "+", "⣾", "*", "…", "...",
+	).Replace(s)
+}
+
+func (m *shellModel) hasRouteDetail() bool {
+	switch m.route {
+	case routeChanges:
+		return m.changes.detail != ""
+	case routeFleet:
+		return m.fleetDetail != ""
+	case routeHealth:
+		return m.healthDetail != ""
+	case routeServices:
+		return m.servicesView.detail != ""
+	case routePackages:
+		return m.packagesView.detail != ""
+	case routeProjects:
+		return m.projectDetail != ""
+	}
+	return false
 }
 
 func (m *shellModel) renderSidebar(rows []shellNavRow, h int) string {

@@ -206,6 +206,34 @@ func TestShellHonorsNoColor(t *testing.T) {
 	}
 }
 
+func TestShellASCIICompatibilityMode(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	t.Setenv("DOTS_ASCII", "1")
+	view := m.View().Content
+	for _, glyph := range []string{"▌", "●", "○", "✓", "×", "─"} {
+		if strings.Contains(view, glyph) {
+			t.Fatalf("ASCII view still contains %q", glyph)
+		}
+	}
+}
+
+func TestShellQUnwindsContentBeforeQuitting(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeFleet
+	m.focus = shellFocusContent
+	m.fleetDetail = "a1 · healthy"
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	m = updated.(*shellModel)
+	if cmd != nil || m.fleetDetail != "" || m.focus != shellFocusContent {
+		t.Fatalf("q did not close detail without quitting: detail=%q focus=%d cmd=%v", m.fleetDetail, m.focus, cmd != nil)
+	}
+	updated, cmd = m.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	m = updated.(*shellModel)
+	if cmd != nil || m.focus != shellFocusSidebar {
+		t.Fatalf("second q did not return to sidebar: focus=%d cmd=%v", m.focus, cmd != nil)
+	}
+}
+
 func TestShellFooterClickOpensPalette(t *testing.T) {
 	m := shellAt(t, 100, 30)
 	_ = m.View()

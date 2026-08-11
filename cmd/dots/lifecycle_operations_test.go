@@ -123,6 +123,15 @@ func TestTUIDispatchBuildsTheRegistryPlan(t *testing.T) {
 	}
 }
 
+func TestRolloutLatestGuardRejectsStalePublishedTag(t *testing.T) {
+	if err := validateRolloutLatest("v0.1.14", "v0.1.15"); err == nil || !strings.Contains(err.Error(), "Latest is v0.1.15") {
+		t.Fatalf("stale tag guard error = %v", err)
+	}
+	if err := validateRolloutLatest("v0.1.15", "v0.1.15"); err != nil {
+		t.Fatalf("current Latest rejected: %v", err)
+	}
+}
+
 func TestInboundProviderRefusesDirtyRepoWithoutChangingIt(t *testing.T) {
 	repo := newTestRepo(t)
 	file := filepath.Join(repo, "local.txt")

@@ -142,7 +142,7 @@ func (m servicesRouteModel) updateKey(msg tea.KeyPressMsg) (servicesRouteModel, 
 		m.filtering = true
 		m.input.Focus()
 		return m, textinput.Blink
-	case "a":
+	case "f":
 		m.runningOnly = !m.runningOnly
 		m.cursor = 0
 	case "r":
@@ -198,7 +198,7 @@ func (m servicesRouteModel) view(w, h int, spin string) string {
 	}
 
 	measure := measureFor(w)
-	lines := []string{truncate("↑↓ move · / filter · a running only · Enter inspect", measure)}
+	lines := []string{truncate("↑↓ move · / filter · f running only · Enter inspect", measure)}
 	if m.filtering || m.filter != "" {
 		m.input.SetWidth(max(10, measure-2))
 		lines = append(lines, "  "+truncate(m.input.View(), measure))

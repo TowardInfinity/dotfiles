@@ -291,5 +291,9 @@ func (a actionModel) view(spin string) string {
 		Width(a.w - 4).
 		Render(inner)
 
-	return lipgloss.Place(a.w, a.h, lipgloss.Center, lipgloss.Center, box)
+	// Return the box at its natural size. The root shell owns placement and
+	// hit-testing; centering it here makes the visible buttons and their hit
+	// rectangles disagree whenever the overlay is later placed in a full
+	// terminal frame.
+	return box
 }

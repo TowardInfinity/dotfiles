@@ -397,7 +397,9 @@ func (m model) View() tea.View {
 	status := styStatus.Width(m.w).Render(truncate(hint, m.w-2))
 
 	if m.act != nil {
-		body = m.act.view(m.sp.View())
+		overlay := m.act.view(m.sp.View())
+		w, h := m.contentSize()
+		body = lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, overlay)
 	}
 
 	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, bar, body, status))

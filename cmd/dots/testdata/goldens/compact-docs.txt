@@ -1,18 +1,18 @@
-dots  ·  Docs  ·  dotfiles                                  
+dots  ·  Docs  ·  dotfiles
 ────────────────────────────────────────────────────────────
-  REFERENCE › Compact Docs                                  
-  A small canonical Markdown page.                          
-  ──────────────────────────────────────────────────────    
-  Compact Docs                                              
-  A short paragraph with strong text, a link                
-  https://example.com, and a table.                         
-                                                            
-   key                       │ value                        
-  ───────────────────────────┼──────────────────────────    
-   mode                      │ compact                      
-                                                            
-    dots status                                             
-                                                            
-                                                            
+  REFERENCE › Compact Docs
+  A small canonical Markdown page.
+  ──────────────────────────────────────────────────────
+  Compact Docs
+  A short paragraph with strong text, a link
+  https://example.com, and a table.
+
+   key                       │ value
+  ───────────────────────────┼──────────────────────────
+   mode                      │ compact
+
+    dots status
+
+
 ────────────────────────────────────────────────────────────
- ↑↓ topic  / filter  d/u scroll  a actions  ? help          
+ ↑↓ topic  / filter  d/u scroll  a actions  ? help

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 )
 
 func shellAt(t *testing.T, width, height int) *shellModel {
@@ -148,6 +150,46 @@ func TestShellMouseHitMapNavigatesRoutes(t *testing.T) {
 	}
 }
 
+func TestShellKeyboardAndMouseSelectTheSameRoute(t *testing.T) {
+	keyboard := shellAt(t, 100, 30)
+	updated, _ := keyboard.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	keyboard = updated.(*shellModel)
+	updated, _ = keyboard.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	keyboard = updated.(*shellModel)
+
+	mouse := shellAt(t, 100, 30)
+	_ = mouse.View()
+	var changes shellHit
+	for _, hit := range mouse.hits {
+		if hit.kind == shellHitRoute && hit.route == routeChanges {
+			changes = hit
+			break
+		}
+	}
+	if changes.h == 0 {
+		t.Fatal("Changes route has no mouse hit target")
+	}
+	updated, _ = mouse.Update(tea.MouseClickMsg{X: changes.x + 1, Y: changes.y, Button: tea.MouseLeft})
+	mouse = updated.(*shellModel)
+	if keyboard.route != mouse.route || keyboard.focus != mouse.focus {
+		t.Fatalf("keyboard selected %s/%d, mouse selected %s/%d", keyboard.route, keyboard.focus, mouse.route, mouse.focus)
+	}
+}
+
+func TestSidebarWheelOnlyBrowsesRoutes(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	for i := 0; i < 2; i++ {
+		updated, cmd := m.Update(tea.MouseWheelMsg{X: 4, Y: 8, Button: tea.MouseWheelDown})
+		m = updated.(*shellModel)
+		if cmd != nil {
+			t.Fatal("sidebar wheel started a route provider")
+		}
+	}
+	if m.route != routeFleet || m.loaded[routeFleet] {
+		t.Fatalf("sidebar wheel route=%s loaded=%v, want Fleet without probing", m.route, m.loaded[routeFleet])
+	}
+}
+
 func TestShellHealthDefaultsToProblemsAndCanInspect(t *testing.T) {
 	m := shellAt(t, 100, 30)
 	m.route = routeHealth
@@ -165,6 +207,89 @@ func TestShellHealthDefaultsToProblemsAndCanInspect(t *testing.T) {
 		t.Fatalf("health inspection = %q, want pnpm detail", m.healthDetail)
 	}
 	assertShellFits(t, m, 100, 30)
+}
+
+func TestShellHealthClampsCursorAfterResultsShrink(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeHealth
+	m.focus = shellFocusContent
+	m.healthProblems = true
+	m.healthCursor = 7
+	m.doc.checks = []checkResult{
+		{name: "pnpm", state: checkBad, path: "not found"},
+	}
+	updated, _ := m.Update(doctorMsg{results: m.doc.checks})
+	m = updated.(*shellModel)
+	if m.healthCursor != 0 {
+		t.Fatalf("health cursor = %d after shrinking to one row, want 0", m.healthCursor)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = updated.(*shellModel)
+	if !strings.Contains(m.healthDetail, "pnpm") {
+		t.Fatalf("health detail = %q, want pnpm", m.healthDetail)
+	}
+}
+
+func TestShellActionHitMatchesVisibleConfirmButton(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	plan := testCommandPlan("Roll out", "sleep", "10")
+	plan.Scope = ops.ScopeFleet
+	plan.Risk = ops.RiskDisruptive
+	plan.Confirm = "Roll out now?"
+	updated, _ := m.Update(runActionMsg{plan: plan})
+	m = updated.(*shellModel)
+	_ = m.View()
+	if m.act == nil || !m.act.confirm {
+		t.Fatal("confirm overlay did not open")
+	}
+	var button shellHit
+	for _, hit := range m.hits {
+		if hit.kind == shellHitAction && hit.index == 0 {
+			button = hit
+			break
+		}
+	}
+	if button.h == 0 {
+		t.Fatal("confirm button was not registered")
+	}
+	overlay := m.act.view(m.sp.View())
+	_, h := lipgloss.Width(overlay), lipgloss.Height(overlay)
+	wantY := (m.h-h)/2 + h - 2
+	if button.y != wantY {
+		t.Fatalf("button y=%d, want visible overlay row %d", button.y, wantY)
+	}
+	// A click in the header/blank area must not run the action.
+	updated, _ = m.Update(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.act == nil || !m.act.confirm {
+		t.Fatal("blank modal click changed confirmation state")
+	}
+	// Clicking the actual visible Run half starts it; cancel immediately so
+	// the test never leaves a child process behind.
+	updated, _ = m.Update(tea.MouseClickMsg{X: button.x + max(1, button.w/2), Y: button.y, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.act == nil || m.act.confirm || !m.act.running {
+		t.Fatal("visible confirm button did not start the action")
+	}
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = updated.(*shellModel)
+	if cmd == nil {
+		t.Fatal("cancel after modal click returned no stream command")
+	}
+	for m.act != nil && cmd != nil {
+		msg := cmd()
+		updated, cmd = m.Update(msg)
+		m = updated.(*shellModel)
+	}
+}
+
+func TestShellReportsRouteErrors(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	updated, _ := m.Update(actionPlanErrorMsg{err: fmt.Errorf("select a machine")})
+	m = updated.(*shellModel)
+	if !strings.Contains(stripANSI(m.View().Content), "select a machine") {
+		t.Fatal("route error was not rendered in the shell footer")
+	}
 }
 
 func TestShellFleetSelectionUsesCacheRows(t *testing.T) {
@@ -191,7 +316,17 @@ func TestShellMouseSelectsRows(t *testing.T) {
 	m.focus = shellFocusContent
 	m.fleet.Hosts = []fleetSnapshotHost{{Alias: "a1", Outcome: "ok", ConfigOK: true}}
 	_ = m.View()
-	updated, _ := m.Update(tea.MouseClickMsg{X: shellSidebarWidth + 5, Y: shellBodyTop + 3 + 1, Button: tea.MouseLeft})
+	var row shellHit
+	for _, hit := range m.hits {
+		if hit.kind == shellHitRow && hit.route == routeFleet && hit.index == 0 {
+			row = hit
+			break
+		}
+	}
+	if row.h == 0 {
+		t.Fatal("fleet row has no mouse hit target")
+	}
+	updated, _ := m.Update(tea.MouseClickMsg{X: row.x + 1, Y: row.y, Button: tea.MouseLeft})
 	m = updated.(*shellModel)
 	if m.fleetCursor != 0 || m.focus != shellFocusContent {
 		t.Fatalf("fleet row click did not focus row: cursor=%d focus=%d", m.fleetCursor, m.focus)
@@ -281,7 +416,17 @@ func TestShellActionModalMouseCancelIsSafe(t *testing.T) {
 	updated, _ := m.Update(runActionMsg{plan: plan})
 	m = updated.(*shellModel)
 	_ = m.View()
-	updated, _ = m.Update(tea.MouseClickMsg{X: 80, Y: 28, Button: tea.MouseLeft})
+	var cancel shellHit
+	for _, hit := range m.hits {
+		if hit.kind == shellHitAction && hit.index == 1 {
+			cancel = hit
+			break
+		}
+	}
+	if cancel.h == 0 {
+		t.Fatal("cancel button was not registered")
+	}
+	updated, _ = m.Update(tea.MouseClickMsg{X: cancel.x + max(1, cancel.w/2), Y: cancel.y, Button: tea.MouseLeft})
 	m = updated.(*shellModel)
 	if m.act != nil {
 		t.Fatal("clicking the cancel half of an action modal did not close it")

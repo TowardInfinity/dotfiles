@@ -460,8 +460,8 @@ func runRolloutCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "dots rollout: cannot resolve Latest: %v\n", err)
 		return 1
 	}
-	if latest != tag {
-		fmt.Fprintf(os.Stderr, "dots rollout: %s is signed/tagged but Latest is %s; refusing a resolver/version mismatch\n", tag, latest)
+	if err := validateRolloutLatest(tag, latest); err != nil {
+		fmt.Fprintf(os.Stderr, "dots rollout: %v\n", err)
 		return 1
 	}
 	plan, err := buildOperation(rolloutRequest{Repo: repo, Hosts: hosts, Revision: sha, Version: tag})
@@ -470,6 +470,13 @@ func runRolloutCLI(args []string) int {
 		return 1
 	}
 	return runPlanCLI(plan, cliPlanOptions{DryRun: dry, AssumeYes: yes, AskConfirm: true})
+}
+
+func validateRolloutLatest(tag, latest string) error {
+	if latest != tag {
+		return fmt.Errorf("%s is signed/tagged but Latest is %s; refusing a resolver/version mismatch", tag, latest)
+	}
+	return nil
 }
 
 func chooseHosts(hosts []string) ([]string, error) {

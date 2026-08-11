@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,36 @@ func TestChangesSelectionBuildsTypedPublishRequest(t *testing.T) {
 	msg := cmd()
 	if _, ok := msg.(runActionMsg); !ok {
 		t.Fatalf("publish command returned %T, want runActionMsg", msg)
+	}
+}
+
+func TestChangesCommitMessageCanBeEditedBeforePublish(t *testing.T) {
+	m := newChangesModel(findRepo())
+	m.loading = false
+	m.files = []changeFile{{Path: "a.txt", Status: " M"}}
+	m, _ = m.update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m, _ = m.update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if !m.messageEditing {
+		t.Fatal("m did not open the commit-message editor")
+	}
+	for _, r := range " review" {
+		m, _ = m.update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	m, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.messageEditing || m.commitMessage != "changes: publish selected paths review" {
+		t.Fatalf("commit message = %q, editing=%t", m.commitMessage, m.messageEditing)
+	}
+	m, cmd := m.update(tea.KeyPressMsg{Code: 'p', Text: "p"})
+	if cmd == nil {
+		t.Fatal("publish did not create an operation command")
+	}
+	msg := cmd()
+	planMsg, ok := msg.(runActionMsg)
+	if !ok {
+		t.Fatalf("publish command returned %T, want runActionMsg", msg)
+	}
+	if !strings.Contains(planMsg.plan.CommandSummary(), "review") {
+		t.Fatalf("edited message did not reach publish plan: %s", planMsg.plan.CommandSummary())
 	}
 }
 

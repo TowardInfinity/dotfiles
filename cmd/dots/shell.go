@@ -249,6 +249,7 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		m.clampHealthCursor()
 		return m, nil
 	case overviewInfoMsg:
 		m.ovInfo = msg.info
@@ -305,6 +306,10 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.act = &a
 		return m, cmd
 	}
+	// Errors are transient route state. Keep them visible until the next user
+	// input, then clear them so a stale plan failure cannot obscure a later
+	// action's feedback.
+	m.err = ""
 
 	if m.palette != nil {
 		return m.updatePalette(msg)
@@ -468,6 +473,9 @@ func (m *shellModel) updateHealthKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	checks := m.visibleHealthChecks()
+	if m.healthCursor >= len(checks) {
+		m.healthCursor = max(0, len(checks)-1)
+	}
 	switch msg.String() {
 	case "j", "down":
 		if m.healthCursor < len(checks)-1 {
@@ -491,6 +499,16 @@ func (m *shellModel) updateHealthKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.doc, cmd = m.doc.update(msg)
 	return m, cmd
+}
+
+func (m *shellModel) clampHealthCursor() {
+	checks := m.visibleHealthChecks()
+	if m.healthCursor >= len(checks) {
+		m.healthCursor = max(0, len(checks)-1)
+	}
+	if m.healthCursor < 0 {
+		m.healthCursor = 0
+	}
 }
 
 func (m *shellModel) visibleHealthChecks() []checkResult {
@@ -687,7 +705,11 @@ func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		} else if msg.Button == tea.MouseWheelUp {
 			m.moveRoute(-1)
 		}
-		return m, m.ensureRouteLoaded()
+		// Scrolling the navigation rail is browsing, not an explicit request
+		// to start a route provider. In particular, do not turn a wheel pass
+		// over the sidebar into an SSH fleet probe; Enter/right-clicking into a
+		// route remains the deliberate load boundary.
+		return m, nil
 	}
 	if m.route == routeDocs {
 		var cmd tea.Cmd
@@ -881,7 +903,11 @@ func (m *shellModel) choosePalette(index int) (tea.Model, tea.Cmd) {
 			m.err = "select at least one changed path before publishing"
 			return m, nil
 		}
-		return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
+		message := strings.TrimSpace(m.changes.commitMessage)
+		if message == "" {
+			message = defaultCommitMessage
+		}
+		return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: message})
 	case "health-refresh":
 		return m, runDoctorChecks
 	case "health-install":
@@ -981,7 +1007,7 @@ func (m *shellModel) View() tea.View {
 		} else {
 			m.hits = append(m.hits, shellHit{x: left, y: top + boxH - 2, w: boxW, h: 2, kind: shellHitAction, index: 0})
 		}
-		view = overlay
+		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, overlay)
 	}
 	if os.Getenv("NO_COLOR") != "" {
 		view = stripANSI(view)
@@ -1116,6 +1142,9 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeChanges:
 		body := m.changes.view(w-4, h-3)
 		row := 0
+		if m.changes.messageEditing {
+			row += 2 // prompt label and the text-input row
+		}
 		if m.changes.filtering || m.changes.message != "" || m.changes.loading {
 			row++
 		}
@@ -1127,7 +1156,9 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeFleet:
 		body := m.renderFleet(w, h)
 		for i := range m.fleet.Hosts {
-			m.registerRowHit(routeFleet, i, shellBodyTop+3+1+i, w)
+			// Fleet has an instruction row plus the shared table header before
+			// its first selectable host.
+			m.registerRowHit(routeFleet, i, shellBodyTop+3+2+i, w)
 		}
 		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), body)
 	case routeServices:
@@ -1262,7 +1293,20 @@ func (m *shellModel) renderFleet(w, h int) string {
 		return styMuted.Render("unknown · press r to check configured SSH hosts")
 	}
 	rows := []string{styMuted.Render("SPACE select · ENTER inspect · r refresh · a actions")}
-	for i, host := range m.fleet.Hosts {
+	measure := measureFor(w)
+	// Preserve the high-value identity/state columns as the terminal narrows;
+	// revision and then release version are details available in the inspector.
+	showVersion := measure >= 58
+	showRevision := measure >= 78
+	headers := []string{"HOST", "STATE"}
+	if showVersion {
+		headers = append(headers, "VERSION")
+	}
+	if showRevision {
+		headers = append(headers, "REVISION")
+	}
+	tableRows := make([][]string, 0, len(m.fleet.Hosts))
+	for _, host := range m.fleet.Hosts {
 		mark := "○"
 		if m.fleetSelected[host.Alias] {
 			mark = "●"
@@ -1273,19 +1317,24 @@ func (m *shellModel) renderFleet(w, h int) string {
 		} else if host.Outcome == "unreachable" {
 			state = styBad.Render("unreachable")
 		}
-		revision := shortSHA(host.Revision)
-		if revision == "" {
-			revision = "—"
+		row := []string{mark + " " + truncate(host.Alias, 18), stripANSI(state)}
+		if showVersion {
+			version := host.Version
+			if version == "" {
+				version = "—"
+			}
+			row = append(row, version)
 		}
-		line := fmt.Sprintf("%s %-10s %-12s %-8s %s", mark, host.Alias, state, host.Version, revision)
-		line = truncate(line, max(1, w-4))
-		if i == m.fleetCursor {
-			line = styItemOn.Render(padRight(line, max(1, w-4)))
-		} else {
-			line = styItem.Render(line)
+		if showRevision {
+			revision := shortSHA(host.Revision)
+			if revision == "" {
+				revision = "—"
+			}
+			row = append(row, revision)
 		}
-		rows = append(rows, line)
+		tableRows = append(tableRows, row)
 	}
+	rows = append(rows, dataTable(headers, tableRows, m.fleetCursor, measure))
 	if m.fleetDetail != "" {
 		rows = append(rows, "", styTitle.Render("MACHINE DETAIL"), styMuted.Render("  "+truncate(m.fleetDetail, max(1, w-4))))
 	}
@@ -1352,18 +1401,33 @@ func (m *shellModel) prepareFleetRollout() tea.Cmd {
 	}
 	repo := m.repo
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		revision, err := gitOutputContext(ctx, repo, "rev-parse", "origin/main")
+		revision, tag, err := resolveFleetRolloutTarget(repo)
 		if err != nil {
-			return actionPlanErrorMsg{err: fmt.Errorf("resolve origin/main: %w", err)}
+			return actionPlanErrorMsg{err: err}
 		}
-		tag, err := latestReleaseTag()
-		if err != nil {
-			return actionPlanErrorMsg{err: fmt.Errorf("resolve Latest release: %w", err)}
-		}
-		return requestAction(rolloutRequest{Repo: repo, Hosts: hosts, Revision: strings.TrimSpace(revision), Version: tag})()
+		return requestAction(rolloutRequest{Repo: repo, Hosts: hosts, Revision: revision, Version: tag})()
 	}
+}
+
+// resolveFleetRolloutTarget is shared by the TUI entry point and the CLI's
+// rollout contract: a rollout may only pair a published semver tag with the
+// exact commit that tag names, and that tag must still be Latest. Resolving
+// origin/main independently would pair an untagged checkout with an older
+// release binary and make the remote script appear successful while the
+// convergence probe failed afterwards.
+func resolveFleetRolloutTarget(repo string) (string, string, error) {
+	revision, tag, err := resolvePublishedRevision(repo, "")
+	if err != nil {
+		return "", "", fmt.Errorf("resolve published revision: %w", err)
+	}
+	latest, err := latestReleaseTag()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve Latest release: %w", err)
+	}
+	if err := validateRolloutLatest(tag, latest); err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(revision), tag, nil
 }
 
 func (m *shellModel) renderOverview(w, h int) string {
@@ -1447,7 +1511,7 @@ func (m *shellModel) renderFooter() string {
 	left := "↑↓ move  tab focus  enter inspect  a actions  / palette  ? help"
 	switch m.route {
 	case routeChanges:
-		left = "↑↓ move  space select  enter inspect  u sync  p publish  a actions  ? help"
+		left = "↑↓ move  space select  enter inspect  m message  L apply  u sync  p publish  a actions  ? help"
 	case routeFleet:
 		left = "↑↓ move  space select  enter inspect  r refresh  a actions  ? help"
 	case routeHealth:
@@ -1460,6 +1524,9 @@ func (m *shellModel) renderFooter() string {
 		left = "↑↓ move  enter open  a actions  ? help"
 	case routeDocs:
 		left = "↑↓ topic  / filter  d/u scroll  a actions  ? help"
+	}
+	if m.err != "" {
+		left = "error: " + m.err + "  ·  press any key to dismiss"
 	}
 	if m.sync.needsSync() {
 		left += "  " + styPending.Render("! changes")

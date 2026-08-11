@@ -51,7 +51,7 @@ func canonicalShell(width, height int, route routeID) *shellModel {
 
 func assertCanonicalGolden(t *testing.T, name, got string) {
 	t.Helper()
-	got = strings.TrimRight(stripANSI(got), "\n") + "\n"
+	got = canonicalGoldenText(stripANSI(got))
 	path := filepath.Join("testdata", "goldens", name+".txt")
 	if *updateGoldens {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -66,9 +66,27 @@ func assertCanonicalGolden(t *testing.T, name, got string) {
 	if err != nil {
 		t.Fatalf("read %s: %v (run go test ./cmd/dots -run TestCanonicalGoldens -update-goldens)", path, err)
 	}
-	if string(want) != got {
-		t.Fatalf("%s golden mismatch; run with -update-goldens only after reviewing the layout", name)
+	if canonicalGoldenText(string(want)) != got {
+		wantText := canonicalGoldenText(string(want))
+		wantLines, gotLines := strings.Split(wantText, "\n"), strings.Split(got, "\n")
+		for i := 0; i < len(wantLines) && i < len(gotLines); i++ {
+			if wantLines[i] != gotLines[i] {
+				t.Fatalf("%s golden mismatch at line %d: want %q, got %q", name, i+1, wantLines[i], gotLines[i])
+			}
+		}
+		t.Fatalf("%s golden mismatch (%d want lines, %d got); run with -update-goldens only after reviewing the layout", name, len(wantLines), len(gotLines))
 	}
+}
+
+func canonicalGoldenText(s string) string {
+	// Remove only the terminal newline. Blank rows inside the fixed-size
+	// terminal frame are meaningful and must not collapse during normalization.
+	s = strings.TrimSuffix(s, "\n")
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " ")
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func TestCanonicalGoldens(t *testing.T) {

@@ -53,11 +53,12 @@ dialog, or action owns it instead.
 | `r` | route content | Refresh the current route. |
 | `q` / `Ctrl-C` | base layer | Quit safely. |
 
-Changes uses `Space` for file selection, `u` for inbound sync, and `p` for a
-reviewed publish plan. Fleet uses `Space` for machine selection and `Enter` for
-inspection. Health uses `f` to switch between Problems and All checks. Services
-and Packages retain their visible start/stop/upgrade shortcuts, but the same
-actions are also discoverable from `a`.
+Changes uses `Space` for file selection, `m` to edit the commit message, `L` for
+local Apply, `u` for inbound sync, and `p` for a reviewed publish plan. Fleet
+uses `Space` for machine selection and `Enter` for inspection. Health uses `f`
+to switch between Problems and All checks. Services uses `f` for the running
+only filter; Packages retains its visible upgrade shortcut. All mutations are
+also discoverable from `a`.
 
 The status bar shows the highest-value actions for the focused route. Full
 details live here and in `?`, so the footer never becomes a wall of letters.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -34,24 +35,31 @@ type changesInfo struct {
 
 type changesInfoMsg struct{ info changesInfo }
 
+const defaultCommitMessage = "changes: publish selected paths"
+
 type changesModel struct {
-	repo      string
-	branch    string
-	files     []changeFile
-	incoming  []changeCommit
-	cursor    int
-	selected  map[string]bool
-	filter    string
-	filtering bool
-	detail    string
-	loading   bool
-	message   string
-	width     int
-	height    int
+	repo           string
+	branch         string
+	files          []changeFile
+	incoming       []changeCommit
+	cursor         int
+	selected       map[string]bool
+	filter         string
+	filtering      bool
+	detail         string
+	loading        bool
+	message        string
+	commitMessage  string
+	messageEditing bool
+	messageInput   textinput.Model
+	width          int
+	height         int
 }
 
 func newChangesModel(repo string) changesModel {
-	return changesModel{repo: repo, selected: map[string]bool{}, loading: true}
+	input := newRouteFilterInput("commit message")
+	input.SetValue(defaultCommitMessage)
+	return changesModel{repo: repo, selected: map[string]bool{}, loading: true, commitMessage: input.Value(), messageInput: input}
 }
 
 func (m changesModel) Init() tea.Cmd { return fetchChangesInfo(m.repo) }
@@ -159,6 +167,27 @@ func (m changesModel) update(msg tea.Msg) (changesModel, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyPressMsg:
+		if m.messageEditing {
+			switch msg.String() {
+			case "esc":
+				m.messageEditing = false
+				m.messageInput.Blur()
+			case "enter":
+				value := strings.TrimSpace(m.messageInput.Value())
+				if value == "" {
+					m.message = "commit message cannot be empty"
+					return m, nil
+				}
+				m.commitMessage = value
+				m.messageEditing = false
+				m.messageInput.Blur()
+			default:
+				var cmd tea.Cmd
+				m.messageInput, cmd = m.messageInput.Update(msg)
+				return m, cmd
+			}
+			return m, nil
+		}
 		if m.filtering {
 			switch msg.String() {
 			case "esc":
@@ -184,6 +213,12 @@ func (m changesModel) update(msg tea.Msg) (changesModel, tea.Cmd) {
 		case "/":
 			m.filtering = true
 			return m, nil
+		case "m":
+			m.messageInput.SetValue(m.commitMessage)
+			m.messageInput.CursorEnd()
+			m.messageInput.Focus()
+			m.messageEditing = true
+			return m, textinput.Blink
 		case "j", "down":
 			if m.cursor < len(files)-1 {
 				m.cursor++
@@ -220,7 +255,11 @@ func (m changesModel) update(msg tea.Msg) (changesModel, tea.Cmd) {
 				m.message = "select at least one changed path before publishing"
 				return m, nil
 			}
-			return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
+			message := strings.TrimSpace(m.commitMessage)
+			if message == "" {
+				message = defaultCommitMessage
+			}
+			return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: message})
 		}
 	}
 	return m, nil
@@ -240,6 +279,10 @@ func (m changesModel) selectedPaths() []string {
 func (m changesModel) view(w, h int) string {
 	files := m.visibleFiles()
 	rows := []string{}
+	if m.messageEditing {
+		m.messageInput.SetWidth(max(10, w-6))
+		rows = append(rows, styFilter.Render("commit message"), "  "+m.messageInput.View())
+	}
 	if m.filtering {
 		rows = append(rows, styFilter.Render("/"+m.filter))
 	}
@@ -280,6 +323,9 @@ func (m changesModel) view(w, h int) string {
 	}
 	if m.detail != "" {
 		rows = append(rows, "", styTitle.Render("INSPECTOR"), styValue.Render("  "+truncate(m.detail, max(1, w-4))))
+	}
+	if m.commitMessage != "" && !m.messageEditing {
+		rows = append(rows, "", styMuted.Render("message: "+truncate(m.commitMessage, max(1, w-13))))
 	}
 	return strings.Join(rows, "\n")
 }

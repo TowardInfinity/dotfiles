@@ -36,6 +36,18 @@ func TestServicesRouteOwnsFilteringAndInspection(t *testing.T) {
 	}
 }
 
+func TestServicesRunningFilterUsesFNotGlobalActionsKey(t *testing.T) {
+	m := newServicesRouteModel()
+	m, _ = m.update(servicesFoundMsg{services: []service{
+		{Name: "api", Source: srcLaunchd, Running: true},
+		{Name: "worker", Source: srcLaunchd, Running: false},
+	}})
+	m, _ = m.updateKey(tea.KeyPressMsg{Code: 'f', Text: "f"})
+	if !m.runningOnly || len(m.visible()) != 1 || m.visible()[0].Name != "api" {
+		t.Fatalf("running filter = enabled:%v rows:%v, want only api", m.runningOnly, m.visible())
+	}
+}
+
 func TestPackagesRouteOwnsSortManagerFilterAndUpgrade(t *testing.T) {
 	m := newPackagesRouteModel()
 	m, _ = m.update(packagesFoundMsg{packages: []pkg{

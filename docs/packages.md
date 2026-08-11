@@ -19,10 +19,10 @@ different questions about it:
   every manager". A full browsable inventory, grouped by manager, with
   versions and — one keypress away — a per-package upgrade. This one *does*
   act, but only on a single row at a time, and only via the same
-  confirm-then-stream overlay every other Manage action uses.
+  confirm-then-stream overlay used by every mutating route.
 
 Neither installs anything `dots install`/`--deps` wouldn't already have
-installed; the Manage section's upgrade key runs each manager's own upgrade
+installed; the Packages route's upgrade key runs each manager's own upgrade
 command on something already present, nothing more.
 
 ## What the configs actually declare
@@ -75,7 +75,7 @@ A blank `LATEST` column means "not knowable offline for this manager", never
 a guessed "up to date" — the same principle the doctor checks above already
 follow with `checkWarn`. The `u` key only appears in the footer when the
 cursor is on a row that actually has an upgrade path; pressing it runs the
-command through the same confirm-then-stream overlay every other Manage
+command through the same confirm-then-stream overlay every other route
 action (services, dotfiles updates, machine doctor) already uses.
 
 The installer group's `VERSION` column is blank the same way — presence
@@ -151,6 +151,6 @@ is narrower, and specific to the doctor checks:
   Packages route's brew rows are already the full `brew list --versions` output,
   so this would just be re-deriving a subset of data already visible there,
   not new information.
-- **Bulk "upgrade everything outdated"**, per manager — the Manage section
+- **Bulk "upgrade everything outdated"**, per manager — the Packages route
   is deliberately per-row only; a batch action is a different, higher-risk
   feature, not a v1 requirement.

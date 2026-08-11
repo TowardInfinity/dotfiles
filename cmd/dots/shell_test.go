@@ -91,6 +91,23 @@ func TestShellSlashFiltersFocusedCollection(t *testing.T) {
 	}
 }
 
+func TestShellEscUnwindsDetailBeforeFocus(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeFleet
+	m.focus = shellFocusContent
+	m.fleetDetail = "a1 · healthy"
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = updated.(*shellModel)
+	if m.fleetDetail != "" || m.focus != shellFocusContent {
+		t.Fatalf("Esc did not close detail first: detail=%q focus=%d", m.fleetDetail, m.focus)
+	}
+	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m = updated.(*shellModel)
+	if m.focus != shellFocusSidebar {
+		t.Fatal("second Esc did not return focus to the sidebar")
+	}
+}
+
 func TestShellResponsiveGeometry(t *testing.T) {
 	for _, size := range [][2]int{{44, 14}, {60, 18}, {76, 22}, {100, 30}, {160, 45}} {
 		m := shellAt(t, size[0], size[1])

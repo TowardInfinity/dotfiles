@@ -325,6 +325,24 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "esc":
 		if m.focus == shellFocusContent {
+			switch m.route {
+			case routeChanges:
+				if m.changes.detail != "" {
+					return m.dispatchRouteKey(msg)
+				}
+			case routeFleet:
+				if m.fleetDetail != "" {
+					return m.dispatchRouteKey(msg)
+				}
+			case routeHealth:
+				if m.healthDetail != "" {
+					return m.dispatchRouteKey(msg)
+				}
+			case routeProjects:
+				if m.projectDetail != "" {
+					return m.dispatchRouteKey(msg)
+				}
+			}
 			m.focus = shellFocusSidebar
 			return m, nil
 		}

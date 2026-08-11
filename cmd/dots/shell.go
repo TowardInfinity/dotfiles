@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -116,11 +117,17 @@ type shellModel struct {
 	route routeID
 	focus shellFocus
 
-	docs    docsModel
-	changes changesModel
-	doc     doctorModel
-	man     manageModel
-	sp      spinner.Model
+	docs            docsModel
+	changes         changesModel
+	doc             doctorModel
+	servicesView    servicesRouteModel
+	packagesView    packagesRouteModel
+	sp              spinner.Model
+	ovInfo          overviewInfo
+	ovLoading       bool
+	projects        []projectInfo
+	projectsLoading bool
+	projectHint     string
 
 	act              *actionModel
 	palette          *shellPalette
@@ -145,17 +152,18 @@ type shellModel struct {
 func newShellModel() *shellModel {
 	repo := findRepo()
 	docs, source := loadDocs(repo)
-	man := newManageModel(repo)
-	man.embedded = true
 	return &shellModel{
-		repo:    repo,
-		source:  source,
-		route:   routeOverview,
-		focus:   shellFocusSidebar,
-		docs:    newDocsModel(docs),
-		changes: newChangesModel(repo),
-		doc:     newDoctorModel(repo),
-		man:     man,
+		repo:            repo,
+		source:          source,
+		route:           routeOverview,
+		focus:           shellFocusSidebar,
+		docs:            newDocsModel(docs),
+		changes:         newChangesModel(repo),
+		doc:             newDoctorModel(repo),
+		servicesView:    newServicesRouteModel(),
+		packagesView:    newPackagesRouteModel(),
+		ovLoading:       true,
+		projectsLoading: true,
 		sp: spinner.New(
 			spinner.WithSpinner(spinner.Dot),
 			spinner.WithStyle(styPending),
@@ -241,6 +249,33 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				break
 			}
 		}
+		return m, nil
+	case overviewInfoMsg:
+		m.ovInfo = msg.info
+		m.ovLoading = false
+		return m, nil
+	case projectsInfoMsg:
+		m.projects = msg.projects
+		m.projectsLoading = false
+		if m.projectCursor >= len(m.projects) {
+			m.projectCursor = len(m.projects) - 1
+		}
+		if m.projectCursor < 0 {
+			m.projectCursor = 0
+		}
+		return m, nil
+	case projTmuxMsg:
+		m.projectHint = msg.hint
+		return m, nil
+	case servicesFoundMsg:
+		var cmd tea.Cmd
+		m.servicesView, cmd = m.servicesView.update(msg)
+		return m, cmd
+	case servicesProbedMsg:
+		m.servicesView, _ = m.servicesView.update(msg)
+		return m, nil
+	case packagesFoundMsg:
+		m.packagesView, _ = m.packagesView.update(msg)
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
@@ -343,6 +378,14 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				if m.projectDetail != "" {
 					return m.dispatchRouteKey(msg)
 				}
+			case routeServices:
+				if m.servicesView.detail != "" {
+					return m.dispatchRouteKey(msg)
+				}
+			case routePackages:
+				if m.packagesView.detail != "" {
+					return m.dispatchRouteKey(msg)
+				}
 			}
 			m.focus = shellFocusSidebar
 			return m, nil
@@ -389,11 +432,9 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case routeFleet:
 		return m.updateFleetKey(msg)
 	case routeServices:
-		m.man.section = secServices
-		m.man, cmd = m.man.updateServicesKey(msg)
+		m.servicesView, cmd = m.servicesView.updateKey(msg)
 	case routePackages:
-		m.man.section = secPackages
-		m.man, cmd = m.man.updatePackagesKey(msg)
+		m.packagesView, cmd = m.packagesView.updateKey(msg)
 	case routeProjects:
 		return m.updateProjectsKey(msg)
 	}
@@ -406,12 +447,12 @@ func (m *shellModel) routeCapturesInput() bool {
 		return m.docs.filtering
 	case routeChanges:
 		return m.changes.filtering
-	case routeServices:
-		return m.man.svcFiltering
-	case routePackages:
-		return m.man.pkgFiltering
 	case routeProjects:
 		return m.projectFiltering
+	case routeServices:
+		return m.servicesView.filtering
+	case routePackages:
+		return m.packagesView.filtering
 	}
 	return false
 }
@@ -492,10 +533,10 @@ func (m *shellModel) updateFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m *shellModel) visibleProjects() []projectInfo {
 	q := strings.ToLower(strings.TrimSpace(m.projectFilter))
 	if q == "" {
-		return m.man.projects
+		return m.projects
 	}
-	projects := make([]projectInfo, 0, len(m.man.projects))
-	for _, project := range m.man.projects {
+	projects := make([]projectInfo, 0, len(m.projects))
+	for _, project := range m.projects {
 		if strings.Contains(strings.ToLower(project.name+" "+project.branch+" "+project.path), q) {
 			projects = append(projects, project)
 		}
@@ -538,9 +579,7 @@ func (m *shellModel) updateProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		if len(projects) > 0 {
 			project := projects[m.projectCursor]
 			m.projectDetail = project.path + " · " + project.branch
-			m.man.projCursor = indexOfProject(m.man.projects, project.name)
-			m.man.projSelected = m.man.projCursor
-			return m, m.man.openProjectTmux(project)
+			return m, openProjectTmux(project)
 		}
 	case "esc":
 		m.projectDetail = ""
@@ -557,6 +596,30 @@ func indexOfProject(projects []projectInfo, name string) int {
 	return 0
 }
 
+// openProjectTmux is a handoff rather than an action-runner operation: tmux
+// must own the controlling terminal. The shell still reports the outcome as a
+// message, so opening a project has the same async/error semantics as every
+// other route action.
+func openProjectTmux(p projectInfo) tea.Cmd {
+	shown := p.path
+	if home := os.Getenv("HOME"); home != "" && strings.HasPrefix(shown, home) {
+		shown = "~" + strings.TrimPrefix(shown, home)
+	}
+	cmdLine := fmt.Sprintf("tmux new-session -A -s %s -c %s", p.name, shown)
+	if os.Getenv("TMUX") == "" {
+		return func() tea.Msg { return projTmuxMsg{hint: "run in a terminal: " + cmdLine} }
+	}
+	name := p.name
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(ctx, "tmux", "switch-client", "-t", name).Run(); err != nil {
+			return projTmuxMsg{hint: "no session named " + name + " yet — run: " + cmdLine}
+		}
+		return projTmuxMsg{hint: "switched to " + name}
+	}
+}
+
 func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
@@ -566,8 +629,6 @@ func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
 	cmds = append(cmds, cmd)
 	m.doc, cmd = m.doc.update(msg)
 	cmds = append(cmds, cmd)
-	m.man, cmd = m.man.update(msg)
-	cmds = append(cmds, cmd)
 	return tea.Batch(cmds...)
 }
 
@@ -576,7 +637,6 @@ func (m *shellModel) resizeChildren() {
 	m.docs = m.docs.resize(w, h)
 	m.changes = m.changes.resize(w, h)
 	m.doc = m.doc.resize(w, h)
-	m.man = m.man.resize(w, h)
 	if m.act != nil {
 		a := m.act.resize(m.w, m.h)
 		m.act = &a
@@ -611,20 +671,9 @@ func (m *shellModel) moveRoute(delta int) {
 }
 
 func (m *shellModel) syncLegacySection() {
-	switch m.route {
-	case routeOverview:
-		m.man.section = secOverview
-	case routeChanges:
-		m.man.section = secDotfiles
-	case routeFleet:
-		m.man.section = secMachines
-	case routeServices:
-		m.man.section = secServices
-	case routePackages:
-		m.man.section = secPackages
-	case routeProjects:
-		m.man.section = secProjects
-	}
+	// Production navigation is owned entirely by the shell. This method keeps
+	// the route transition call sites readable while legacy Manage remains
+	// available only to compatibility tests and the old model package.
 }
 
 func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
@@ -701,6 +750,10 @@ func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 				m.healthCursor = hit.index
 			case routeProjects:
 				m.projectCursor = hit.index
+			case routeServices:
+				m.servicesView.cursor = hit.index
+			case routePackages:
+				m.packagesView.cursor = hit.index
 			}
 		}
 		return m, nil
@@ -1027,9 +1080,17 @@ func (m *shellModel) renderRoute(w, h int) string {
 		}
 		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), body)
 	case routeServices:
-		return contentColumn(w, h, paneHeader("This machine", "Services", m.man.servicesSummary(), measureFor(w)), m.man.viewServices(spin))
+		body := m.servicesView.view(w, h, spin)
+		for i := range m.servicesView.visible() {
+			m.registerRowHit(routeServices, i, shellBodyTop+3+m.servicesView.rowOffset()+i, w)
+		}
+		return contentColumn(w, h, paneHeader("This machine", "Services", m.servicesView.summary(), measureFor(w)), body)
 	case routePackages:
-		return contentColumn(w, h, paneHeader("This machine", "Packages", m.man.packagesSummary(), measureFor(w)), m.man.viewPackages(spin))
+		body := m.packagesView.view(w, h, spin)
+		for i := range m.packagesView.visible() {
+			m.registerRowHit(routePackages, i, shellBodyTop+3+m.packagesView.rowOffset()+i, w)
+		}
+		return contentColumn(w, h, paneHeader("This machine", "Packages", m.packagesView.summary(), measureFor(w)), body)
 	case routeProjects:
 		body := m.renderProjects(w, h)
 		row := 1
@@ -1039,7 +1100,7 @@ func (m *shellModel) renderRoute(w, h int) string {
 		for i := range m.visibleProjects() {
 			m.registerRowHit(routeProjects, i, shellBodyTop+3+row+i, w)
 		}
-		return contentColumn(w, h, paneHeader("This machine", "Projects", fmt.Sprintf("%d repositories under ~/Codes", len(m.man.projects)), measureFor(w)), body)
+		return contentColumn(w, h, paneHeader("This machine", "Projects", fmt.Sprintf("%d repositories under ~/Codes", len(m.projects)), measureFor(w)), body)
 	default:
 		return ""
 	}
@@ -1186,7 +1247,7 @@ func (m *shellModel) renderProjects(w, h int) string {
 	if m.projectFiltering {
 		rows = append(rows, styFilter.Render("/"+m.projectFilter))
 	}
-	if m.man.projLoading {
+	if m.projectsLoading {
 		return styPending.Render("scanning projects…")
 	}
 	if len(projects) == 0 {
@@ -1213,8 +1274,8 @@ func (m *shellModel) renderProjects(w, h int) string {
 		}
 		rows = append(rows, line)
 	}
-	if m.man.projTmuxHint != "" {
-		rows = append(rows, "", styMuted.Render("  "+truncate(m.man.projTmuxHint, max(1, w-4))))
+	if m.projectHint != "" {
+		rows = append(rows, "", styMuted.Render("  "+truncate(m.projectHint, max(1, w-4))))
 	}
 	if m.projectDetail != "" {
 		rows = append(rows, "", styTitle.Render("PROJECT DETAIL"), styMuted.Render("  "+truncate(m.projectDetail, max(1, w-4))))
@@ -1272,11 +1333,11 @@ func (m *shellModel) renderOverview(w, h int) string {
 		rows = append(rows, styBad.Render("  × detached HEAD — sync and publish are blocked"))
 		attention++
 	}
-	if !m.man.ovLoading && m.man.ovInfo.toolsTotal > 0 && m.man.ovInfo.toolsHave < m.man.ovInfo.toolsTotal {
-		rows = append(rows, styPending.Render(fmt.Sprintf("  ! tools %d/%d present — inspect Health", m.man.ovInfo.toolsHave, m.man.ovInfo.toolsTotal)))
+	if !m.ovLoading && m.ovInfo.toolsTotal > 0 && m.ovInfo.toolsHave < m.ovInfo.toolsTotal {
+		rows = append(rows, styPending.Render(fmt.Sprintf("  ! tools %d/%d present — inspect Health", m.ovInfo.toolsHave, m.ovInfo.toolsTotal)))
 		attention++
 	}
-	if attention == 0 && !m.man.ovLoading {
+	if attention == 0 && !m.ovLoading {
 		rows = append(rows, styOK.Render("  ✓ nothing needs attention"))
 	}
 
@@ -1307,16 +1368,16 @@ func (m *shellModel) renderOverview(w, h int) string {
 	}
 
 	rows = append(rows, "", styMuted.Render("THIS MACHINE"))
-	if m.man.ovLoading {
+	if m.ovLoading {
 		rows = append(rows, styPending.Render("  ⣾ collecting local facts"))
 	} else {
-		info := m.man.ovInfo
+		info := m.ovInfo
 		name := info.osName
 		if name == "" {
 			name = "OS unknown"
 		}
 		rows = append(rows, styValue.Render(fmt.Sprintf("  %s · %s · dots %s", name, info.arch, info.version)))
-		rows = append(rows, styMuted.Render(fmt.Sprintf("  tools %d/%d · services %d · packages %d", info.toolsHave, info.toolsTotal, len(m.man.services), len(m.man.packages))))
+		rows = append(rows, styMuted.Render(fmt.Sprintf("  tools %d/%d · services %d · packages %d", info.toolsHave, info.toolsTotal, len(m.servicesView.items), len(m.packagesView.items))))
 	}
 	return strings.Join(rows, "\n")
 }

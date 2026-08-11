@@ -73,6 +73,24 @@ func TestShellPaletteNavigatesWithoutExecuting(t *testing.T) {
 	}
 }
 
+func TestShellSlashFiltersFocusedCollection(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeDocs
+	m.focus = shellFocusContent
+	updated, _ := m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(*shellModel)
+	if !m.docs.filtering || m.palette != nil {
+		t.Fatal("Docs slash opened a palette instead of its filter")
+	}
+	m.route = routeChanges
+	m.docs.filtering = false
+	updated, _ = m.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	m = updated.(*shellModel)
+	if !m.changes.filtering || m.palette != nil {
+		t.Fatal("Changes slash opened a palette instead of its filter")
+	}
+}
+
 func TestShellResponsiveGeometry(t *testing.T) {
 	for _, size := range [][2]int{{44, 14}, {60, 18}, {76, 22}, {100, 30}, {160, 45}} {
 		m := shellAt(t, size[0], size[1])

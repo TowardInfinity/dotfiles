@@ -295,9 +295,17 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, tea.Quit
-	case "ctrl+p", ":", "/":
+	case "ctrl+p", ":":
 		m.openPalette(false)
 		return m, nil
+	case "/":
+		switch m.route {
+		case routeDocs, routeChanges, routeServices, routePackages, routeProjects:
+			return m.dispatchRouteKey(msg)
+		default:
+			m.openPalette(false)
+			return m, nil
+		}
 	case "?", "f1":
 		m.help = true
 		return m, nil

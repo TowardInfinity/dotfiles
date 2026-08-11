@@ -1,5 +1,9 @@
 package main
 
+// Deprecated compatibility model. runTUI uses shellModel; this three-tab
+// implementation remains only so the pre-redesign interaction tests continue
+// to exercise their historical contracts while the migration is rolled out.
+
 import (
 	"fmt"
 	"strings"

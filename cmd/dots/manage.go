@@ -1,5 +1,9 @@
 package main
 
+// Deprecated compatibility model. The production shell owns route state and
+// rendering; manageModel remains for legacy contract tests and shared data
+// discovery helpers until that test suite is retired.
+
 import (
 	"context"
 	"fmt"

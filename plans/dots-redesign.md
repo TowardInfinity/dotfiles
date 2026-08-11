@@ -1,8 +1,10 @@
 # dots redesign — product, interaction, and command plan
 
-Status: implementation in progress; Phases −1 through 5 foundations and route
-slices are landed locally. Signed releases and fleet rollout remain
-intentionally unperformed from this workspace.
+Status: user-facing implementation complete locally; Phases −1 through 5
+foundations and native route slices are landed and verified. The retired
+three-tab Manage model remains unreachable compatibility scaffolding for the
+legacy contract tests. Signed release and fleet rollout of these local commits
+remain intentionally unperformed from this workspace.
 
 Date: 2026-08-09
 

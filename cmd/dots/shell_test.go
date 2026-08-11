@@ -238,3 +238,17 @@ func TestShellPaletteRowsAreClickable(t *testing.T) {
 		t.Fatalf("palette click route=%s palette=%v, want changes/closed", m.route, m.palette != nil)
 	}
 }
+
+func TestShellActionModalMouseCancelIsSafe(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	plan := testCommandPlan("Probe", "echo", "ok")
+	plan.Confirm = "Run the probe?"
+	updated, _ := m.Update(runActionMsg{plan: plan})
+	m = updated.(*shellModel)
+	_ = m.View()
+	updated, _ = m.Update(tea.MouseClickMsg{X: 80, Y: 28, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.act != nil {
+		t.Fatal("clicking the cancel half of an action modal did not close it")
+	}
+}

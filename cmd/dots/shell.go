@@ -85,6 +85,7 @@ const (
 	shellHitPalette
 	shellHitHelp
 	shellHitRow
+	shellHitAction
 )
 
 type shellHit struct {
@@ -676,6 +677,17 @@ func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 				return m.choosePalette(hit.index)
 			}
 			m.openPalette(false)
+		case shellHitAction:
+			if m.act == nil {
+				return m, nil
+			}
+			if m.act.confirm {
+				if hit.index == 0 {
+					return m.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+				}
+				return m.updateKey(tea.KeyPressMsg{Code: tea.KeyEsc})
+			}
+			return m.updateKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 		case shellHitHelp:
 			m.help = true
 		case shellHitRow:
@@ -890,14 +902,29 @@ func (m *shellModel) View() tea.View {
 	}
 	view := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 	if m.palette != nil {
+		m.hits = m.hits[:0] // modal input blocks routes and footer behind it
 		view = lipgloss.Place(m.w, m.h, lipgloss.Left, lipgloss.Top, view)
 		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, m.renderPalette(view))
 	}
 	if m.help {
+		m.hits = m.hits[:0]
 		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, m.renderHelp(view))
 	}
 	if m.act != nil {
-		view = m.act.view(m.sp.View())
+		m.hits = m.hits[:0] // modal input blocks every route behind it
+		overlay := m.act.view(m.sp.View())
+		boxW, boxH := lipgloss.Width(overlay), lipgloss.Height(overlay)
+		left := max(0, (m.w-boxW)/2)
+		top := max(0, (m.h-boxH)/2)
+		if m.act.confirm {
+			half := max(1, boxW/2)
+			m.hits = append(m.hits,
+				shellHit{x: left, y: top + boxH - 2, w: half, h: 2, kind: shellHitAction, index: 0},
+				shellHit{x: left + half, y: top + boxH - 2, w: boxW - half, h: 2, kind: shellHitAction, index: 1})
+		} else {
+			m.hits = append(m.hits, shellHit{x: left, y: top + boxH - 2, w: boxW, h: 2, kind: shellHitAction, index: 0})
+		}
+		view = overlay
 	}
 	if os.Getenv("NO_COLOR") != "" {
 		view = stripANSI(view)

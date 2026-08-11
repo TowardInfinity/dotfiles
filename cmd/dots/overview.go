@@ -1,9 +1,9 @@
 package main
 
-// Overview: a single-glance summary of this machine, for the FIRST section of
-// the Manage tab. Deliberately a thin layer over data other sections already
-// gather — repo state (dotfilesInfo), tool presence (checkNames/evalCheck),
-// service counts (the model's discovered []service) — plus a handful of
+// Overview: a single-glance summary of this machine, for the FIRST route of
+// the shell. Deliberately a thin layer over data other sections already gather
+// — repo state (dotfilesInfo), tool presence (checkNames/evalCheck), service
+// counts (the shell's discovered []service) — plus a handful of
 // small OS facts (hostname, OS/version, memory, disk, uptime) that nothing
 // else in this program collects yet. Those go here, gathered by one bounded,
 // partly-concurrent pass so a slow or absent command degrades a single field

@@ -131,7 +131,9 @@ func usage() {
 install, update and docs are commands, not pages. The pages of those names
 are at: dots docs install, dots docs update.
 
-In the TUI: 1/2/3 or tab switch panes, / filters, j/k moves, q quits.
+In the TUI: use the sidebar or Ctrl-P/: to change routes, Tab to move focus,
+arrows/j/k to move, / to filter lists, ? for help, mouse to click controls,
+Esc to go back, and q to quit from the base layer.
 `)
 }
 

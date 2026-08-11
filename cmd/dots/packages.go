@@ -5,11 +5,11 @@ package main
 // offline — the latest available version. Companion to packagehealth.go's
 // narrower doctor checks ("is the one thing bootstrap.sh declared still
 // there"); this file answers the bigger question, "what's here at all",
-// browsable in the Manage tab and one keypress from an upgrade.
+// browsable in the Packages route and one keypress from an upgrade.
 //
 // Same shape as services.go: backends run concurrently, contribute what they
 // can see, and skip themselves silently when their manager isn't installed.
-// No rendering here — that lives in manage.go's viewPackages.
+// No rendering here — that lives in the shell's native Packages route.
 
 import (
 	"context"

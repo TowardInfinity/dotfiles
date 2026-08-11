@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ type statusReport struct {
 	Arch           string              `json:"arch"`
 	Version        string              `json:"version"`
 	BinarySource   string              `json:"binary_source,omitempty"`
+	KeyMarker      string              `json:"key_marker,omitempty"`
 	Repo           string              `json:"repo,omitempty"`
 	Revision       string              `json:"revision,omitempty"`
 	Branch         string              `json:"branch,omitempty"`
@@ -34,11 +36,13 @@ type statusReport struct {
 }
 
 type fleetStatusReport struct {
-	Host     string `json:"host"`
-	Revision string `json:"revision,omitempty"`
-	Version  string `json:"version,omitempty"`
-	ConfigOK bool   `json:"config_ok"`
-	Error    string `json:"error,omitempty"`
+	Host         string `json:"host"`
+	Revision     string `json:"revision,omitempty"`
+	Version      string `json:"version,omitempty"`
+	BinarySource string `json:"binary_source,omitempty"`
+	KeyMarker    string `json:"key_marker,omitempty"`
+	ConfigOK     bool   `json:"config_ok"`
+	Error        string `json:"error,omitempty"`
 }
 
 func runStatusCLI(args []string) int {
@@ -104,6 +108,15 @@ func collectStatus(repo string, online bool) statusReport {
 		}
 		state := readRepoState(repo)
 		report.Dirty, report.Ahead = state.dirty, state.unpushed
+		cache := filepath.Join(os.Getenv("XDG_CACHE_HOME"), "dots")
+		if os.Getenv("XDG_CACHE_HOME") == "" {
+			if home, err := os.UserHomeDir(); err == nil {
+				cache = filepath.Join(home, ".cache", "dots")
+			}
+		}
+		if marker, err := os.ReadFile(filepath.Join(cache, "dots-"+version+".sig-ok")); err == nil {
+			report.KeyMarker = strings.TrimSpace(string(marker))
+		}
 	}
 	for _, check := range configChecks(repo) {
 		detail := check.name + ": " + check.path
@@ -145,7 +158,7 @@ func collectFleetStatus(hosts []string) []fleetStatusReport {
 			if err := json.Unmarshal(out, &remote); err != nil {
 				item.Error = "invalid status response: " + err.Error()
 			} else {
-				item.Revision, item.Version, item.ConfigOK = remote.Revision, remote.Version, remote.ConfigOK
+				item.Revision, item.Version, item.BinarySource, item.KeyMarker, item.ConfigOK = remote.Revision, remote.Version, remote.BinarySource, remote.KeyMarker, remote.ConfigOK
 			}
 		}
 		results = append(results, item)

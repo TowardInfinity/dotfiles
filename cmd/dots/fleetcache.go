@@ -28,6 +28,7 @@ type fleetSnapshotHost struct {
 	Revision     string    `json:"revision,omitempty"`
 	Version      string    `json:"version,omitempty"`
 	BinarySource string    `json:"binary_source,omitempty"`
+	KeyMarker    string    `json:"key_marker,omitempty"`
 	ConfigOK     bool      `json:"config_ok"`
 	Outcome      string    `json:"outcome"`
 	CheckedAt    time.Time `json:"checked_at"`
@@ -133,7 +134,7 @@ func fetchFleetSnapshot() tea.Cmd {
 		results := collectFleetStatus(hosts)
 		snapshot.Hosts = make([]fleetSnapshotHost, 0, len(results))
 		for _, result := range results {
-			item := fleetSnapshotHost{Alias: result.Host, Revision: result.Revision, Version: result.Version, ConfigOK: result.ConfigOK, CheckedAt: started, LastAttempt: started}
+			item := fleetSnapshotHost{Alias: result.Host, Revision: result.Revision, Version: result.Version, BinarySource: result.BinarySource, KeyMarker: result.KeyMarker, ConfigOK: result.ConfigOK, CheckedAt: started, LastAttempt: started}
 			if result.Error != "" {
 				item.Outcome = "unreachable"
 				snapshot.Partial = true

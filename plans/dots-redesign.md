@@ -1,6 +1,8 @@
 # dots redesign — product, interaction, and command plan
 
-Status: proposed; no implementation has started
+Status: implementation in progress; Phases −1 through 5 foundations and route
+slices are landed locally. Signed releases and fleet rollout remain
+intentionally unperformed from this workspace.
 
 Date: 2026-08-09
 

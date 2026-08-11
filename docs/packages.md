@@ -15,7 +15,7 @@ different questions about it:
 - **`dots doctor`'s Packages group** — "did the one thing `bootstrap.sh`
   declared stay installed and usable". Narrow, read-only, reports drift and
   never fixes it, same as the Config group.
-- **The `Manage` tab's Packages section** — "what's actually here, across
+- **The Packages route in `dots`** — "what's actually here, across
   every manager". A full browsable inventory, grouped by manager, with
   versions and — one keypress away — a per-package upgrade. This one *does*
   act, but only on a single row at a time, and only via the same
@@ -55,7 +55,7 @@ repair the Packages group" command the way there is for Config drift
 (`dots install`) or missing base tools (`--deps`), because a PATH problem and
 a missing `uv tool install` aren't the same repair.
 
-## The Manage tab's Packages section
+## The Packages route
 
 Seven backends, each contributing nothing when its manager isn't installed —
 the same "silently skip, never error" rule `cmd/dots/services.go` already
@@ -130,7 +130,7 @@ decision stays with whoever types the suggested command by hand.
 ## Not tracked here, on purpose
 
 Personal installs that nothing in the repo calls for still show up in the
-Manage tab's inventory above — that section is intentionally a full
+Packages route's inventory above — that section is intentionally a full
 snapshot, not filtered to what `bootstrap.sh` declared. What's *not* tracked
 is narrower, and specific to the doctor checks:
 
@@ -148,7 +148,7 @@ is narrower, and specific to the doctor checks:
   checking for it would assert something the tools on hand can't actually
   confirm one way or the other.
 - **`brew leaves` reconciliation** against `docs/tools.md`'s table — the
-  Manage tab's brew rows are already the full `brew list --versions` output,
+  Packages route's brew rows are already the full `brew list --versions` output,
   so this would just be re-deriving a subset of data already visible there,
   not new information.
 - **Bulk "upgrade everything outdated"**, per manager — the Manage section

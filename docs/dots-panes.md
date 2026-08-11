@@ -1,71 +1,66 @@
 ---
-title: Panes & Keys
+title: Navigation & Keys
 group: dots
 order: 20
-summary: The three panes, the arrow keys, and Manage's per-section keys
+summary: The route shell, focus model, keyboard shortcuts, and mouse behavior
 ---
 
-# Panes & Keys
+# Navigation & Keys
 
-## The three panes
+## One route shell
 
-`1` `2` `3` jump straight to one; `tab` cycles.
+The bare `dots` command opens one shell with a route sidebar. It starts on
+Overview and keeps the same focus model everywhere:
 
 | | Pane | What it is for |
 |---|---|---|
-| `1` | **Docs** | These pages. `/` filters, `j`/`k` moves, `d`/`u` scrolls by half a screen, the wheel scrolls. |
-| `2` | **Doctor** | Whether the tools these configs actually call are installed. `r` re-checks, `i` installs what is missing. |
-| `3` | **Manage** | Everything stateful. `h`/`l` moves between its six sections. |
+| — | **Overview** | Attention first: workspace, fleet freshness, and local facts. |
+| — | **Changes** | Review local edits and incoming commits; sync, apply, or publish through plans. |
+| — | **Fleet** | Inspect cached machine results, select hosts, and prepare exact-revision rollout. |
+| — | **Health** | Tools, frameworks, config, and package checks with repair actions. |
+| — | **Services / Packages / Projects** | Local inventories and their scoped actions. |
+| — | **Docs** | Topics, rendered Markdown, and outline navigation. |
 
-`q` quits from anywhere.
+The sidebar is visible at 76 columns and above. On compact terminals it becomes
+a breadcrumb so the content remains readable rather than being squeezed into
+two competing rails. `Ctrl-P` or `:` always opens the searchable palette, so
+every route remains reachable when the sidebar is hidden.
 
 ### The arrow keys
 
 All four work, everywhere something can move. The status bar shows the letter
 form because it is shorter, but the arrows are always aliases for it:
 
-| | Moves the rail | Moves within the section |
+| Axis | Shortcut | Meaning |
 |---|---|---|
-| **Docs** | `↑` `↓` `←` `→` · `j` `k` `h` `l` | — |
-| **Manage** | `←` `→` · `h` `l` | `↑` `↓` · `j` `k` |
+| Vertical | `↑` `↓` or `j` `k` | Move in the focused list or scroll the focused document. |
+| Horizontal | `←` `→` or `h` `l` | Move focus between the sidebar and content, or back/forward in detail. |
+| Focus | `Tab` / `Shift-Tab` | Move between interactive regions; never changes route. |
+| Selection | `Enter` / `Space` | Inspect the focused row / toggle selection where supported. |
+| Back | `Esc` | Close a modal, clear input, close detail, or return to the route. |
 
-Manage's rail and its section content never share a key: `←`/`→` always
-switches sections, `↑`/`↓` always acts within whichever section is showing —
-a row cursor where there's a list (Services, Packages, Projects, Machines), a
-scroll offset where there's just text (Overview, Dotfiles). Where a section
-has nothing to move, `↑`/`↓` does nothing rather than falling back to a
-second meaning — an earlier version had `↑`/`↓` move the rail in the two
-sections with no list, which meant the same keys meant two different things
-depending on where you were; landing on Services mid-scroll and having
-`↑`/`↓` suddenly mean something else was the actual bug report that got it
-removed.
+Filters own every key while open. `q` quits only at the base layer; a filter,
+dialog, or action owns it instead.
 
-While a filter box is open (Services' or Packages' `/`), every key including
-`h`/`j`/`k`/`l` goes into the filter text instead — none of the above fires
-until you `enter`/`esc` out of it.
-
-Doctor has neither a rail nor a list, so the arrows have nothing to move there.
-
-Nothing scrolls sideways anywhere: the body is wrapped to the reading measure,
-which is why `←`/`→` were free to mean "move the rail" in the first place.
-
-### Manage's sections
-
-**Overview** · **Dotfiles** · **Services** · **Projects** · **Machines**
+### Global keys
 
 | Key | Where | Does |
 |---|---|---|
-| `u` | Dotfiles | update — pull, then relink |
-| `L` | Dotfiles | relink only |
-| `p` `t` `D` | Dotfiles | nvim plugins · TPM · dependencies |
-| `s` `x` `R` | Services | start · stop · restart |
-| `a` | Services | toggle all / running only |
-| `enter` | Projects | open a tmux session there |
-| `d` | Machines | run doctor on that machine over SSH |
-| `r` | most | rescan |
+| `Ctrl-P` / `:` | everywhere | Open the command and route palette. |
+| `?` / `F1` | everywhere | Show contextual help. |
+| `/` | lists and Docs | Filter the focused collection. |
+| `a` | route content | Show actions available for that route. |
+| `r` | route content | Refresh the current route. |
+| `q` / `Ctrl-C` | base layer | Quit safely. |
 
-The status bar always shows the keys for whatever is in front of you, so this
-table is a reference, not something to memorise.
+Changes uses `Space` for file selection, `u` for inbound sync, and `p` for a
+reviewed publish plan. Fleet uses `Space` for machine selection and `Enter` for
+inspection. Health uses `f` to switch between Problems and All checks. Services
+and Packages retain their visible start/stop/upgrade shortcuts, but the same
+actions are also discoverable from `a`.
+
+The status bar shows the highest-value actions for the focused route. Full
+details live here and in `?`, so the footer never becomes a wall of letters.
 
 ## When it says you are ahead
 

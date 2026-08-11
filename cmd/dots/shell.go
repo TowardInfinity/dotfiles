@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ const (
 )
 
 const shellSidebarWidth = 20
+const shellBodyTop = 2 // one header row plus its bottom rule
 
 type shellNavRow struct {
 	group string
@@ -82,12 +84,14 @@ const (
 	shellHitFocus
 	shellHitPalette
 	shellHitHelp
+	shellHitRow
 )
 
 type shellHit struct {
 	x, y, w, h int
 	kind       shellHitKind
 	route      routeID
+	index      int
 }
 
 type paletteItem struct {
@@ -117,19 +121,23 @@ type shellModel struct {
 	man     manageModel
 	sp      spinner.Model
 
-	act            *actionModel
-	palette        *shellPalette
-	help           bool
-	err            string
-	sync           repoState
-	fleet          fleetSnapshot
-	healthProblems bool
-	healthCursor   int
-	healthDetail   string
-	fleetCursor    int
-	fleetSelected  map[string]bool
-	fleetDetail    string
-	hits           []shellHit
+	act              *actionModel
+	palette          *shellPalette
+	help             bool
+	err              string
+	sync             repoState
+	fleet            fleetSnapshot
+	healthProblems   bool
+	healthCursor     int
+	healthDetail     string
+	fleetCursor      int
+	fleetSelected    map[string]bool
+	fleetDetail      string
+	projectFilter    string
+	projectFiltering bool
+	projectCursor    int
+	projectDetail    string
+	hits             []shellHit
 }
 
 func newShellModel() *shellModel {
@@ -331,8 +339,7 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.man.section = secPackages
 		m.man, cmd = m.man.updatePackagesKey(msg)
 	case routeProjects:
-		m.man.section = secProjects
-		m.man, cmd = m.man.updateProjectsKey(msg)
+		return m.updateProjectsKey(msg)
 	}
 	return m, cmd
 }
@@ -347,6 +354,8 @@ func (m *shellModel) routeCapturesInput() bool {
 		return m.man.svcFiltering
 	case routePackages:
 		return m.man.pkgFiltering
+	case routeProjects:
+		return m.projectFiltering
 	}
 	return false
 }
@@ -424,6 +433,74 @@ func (m *shellModel) updateFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *shellModel) visibleProjects() []projectInfo {
+	q := strings.ToLower(strings.TrimSpace(m.projectFilter))
+	if q == "" {
+		return m.man.projects
+	}
+	projects := make([]projectInfo, 0, len(m.man.projects))
+	for _, project := range m.man.projects {
+		if strings.Contains(strings.ToLower(project.name+" "+project.branch+" "+project.path), q) {
+			projects = append(projects, project)
+		}
+	}
+	return projects
+}
+
+func (m *shellModel) updateProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if m.projectFiltering {
+		switch msg.String() {
+		case "esc":
+			m.projectFiltering, m.projectFilter = false, ""
+		case "enter":
+			m.projectFiltering = false
+		case "backspace":
+			if m.projectFilter != "" {
+				m.projectFilter = m.projectFilter[:len(m.projectFilter)-1]
+			}
+		default:
+			if msg.Text != "" && msg.Mod == 0 {
+				m.projectFilter += msg.Text
+			}
+		}
+		m.projectCursor = 0
+		return m, nil
+	}
+	projects := m.visibleProjects()
+	switch msg.String() {
+	case "/":
+		m.projectFiltering = true
+	case "j", "down":
+		if m.projectCursor < len(projects)-1 {
+			m.projectCursor++
+		}
+	case "k", "up":
+		if m.projectCursor > 0 {
+			m.projectCursor--
+		}
+	case "enter":
+		if len(projects) > 0 {
+			project := projects[m.projectCursor]
+			m.projectDetail = project.path + " · " + project.branch
+			m.man.projCursor = indexOfProject(m.man.projects, project.name)
+			m.man.projSelected = m.man.projCursor
+			return m, m.man.openProjectTmux(project)
+		}
+	case "esc":
+		m.projectDetail = ""
+	}
+	return m, nil
+}
+
+func indexOfProject(projects []projectInfo, name string) int {
+	for i, project := range projects {
+		if project.name == name {
+			return i
+		}
+	}
+	return 0
+}
+
 func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
@@ -495,6 +572,14 @@ func (m *shellModel) syncLegacySection() {
 }
 
 func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
+	if m.hasSidebar() && msg.X < shellSidebarWidth {
+		if msg.Button == tea.MouseWheelDown {
+			m.moveRoute(1)
+		} else if msg.Button == tea.MouseWheelUp {
+			m.moveRoute(-1)
+		}
+		return m, nil
+	}
 	if m.route == routeDocs {
 		var cmd tea.Cmd
 		m.docs, cmd = m.docs.update(msg)
@@ -534,6 +619,18 @@ func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 			m.openPalette(false)
 		case shellHitHelp:
 			m.help = true
+		case shellHitRow:
+			m.focus = shellFocusContent
+			switch hit.route {
+			case routeChanges:
+				m.changes.cursor = hit.index
+			case routeFleet:
+				m.fleetCursor = hit.index
+			case routeHealth:
+				m.healthCursor = hit.index
+			case routeProjects:
+				m.projectCursor = hit.index
+			}
 		}
 		return m, nil
 	}
@@ -576,6 +673,8 @@ func shellPaletteItems(current routeID, actionsOnly bool) []paletteItem {
 		items = append(items, paletteItem{label: "Rescan services", detail: "LOCAL · read-only", action: "services-refresh"})
 	case routePackages:
 		items = append(items, paletteItem{label: "Rescan packages", detail: "LOCAL · read-only", action: "packages-refresh"})
+	case routeProjects:
+		items = append(items, paletteItem{label: "Rescan projects", detail: "LOCAL · read-only", action: "projects-refresh"})
 	case routeFleet:
 		items = append(items,
 			paletteItem{label: "Refresh fleet", detail: "FLEET · SSH read-only", action: "fleet-refresh"},
@@ -649,6 +748,9 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "packages-refresh":
 			m.route = routePackages
 			return m, discoverPackages()
+		case "projects-refresh":
+			m.route = routeProjects
+			return m, fetchProjectsInfo()
 		case "fleet-refresh":
 			m.route = routeFleet
 			return m, fetchFleetSnapshot()
@@ -724,10 +826,32 @@ func (m *shellModel) View() tea.View {
 	if m.act != nil {
 		view = m.act.view(m.sp.View())
 	}
+	if os.Getenv("NO_COLOR") != "" {
+		view = stripANSI(view)
+	}
 	v := tea.NewView(view)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] != 0x1b {
+			b.WriteByte(s[i])
+			continue
+		}
+		// CSI sequences end in the first byte in the final range @–~.
+		if i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && (s[i] < '@' || s[i] > '~') {
+				i++
+			}
+			continue
+		}
+	}
+	return b.String()
 }
 
 func (m *shellModel) renderSidebar(rows []shellNavRow, h int) string {
@@ -754,7 +878,7 @@ func (m *shellModel) renderSidebar(rows []shellNavRow, h int) string {
 			b.WriteString(styItem.Render(label))
 		}
 		b.WriteByte('\n')
-		m.hits = append(m.hits, shellHit{x: 0, y: line, w: shellSidebarWidth, h: 1, kind: shellHitRoute, route: row.route})
+		m.hits = append(m.hits, shellHit{x: 0, y: shellBodyTop + line, w: shellSidebarWidth, h: 1, kind: shellHitRoute, route: row.route})
 		line++
 	}
 	for line <= h {
@@ -762,6 +886,17 @@ func (m *shellModel) renderSidebar(rows []shellNavRow, h int) string {
 		line++
 	}
 	return stySidebar.Width(shellSidebarWidth).Height(h).Render(b.String())
+}
+
+func (m *shellModel) registerRowHit(route routeID, index, y, width int) {
+	x := 0
+	if m.hasSidebar() {
+		x = shellSidebarWidth + 1
+	}
+	if width < 1 {
+		return
+	}
+	m.hits = append(m.hits, shellHit{x: x, y: y, w: width, h: 1, kind: shellHitRow, route: route, index: index})
 }
 
 func (m *shellModel) renderRoute(w, h int) string {
@@ -775,15 +910,36 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeOverview:
 		return contentColumn(w, h, paneHeader("Overview", "Triage", "what needs attention now", measureFor(w)), m.renderOverview(w, h))
 	case routeChanges:
-		return contentColumn(w, h, paneHeader("Workspace", "Changes", m.changesSummary(), measureFor(w)), m.changes.view(w-4, h-3))
+		body := m.changes.view(w-4, h-3)
+		row := 0
+		if m.changes.filtering || m.changes.message != "" || m.changes.loading {
+			row++
+		}
+		row++ // LOCAL CHANGES label
+		for i := range m.changes.visibleFiles() {
+			m.registerRowHit(routeChanges, i, shellBodyTop+3+row+i, w)
+		}
+		return contentColumn(w, h, paneHeader("Workspace", "Changes", m.changesSummary(), measureFor(w)), body)
 	case routeFleet:
-		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), m.renderFleet(w, h))
+		body := m.renderFleet(w, h)
+		for i := range m.fleet.Hosts {
+			m.registerRowHit(routeFleet, i, shellBodyTop+3+1+i, w)
+		}
+		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), body)
 	case routeServices:
 		return contentColumn(w, h, paneHeader("This machine", "Services", m.man.servicesSummary(), measureFor(w)), m.man.viewServices(spin))
 	case routePackages:
 		return contentColumn(w, h, paneHeader("This machine", "Packages", m.man.packagesSummary(), measureFor(w)), m.man.viewPackages(spin))
 	case routeProjects:
-		return contentColumn(w, h, paneHeader("This machine", "Projects", fmt.Sprintf("%d repositories under ~/Codes", len(m.man.projects)), measureFor(w)), m.man.viewProjects())
+		body := m.renderProjects(w, h)
+		row := 1
+		if m.projectFiltering {
+			row++
+		}
+		for i := range m.visibleProjects() {
+			m.registerRowHit(routeProjects, i, shellBodyTop+3+row+i, w)
+		}
+		return contentColumn(w, h, paneHeader("This machine", "Projects", fmt.Sprintf("%d repositories under ~/Codes", len(m.man.projects)), measureFor(w)), body)
 	default:
 		return ""
 	}
@@ -843,6 +999,8 @@ func (m *shellModel) renderHealth(w, h int, spin string) string {
 			line = styItemOn.Render(padRight(truncate(line, max(1, w-4)), max(1, w-4)))
 		}
 		rows = append(rows, line)
+		localY := 3 + len(rows) - 1
+		m.registerRowHit(routeHealth, i, shellBodyTop+localY, w)
 	}
 	if m.healthDetail != "" {
 		rows = append(rows, "", styTitle.Render("DETAIL"), styMuted.Render("  "+truncate(m.healthDetail, max(1, w-4))))
@@ -918,6 +1076,48 @@ func (m *shellModel) renderFleet(w, h int) string {
 	}
 	if m.fleetDetail != "" {
 		rows = append(rows, "", styTitle.Render("MACHINE DETAIL"), styMuted.Render("  "+truncate(m.fleetDetail, max(1, w-4))))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m *shellModel) renderProjects(w, h int) string {
+	projects := m.visibleProjects()
+	rows := []string{}
+	if m.projectFiltering {
+		rows = append(rows, styFilter.Render("/"+m.projectFilter))
+	}
+	if m.man.projLoading {
+		return styPending.Render("scanning projects…")
+	}
+	if len(projects) == 0 {
+		return styMuted.Render("no projects match · repositories are discovered under ~/Codes")
+	}
+	rows = append(rows, styMuted.Render("ENTER open/switch · / filter · projects never mutate git state"))
+	for i, project := range projects {
+		status := styOK.Render("clean")
+		if !project.dirtyKnown {
+			status = styMuted.Render("unknown")
+		} else if project.dirty {
+			status = styBad.Render("dirty")
+		}
+		tmux := styMuted.Render("-")
+		if project.tmux {
+			tmux = styOK.Render("tmux")
+		}
+		line := fmt.Sprintf("%-22s %-16s %s  %s", truncate(project.name, 22), truncate(project.branch, 16), status, tmux)
+		line = truncate(line, max(1, w-4))
+		if i == m.projectCursor {
+			line = styItemOn.Render(padRight("▌ "+line, max(1, w-4)))
+		} else {
+			line = styItem.Render("  " + line)
+		}
+		rows = append(rows, line)
+	}
+	if m.man.projTmuxHint != "" {
+		rows = append(rows, "", styMuted.Render("  "+truncate(m.man.projTmuxHint, max(1, w-4))))
+	}
+	if m.projectDetail != "" {
+		rows = append(rows, "", styTitle.Render("PROJECT DETAIL"), styMuted.Render("  "+truncate(m.projectDetail, max(1, w-4))))
 	}
 	return strings.Join(rows, "\n")
 }

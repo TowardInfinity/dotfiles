@@ -103,7 +103,7 @@ func TestShellMouseHitMapNavigatesRoutes(t *testing.T) {
 		t.Fatalf("hit map has %d entries, want at least %d", len(m.hits), len(shellNavRows()))
 	}
 	// Overview is the first row after its group heading, so y=2 in the shell.
-	updated, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 4, Button: tea.MouseLeft})
+	updated, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 6, Button: tea.MouseLeft})
 	m = updated.(*shellModel)
 	if m.route != routeChanges {
 		t.Fatalf("mouse click selected %s, want changes", m.route)
@@ -148,4 +148,25 @@ func TestShellFleetSelectionUsesCacheRows(t *testing.T) {
 		t.Fatalf("fleet cursor = %d, want 1", m.fleetCursor)
 	}
 	assertShellFits(t, m, 100, 30)
+}
+
+func TestShellMouseSelectsRows(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.route = routeFleet
+	m.focus = shellFocusContent
+	m.fleet.Hosts = []fleetSnapshotHost{{Alias: "a1", Outcome: "ok", ConfigOK: true}}
+	_ = m.View()
+	updated, _ := m.Update(tea.MouseClickMsg{X: shellSidebarWidth + 5, Y: shellBodyTop + 3 + 1, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.fleetCursor != 0 || m.focus != shellFocusContent {
+		t.Fatalf("fleet row click did not focus row: cursor=%d focus=%d", m.fleetCursor, m.focus)
+	}
+}
+
+func TestShellHonorsNoColor(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	t.Setenv("NO_COLOR", "1")
+	if strings.Contains(m.View().Content, "\x1b[") {
+		t.Fatal("NO_COLOR view still contains ANSI styling")
+	}
 }

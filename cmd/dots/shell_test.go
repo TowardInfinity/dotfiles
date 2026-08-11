@@ -215,3 +215,26 @@ func TestShellFooterClickOpensPalette(t *testing.T) {
 		t.Fatal("clicking the visible footer did not open the action palette")
 	}
 }
+
+func TestShellPaletteRowsAreClickable(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.openPalette(false)
+	_ = m.View()
+	// Changes is the second route item; the palette is centered and each item
+	// occupies one registered row in the hit map.
+	var hit *shellHit
+	for i := range m.hits {
+		if m.hits[i].kind == shellHitPalette && m.hits[i].index == 1 {
+			hit = &m.hits[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatal("palette route row was not registered")
+	}
+	updated, _ := m.Update(tea.MouseClickMsg{X: hit.x + 2, Y: hit.y, Button: tea.MouseLeft})
+	m = updated.(*shellModel)
+	if m.route != routeChanges || m.palette != nil {
+		t.Fatalf("palette click route=%s palette=%v, want changes/closed", m.route, m.palette != nil)
+	}
+}

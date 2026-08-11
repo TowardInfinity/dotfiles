@@ -672,6 +672,9 @@ func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		case shellHitFocus:
 			m.focus = shellFocusContent
 		case shellHitPalette:
+			if m.palette != nil && hit.index >= 0 {
+				return m.choosePalette(hit.index)
+			}
 			m.openPalette(false)
 		case shellHitHelp:
 			m.help = true
@@ -764,60 +767,7 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if len(items) == 0 {
 			return m, nil
 		}
-		item := items[p.cursor]
-		m.palette = nil
-		if item.route != "" {
-			m.route = item.route
-			m.focus = shellFocusContent
-			m.syncLegacySection()
-			if cmd := m.ensureRouteLoaded(); cmd != nil {
-				return m, cmd
-			}
-		}
-		switch item.action {
-		case "sync":
-			return m, requestAction(syncInboundRequest{Repo: m.repo})
-		case "apply":
-			return m, requestAction(applyRequest{Repo: m.repo})
-		case "publish":
-			paths := m.changes.selectedPaths()
-			if len(paths) == 0 {
-				m.route, m.focus = routeChanges, shellFocusContent
-				m.err = "select at least one changed path before publishing"
-				return m, nil
-			}
-			return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
-		case "health-refresh":
-			return m, runDoctorChecks
-		case "health-install":
-			req, note, ok := m.doc.buildInstall()
-			m.doc.note = note
-			if ok {
-				return m, requestAction(req)
-			}
-		case "health-config":
-			req, note, ok := m.doc.buildConfigRepair()
-			m.doc.note = note
-			if ok {
-				return m, requestAction(req)
-			}
-		case "services-refresh":
-			m.route = routeServices
-			return m, discoverServices()
-		case "packages-refresh":
-			m.route = routePackages
-			return m, discoverPackages()
-		case "projects-refresh":
-			m.route = routeProjects
-			return m, fetchProjectsInfo()
-		case "fleet-refresh":
-			m.route = routeFleet
-			return m, fetchFleetSnapshot()
-		case "rollout":
-			m.route = routeFleet
-			return m, m.prepareFleetRollout()
-		}
-		return m, nil
+		return m.choosePalette(p.cursor)
 	case "backspace":
 		if p.query != "" {
 			p.query = p.query[:len(p.query)-1]
@@ -828,6 +778,70 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.Text != "" && msg.Mod == 0 {
 		p.query += msg.Text
 		p.cursor = 0
+	}
+	return m, nil
+}
+
+func (m *shellModel) choosePalette(index int) (tea.Model, tea.Cmd) {
+	if m.palette == nil {
+		return m, nil
+	}
+	items := m.palette.filtered()
+	if index < 0 || index >= len(items) {
+		return m, nil
+	}
+	item := items[index]
+	m.palette = nil
+	if item.route != "" {
+		m.route = item.route
+		m.focus = shellFocusContent
+		m.syncLegacySection()
+		if cmd := m.ensureRouteLoaded(); cmd != nil {
+			return m, cmd
+		}
+	}
+	switch item.action {
+	case "sync":
+		return m, requestAction(syncInboundRequest{Repo: m.repo})
+	case "apply":
+		return m, requestAction(applyRequest{Repo: m.repo})
+	case "publish":
+		paths := m.changes.selectedPaths()
+		if len(paths) == 0 {
+			m.route, m.focus = routeChanges, shellFocusContent
+			m.err = "select at least one changed path before publishing"
+			return m, nil
+		}
+		return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
+	case "health-refresh":
+		return m, runDoctorChecks
+	case "health-install":
+		req, note, ok := m.doc.buildInstall()
+		m.doc.note = note
+		if ok {
+			return m, requestAction(req)
+		}
+	case "health-config":
+		req, note, ok := m.doc.buildConfigRepair()
+		m.doc.note = note
+		if ok {
+			return m, requestAction(req)
+		}
+	case "services-refresh":
+		m.route = routeServices
+		return m, discoverServices()
+	case "packages-refresh":
+		m.route = routePackages
+		return m, discoverPackages()
+	case "projects-refresh":
+		m.route = routeProjects
+		return m, fetchProjectsInfo()
+	case "fleet-refresh":
+		m.route = routeFleet
+		return m, fetchFleetSnapshot()
+	case "rollout":
+		m.route = routeFleet
+		return m, m.prepareFleetRollout()
 	}
 	return m, nil
 }
@@ -1339,7 +1353,15 @@ func (m *shellModel) renderPalette(base string) string {
 	if len(items) == 0 {
 		b.WriteString(styMuted.Render("No matching routes or actions."))
 	}
-	return lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cMac).Padding(1, 2).Width(min(78, m.w-8)).Render(b.String())
+	out := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cMac).Padding(1, 2).Width(min(78, m.w-8)).Render(b.String())
+	boxW, boxH := lipgloss.Width(out), lipgloss.Height(out)
+	left := max(0, (m.w-boxW)/2)
+	top := max(0, (m.h-boxH)/2)
+	itemTop := top + 7 // border, padding, title, hint, spacer, filter, spacer
+	for i := range items {
+		m.hits = append(m.hits, shellHit{x: left, y: itemTop + i, w: boxW, h: 1, kind: shellHitPalette, index: i})
+	}
+	return out
 }
 
 func (m *shellModel) renderHelp(base string) string {

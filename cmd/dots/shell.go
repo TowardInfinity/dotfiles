@@ -7,6 +7,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -109,16 +110,18 @@ type shellModel struct {
 	route routeID
 	focus shellFocus
 
-	docs docsModel
-	doc  doctorModel
-	man  manageModel
-	sp   spinner.Model
+	docs    docsModel
+	changes changesModel
+	doc     doctorModel
+	man     manageModel
+	sp      spinner.Model
 
 	act     *actionModel
 	palette *shellPalette
 	help    bool
 	err     string
 	sync    repoState
+	fleet   fleetSnapshot
 	hits    []shellHit
 }
 
@@ -126,23 +129,29 @@ func newShellModel() *shellModel {
 	repo := findRepo()
 	docs, source := loadDocs(repo)
 	return &shellModel{
-		repo:   repo,
-		source: source,
-		route:  routeOverview,
-		focus:  shellFocusSidebar,
-		docs:   newDocsModel(docs),
-		doc:    newDoctorModel(repo),
-		man:    newManageModel(repo),
+		repo:    repo,
+		source:  source,
+		route:   routeOverview,
+		focus:   shellFocusSidebar,
+		docs:    newDocsModel(docs),
+		changes: newChangesModel(repo),
+		doc:     newDoctorModel(repo),
+		man:     newManageModel(repo),
 		sp: spinner.New(
 			spinner.WithSpinner(spinner.Dot),
 			spinner.WithStyle(styPending),
 		),
-		sync: readRepoState(repo),
+		sync:  readRepoState(repo),
+		fleet: loadFleetSnapshot(),
 	}
 }
 
 func (m *shellModel) Init() tea.Cmd {
-	return tea.Batch(m.doc.Init(), m.man.Init(), m.sp.Tick)
+	cmds := []tea.Cmd{m.doc.Init(), m.man.Init(), m.changes.Init(), m.sp.Tick}
+	if len(m.fleet.Hosts) == 0 {
+		cmds = append(cmds, fetchFleetSnapshot())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -168,6 +177,9 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case repoStateMsg:
 		m.sync = msg.state
+		return m, nil
+	case fleetSnapshotMsg:
+		m.fleet = msg.snapshot
 		return m, nil
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
@@ -279,14 +291,14 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	switch m.route {
 	case routeDocs:
 		m.docs, cmd = m.docs.update(msg)
+	case routeChanges:
+		m.changes, cmd = m.changes.update(msg)
 	case routeHealth:
 		m.doc, cmd = m.doc.update(msg)
 	case routeOverview:
-		m.man.section = secOverview
-		m.man, cmd = m.man.updateOverviewKey(msg)
-	case routeChanges:
-		m.man.section = secDotfiles
-		m.man, cmd = m.man.updateDotfilesKey(msg)
+		if msg.String() == "r" {
+			return m, tea.Batch(fetchOverviewInfo(), fetchRepoState(m.repo), fetchFleetSnapshot())
+		}
 	case routeFleet:
 		m.man.section = secMachines
 		m.man, cmd = m.man.updateMachinesKey(msg)
@@ -307,6 +319,8 @@ func (m *shellModel) routeCapturesInput() bool {
 	switch m.route {
 	case routeDocs:
 		return m.docs.filtering
+	case routeChanges:
+		return m.changes.filtering
 	case routeServices:
 		return m.man.svcFiltering
 	case routePackages:
@@ -320,6 +334,8 @@ func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	m.docs, cmd = m.docs.update(msg)
 	cmds = append(cmds, cmd)
+	m.changes, cmd = m.changes.update(msg)
+	cmds = append(cmds, cmd)
 	m.doc, cmd = m.doc.update(msg)
 	cmds = append(cmds, cmd)
 	m.man, cmd = m.man.update(msg)
@@ -330,6 +346,7 @@ func (m *shellModel) updateChildren(msg tea.Msg) tea.Cmd {
 func (m *shellModel) resizeChildren() {
 	w, h := m.contentSize()
 	m.docs = m.docs.resize(w, h)
+	m.changes = m.changes.resize(w, h)
 	m.doc = m.doc.resize(w, h)
 	m.man = m.man.resize(w, h)
 	if m.act != nil {
@@ -433,6 +450,9 @@ func shellPaletteItems(current routeID, actionsOnly bool) []paletteItem {
 	if actionsOnly {
 		items = nil
 	}
+	if !actionsOnly || current == routeChanges {
+		items = append(items, paletteItem{label: "Publish selected changes", detail: "REPOSITORY · reviewed commit and push", action: "publish"})
+	}
 	items = append(items,
 		paletteItem{label: "Sync this machine from origin", detail: "LOCAL · safe inbound", action: "sync"},
 		paletteItem{label: "Apply current configuration", detail: "LOCAL · no network", action: "apply"},
@@ -479,6 +499,14 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, requestAction(syncInboundRequest{Repo: m.repo})
 		case "apply":
 			return m, requestAction(applyRequest{Repo: m.repo})
+		case "publish":
+			paths := m.changes.selectedPaths()
+			if len(paths) == 0 {
+				m.route, m.focus = routeChanges, shellFocusContent
+				m.err = "select at least one changed path before publishing"
+				return m, nil
+			}
+			return m, requestAction(publishRequest{Repo: m.repo, Paths: paths, Message: "changes: publish selected paths"})
 		}
 		return m, nil
 	case "backspace":
@@ -597,9 +625,9 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeHealth:
 		return m.doc.view(spin)
 	case routeOverview:
-		return contentColumn(w, h, paneHeader("Overview", "Triage", "what needs attention now", measureFor(w)), m.man.viewOverview(spin))
+		return contentColumn(w, h, paneHeader("Overview", "Triage", "what needs attention now", measureFor(w)), m.renderOverview(w, h))
 	case routeChanges:
-		return contentColumn(w, h, paneHeader("Workspace", "Changes", m.man.dotfilesSummary(), measureFor(w)), m.man.viewDotfiles())
+		return contentColumn(w, h, paneHeader("Workspace", "Changes", m.changesSummary(), measureFor(w)), m.changes.view(w-4, h-3))
 	case routeFleet:
 		return contentColumn(w, h, paneHeader("Fleet", "Machines", fmt.Sprintf("%d configured hosts", len(m.man.machines)), measureFor(w)), m.man.viewMachines())
 	case routeServices:
@@ -611,6 +639,100 @@ func (m *shellModel) renderRoute(w, h int) string {
 	default:
 		return ""
 	}
+}
+
+func (m *shellModel) changesSummary() string {
+	files := len(m.changes.visibleFiles())
+	parts := []string{}
+	if files == 0 {
+		parts = append(parts, "clean")
+	} else {
+		parts = append(parts, plural(files, "local change", "local changes"))
+	}
+	if len(m.changes.incoming) > 0 {
+		parts = append(parts, plural(len(m.changes.incoming), "incoming commit", "incoming commits"))
+	}
+	if m.changes.branch != "" {
+		parts = append(parts, m.changes.branch)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func (m *shellModel) renderOverview(w, h int) string {
+	var rows []string
+	rows = append(rows, styMuted.Render("NEEDS ATTENTION"))
+	attention := 0
+	if m.changes.loading {
+		rows = append(rows, styPending.Render("  ⣾ checking repository changes"))
+	} else if len(m.changes.files) > 0 {
+		rows = append(rows, styPending.Render(fmt.Sprintf("  ! %s — review in Changes", plural(len(m.changes.files), "local change", "local changes"))))
+		attention++
+	}
+	if len(m.changes.incoming) > 0 {
+		rows = append(rows, styPending.Render(fmt.Sprintf("  ! %s from origin — sync when ready", plural(len(m.changes.incoming), "incoming commit", "incoming commits"))))
+		attention++
+	}
+	if m.sync.detached {
+		rows = append(rows, styBad.Render("  × detached HEAD — sync and publish are blocked"))
+		attention++
+	}
+	if !m.man.ovLoading && m.man.ovInfo.toolsTotal > 0 && m.man.ovInfo.toolsHave < m.man.ovInfo.toolsTotal {
+		rows = append(rows, styPending.Render(fmt.Sprintf("  ! tools %d/%d present — inspect Health", m.man.ovInfo.toolsHave, m.man.ovInfo.toolsTotal)))
+		attention++
+	}
+	if attention == 0 && !m.man.ovLoading {
+		rows = append(rows, styOK.Render("  ✓ nothing needs attention"))
+	}
+
+	rows = append(rows, "", styMuted.Render("WORKSPACE"))
+	branch := m.changes.branch
+	if branch == "" {
+		branch = "unknown branch"
+	}
+	workspace := fmt.Sprintf("  %s · %s", branch, m.changesSummary())
+	rows = append(rows, styValue.Render(truncate(workspace, max(1, w-4))))
+	if m.repo != "" {
+		rows = append(rows, styMuted.Render("  "+truncate(m.repo, max(1, w-4))))
+	}
+
+	rows = append(rows, "", styMuted.Render("FLEET"))
+	if len(m.fleet.Hosts) == 0 {
+		rows = append(rows, styMuted.Render("  unknown · press r to check"))
+	} else {
+		line := "  " + m.fleet.summary()
+		if age, ok := fleetSnapshotAge(m.fleet); ok {
+			state := "fresh"
+			if !m.fleet.fresh(time.Now()) {
+				state = "stale"
+			}
+			line += fmt.Sprintf(" · %s · %s", state, formatAge(age))
+		}
+		rows = append(rows, styValue.Render(line))
+	}
+
+	rows = append(rows, "", styMuted.Render("THIS MACHINE"))
+	if m.man.ovLoading {
+		rows = append(rows, styPending.Render("  ⣾ collecting local facts"))
+	} else {
+		info := m.man.ovInfo
+		name := info.osName
+		if name == "" {
+			name = "OS unknown"
+		}
+		rows = append(rows, styValue.Render(fmt.Sprintf("  %s · %s · dots %s", name, info.arch, info.version)))
+		rows = append(rows, styMuted.Render(fmt.Sprintf("  tools %d/%d · services %d · packages %d", info.toolsHave, info.toolsTotal, len(m.man.services), len(m.man.packages))))
+	}
+	return strings.Join(rows, "\n")
+}
+
+func formatAge(age time.Duration) string {
+	if age < time.Minute {
+		return "just now"
+	}
+	if age < time.Hour {
+		return fmt.Sprintf("%dm ago", int(age/time.Minute))
+	}
+	return fmt.Sprintf("%dh ago", int(age/time.Hour))
 }
 
 func (m *shellModel) renderFooter() string {
@@ -683,7 +805,7 @@ func (m *shellModel) refreshAffected(resources []ops.ResourceID) tea.Cmd {
 		case resourcePackages:
 			cmds = append(cmds, discoverPackages())
 		case resourceMachines:
-			cmds = append(cmds, fetchMachinesInfo())
+			cmds = append(cmds, fetchMachinesInfo(), fetchFleetSnapshot())
 		}
 	}
 	return tea.Batch(cmds...)

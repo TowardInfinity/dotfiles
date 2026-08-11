@@ -84,6 +84,18 @@ func TestShellResponsiveGeometry(t *testing.T) {
 	}
 }
 
+func TestShellEveryRouteFitsSupportedSizes(t *testing.T) {
+	routes := []routeID{routeOverview, routeChanges, routeFleet, routeHealth, routeServices, routePackages, routeProjects, routeDocs}
+	for _, size := range [][2]int{{60, 18}, {76, 22}, {100, 30}, {160, 45}} {
+		for _, route := range routes {
+			m := shellAt(t, size[0], size[1])
+			m.route = route
+			m.focus = shellFocusContent
+			assertShellFits(t, m, size[0], size[1])
+		}
+	}
+}
+
 func TestShellMouseHitMapNavigatesRoutes(t *testing.T) {
 	m := shellAt(t, 100, 30)
 	_ = m.View() // hit rectangles are built during rendering

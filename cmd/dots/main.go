@@ -100,7 +100,7 @@ func runTUI() {
 	// The trade is real and worth knowing: with mouse reporting on, the terminal
 	// hands drags to this program instead of using them to select text. Hold
 	// Option in Ghostty (Shift in most others) to select as usual.
-	p := tea.NewProgram(newModel())
+	p := tea.NewProgram(newShellModel())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "dots: %v\n", err)
 		os.Exit(1)

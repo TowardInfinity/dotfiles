@@ -137,6 +137,7 @@ type shellModel struct {
 	projectFiltering bool
 	projectCursor    int
 	projectDetail    string
+	loaded           map[routeID]bool
 	hits             []shellHit
 }
 
@@ -161,15 +162,43 @@ func newShellModel() *shellModel {
 		sync:          readRepoState(repo),
 		fleet:         loadFleetSnapshot(),
 		fleetSelected: map[string]bool{},
+		loaded:        map[routeID]bool{routeOverview: true, routeChanges: true},
 	}
 }
 
 func (m *shellModel) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.doc.Init(), m.man.Init(), m.changes.Init(), m.sp.Tick}
+	cmds := []tea.Cmd{fetchOverviewInfo(), m.changes.Init(), m.sp.Tick}
 	if len(m.fleet.Hosts) == 0 {
+		m.loaded[routeFleet] = true
 		cmds = append(cmds, fetchFleetSnapshot())
 	}
 	return tea.Batch(cmds...)
+}
+
+func (m *shellModel) ensureRouteLoaded() tea.Cmd {
+	if m.loaded == nil {
+		m.loaded = map[routeID]bool{}
+	}
+	if m.loaded[m.route] {
+		if m.route == routeFleet && !m.fleet.fresh(time.Now()) {
+			return fetchFleetSnapshot()
+		}
+		return nil
+	}
+	m.loaded[m.route] = true
+	switch m.route {
+	case routeHealth:
+		return m.doc.Init()
+	case routeServices:
+		return discoverServices()
+	case routePackages:
+		return discoverPackages()
+	case routeProjects:
+		return fetchProjectsInfo()
+	case routeFleet:
+		return fetchFleetSnapshot()
+	}
+	return nil
 }
 
 func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -303,7 +332,7 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "enter", "l", "right":
 			m.focus = shellFocusContent
 		}
-		return m, nil
+		return m, m.ensureRouteLoaded()
 	}
 
 	if msg.String() == "h" || msg.String() == "left" {
@@ -578,7 +607,7 @@ func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 		} else if msg.Button == tea.MouseWheelUp {
 			m.moveRoute(-1)
 		}
-		return m, nil
+		return m, m.ensureRouteLoaded()
 	}
 	if m.route == routeDocs {
 		var cmd tea.Cmd
@@ -613,6 +642,7 @@ func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 			m.route = hit.route
 			m.focus = shellFocusContent
 			m.syncLegacySection()
+			return m, m.ensureRouteLoaded()
 		case shellHitFocus:
 			m.focus = shellFocusContent
 		case shellHitPalette:
@@ -714,6 +744,9 @@ func (m *shellModel) updatePalette(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.route = item.route
 			m.focus = shellFocusContent
 			m.syncLegacySection()
+			if cmd := m.ensureRouteLoaded(); cmd != nil {
+				return m, cmd
+			}
 		}
 		switch item.action {
 		case "sync":

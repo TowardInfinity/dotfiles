@@ -926,6 +926,11 @@ internal/dots/
     screens/               one package/model per route
 ```
 
+Implementation decision: the initial decomposition stops at `ops` and
+`providers`. The shell and route data remain in `cmd/dots` while the product
+stabilizes; the `domain`, `cli`, `app`, and `ui/*` split above is deferred
+architecture work, not an unreported Phase 5 completion claim.
+
 ### Root state
 
 ```go
@@ -976,13 +981,13 @@ inspector, footer, and overlay.
 - Persist fleet observations atomically at
   `${XDG_CACHE_HOME:-$HOME/.cache}/dots/fleet-status-v1.json`, mode `0600`.
   Store a schema version and, per host, only the alias, observed revision,
-  binary version/source, signing-key/provenance result, outcome, `checked_at`,
-  and `last_attempt_at`; do not cache SSH addresses or raw command output.
+  binary version/source, signing-key/provenance result, outcome, and
+  `checked_at`; do not cache SSH addresses or raw command output.
 - Treat fleet observations as event-driven state with a 12-hour TTL. A cold
   cache starts one asynchronous probe. A fresh cache starts no SSH. A stale
-  cache remains visible with its age and may refresh in the background only
-  after its persisted retry backoff; an offline laptop must not retry four SSH
-  connections every time Overview opens.
+  cache remains visible with its age and refreshes at most once per TTL;
+  an offline laptop must not retry four SSH connections every time Overview
+  opens. There is intentionally no per-host retry-backoff field in schema 1.
 - `r` bypasses the TTL/backoff. Entering Fleet may explicitly refresh.
 - Rollout updates each host entry only after its post-rollout verification has
   observed the exact revision, binary version/source, signing key, and cache

@@ -1002,13 +1002,31 @@ func stripANSI(s string) string {
 			b.WriteByte(s[i])
 			continue
 		}
-		// CSI sequences end in the first byte in the final range @–~.
-		if i+1 < len(s) && s[i+1] == '[' {
+		if i+1 >= len(s) {
+			continue
+		}
+		switch s[i+1] {
+		case '[':
+			// CSI sequences end in the first byte in the final range @–~.
 			i += 2
 			for i < len(s) && (s[i] < '@' || s[i] > '~') {
 				i++
 			}
-			continue
+		case ']':
+			// OSC sequences (notably OSC 8 hyperlinks from Glamour) end at
+			// BEL or the ST two-byte terminator. They are control metadata;
+			// the visible link text after them must remain.
+			i += 2
+			for i < len(s) {
+				if s[i] == '\a' {
+					break
+				}
+				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+					i++
+					break
+				}
+				i++
+			}
 		}
 	}
 	return b.String()

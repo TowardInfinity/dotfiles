@@ -1,0 +1,46 @@
+dots  ·  Machines  ·  dotfiles                                                                                                                                  
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+OVERVIEW           │  FLEET › Machines                                                                                                                          
+  Overview         │  2 healthy hosts, 1 needs attention · never checked                                                                                        
+WORKSPACE          │  ────────────────────────────────────────────────────────────────────────────────────────────                                              
+  Changes          │  SPACE select · ENTER inspect · r refresh · a actions                                                                                      
+FLEET              │  ● a1         healthy v0.1.16  111111111111                                                 …                                              
+▌ Machines         │  ○ v1         healthy v0.1.16  222222222222                                                                                                
+THIS MACHINE       │  ○ v2         unreachable —        —                                                                                                       
+  Health           │                                                                                                                                            
+  Services         │                                                                                                                                            
+  Packages         │                                                                                                                                            
+  Projects         │                                                                                                                                            
+REFERENCE          │                                                                                                                                            
+  Docs             │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+                   │                                                                                                                                            
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ↑↓ move  space select  enter inspect  r refresh  a actions  ? help                                                                                             

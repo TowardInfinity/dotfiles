@@ -1,0 +1,30 @@
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────╮  
+  │ ? Publish selected changes                                                                   │  
+  │ dots publish common/claude/settings.json                                                     │  
+  │                                                                                              │  
+  │   scope=local  risk=reversible                                                               │  
+  │   target=/workspace/dotfiles                                                                 │  
+  │                                                                                              │  
+  │   Publish the selected changes to the canonical repository?                                  │  
+  │                                                                                              │  
+  │   y run  ·  n cancel                                                                         │  
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────╯  
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    
+                                                                                                    

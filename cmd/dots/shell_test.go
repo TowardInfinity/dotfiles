@@ -109,7 +109,7 @@ func TestShellEscUnwindsDetailBeforeFocus(t *testing.T) {
 }
 
 func TestShellResponsiveGeometry(t *testing.T) {
-	for _, size := range [][2]int{{44, 14}, {60, 18}, {76, 22}, {100, 30}, {160, 45}} {
+	for _, size := range [][2]int{{44, 14}, {60, 18}, {76, 22}, {100, 30}, {120, 32}, {160, 45}} {
 		m := shellAt(t, size[0], size[1])
 		assertShellFits(t, m, size[0], size[1])
 	}
@@ -121,7 +121,7 @@ func TestShellResponsiveGeometry(t *testing.T) {
 
 func TestShellEveryRouteFitsSupportedSizes(t *testing.T) {
 	routes := []routeID{routeOverview, routeChanges, routeFleet, routeHealth, routeServices, routePackages, routeProjects, routeDocs}
-	for _, size := range [][2]int{{60, 18}, {76, 22}, {100, 30}, {160, 45}} {
+	for _, size := range [][2]int{{60, 18}, {76, 22}, {100, 30}, {120, 32}, {160, 45}} {
 		for _, route := range routes {
 			m := shellAt(t, size[0], size[1])
 			m.route = route
@@ -203,6 +203,13 @@ func TestShellHonorsNoColor(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	if strings.Contains(m.View().Content, "\x1b[") {
 		t.Fatal("NO_COLOR view still contains ANSI styling")
+	}
+}
+
+func TestStripANSIRemovesOSCLinksButKeepsText(t *testing.T) {
+	got := stripANSI("before\x1b]8;;https://example.com\aLink\x1b]8;;\aafter")
+	if got != "beforeLinkafter" {
+		t.Fatalf("OSC stripping = %q, want visible link text only", got)
 	}
 }
 

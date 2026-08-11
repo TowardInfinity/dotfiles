@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // ── sections ──────────────────────────────────────────────────
@@ -131,17 +131,20 @@ func newManageModel(repo string) manageModel {
 	ti := textinput.New()
 	ti.Prompt = "/"
 	ti.Placeholder = "filter services"
-	ti.PromptStyle = styFilter
-	ti.TextStyle = styValue
-	ti.PlaceholderStyle = styMuted
+	styles := textinput.DefaultDarkStyles()
+	styles.Focused.Prompt = styFilter
+	styles.Focused.Text = styValue
+	styles.Focused.Placeholder = styMuted
+	styles.Blurred.Prompt = styFilter
+	styles.Blurred.Text = styValue
+	styles.Blurred.Placeholder = styMuted
+	ti.SetStyles(styles)
 	ti.CharLimit = 40
 
 	pkgTI := textinput.New()
 	pkgTI.Prompt = "/"
 	pkgTI.Placeholder = "filter packages"
-	pkgTI.PromptStyle = styFilter
-	pkgTI.TextStyle = styValue
-	pkgTI.PlaceholderStyle = styMuted
+	pkgTI.SetStyles(styles)
 	pkgTI.CharLimit = 40
 
 	return manageModel{
@@ -318,7 +321,7 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// See the navigation contract above manageModel.keys() in keys.go:
 		// left/right is the only thing that ever switches the rail, up/down is
 		// the only thing that ever moves within a section, and neither fires
@@ -359,7 +362,7 @@ func (m manageModel) update(msg tea.Msg) (manageModel, tea.Cmd) {
 // updateOverviewKey is deliberately narrow: this section only ever reports
 // on the machine, it never acts on it, so refresh and scroll are all it
 // handles.
-func (m manageModel) updateOverviewKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updateOverviewKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
 	case "r":
 		m.ovLoading = true
@@ -374,7 +377,7 @@ func (m manageModel) updateOverviewKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updateDotfilesKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
 		_, m.dfScroll = scrollWindow(m.dotfilesLines(), m.dfScroll+1, m.bodyRows())
@@ -412,7 +415,7 @@ func (m manageModel) updateDotfilesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updateServicesKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	if m.svcFiltering {
 		switch msg.String() {
 		case "esc":
@@ -489,7 +492,7 @@ func (m manageModel) updateServicesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	return m, requestAction(serviceRequest{Service: vis[m.svcCursor], Verb: verb})
 }
 
-func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updatePackagesKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	if m.pkgFiltering {
 		switch msg.String() {
 		case "esc":
@@ -568,7 +571,7 @@ func (m manageModel) updatePackagesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
 	return m, nil
 }
 
-func (m manageModel) updateProjectsKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updateProjectsKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
 		if m.projCursor < len(m.projects)-1 {
@@ -632,7 +635,7 @@ func (m manageModel) openProjectTmux(p projectInfo) tea.Cmd {
 	}
 }
 
-func (m manageModel) updateMachinesKey(msg tea.KeyMsg) (manageModel, tea.Cmd) {
+func (m manageModel) updateMachinesKey(msg tea.KeyPressMsg) (manageModel, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
 		if m.machCursor < len(m.machines)-1 {
@@ -1189,7 +1192,7 @@ func (m manageModel) viewServices(spin string) string {
 
 	var head string
 	if m.svcFilter != "" || m.svcFiltering {
-		m.svcTI.Width = measure - 4
+		m.svcTI.SetWidth(measure - 4)
 		head = "  " + truncate(m.svcTI.View(), measure) + "\n"
 	}
 
@@ -1343,7 +1346,7 @@ func (m manageModel) viewPackages(spin string) string {
 
 	var head string
 	if m.pkgFilter != "" || m.pkgFiltering {
-		m.pkgTI.Width = measure - 4
+		m.pkgTI.SetWidth(measure - 4)
 		head = "  " + truncate(m.pkgTI.View(), measure) + "\n"
 	}
 

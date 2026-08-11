@@ -1,7 +1,7 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"testing"
 )
 
@@ -13,14 +13,14 @@ func TestFilterCapturesGlobalKeys(t *testing.T) {
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
 	tm, _ = tm.Update(discoverServices()())
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 
 	for _, r := range "quit" {
 		var cmd tea.Cmd
-		tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm, cmd = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		if isQuit(cmd) {
 			t.Fatalf("typing %q into the services filter quit the program", r)
 		}
@@ -36,10 +36,10 @@ func TestFilterCapturesGlobalKeys(t *testing.T) {
 	m2 := newModel()
 	var tm2 tea.Model = m2
 	tm2, _ = tm2.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
-	tm2, _ = tm2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm2, _ = tm2.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 	for _, r := range "q1" {
 		var cmd tea.Cmd
-		tm2, cmd = tm2.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm2, cmd = tm2.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		if isQuit(cmd) {
 			t.Fatalf("typing %q into the docs filter quit the program", r)
 		}
@@ -70,13 +70,13 @@ func TestFilterCapturesSectionKeys(t *testing.T) {
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
 	tm, _ = tm.Update(discoverServices()())
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 
 	for _, r := range "lazygit" {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	if got := tm.(model).man.section; got != secServices {
 		t.Errorf("typing into the services filter changed section to %v", got)
@@ -87,21 +87,21 @@ func TestFilterCapturesSectionKeys(t *testing.T) {
 
 	// Arrow-type left/right move the textinput's cursor, not the value — so
 	// only assert the section held, not that the text changed.
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if got := tm.(model).man.section; got != secServices {
 		t.Errorf("arrow keys in the services filter changed section to %v", got)
 	}
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 	// Packages: one more "l" from Services.
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Packages
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Packages
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 
 	for _, r := range "lazygit" {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	if got := tm.(model).man.section; got != secPackages {
 		t.Errorf("typing into the packages filter changed section to %v", got)
@@ -110,10 +110,10 @@ func TestFilterCapturesSectionKeys(t *testing.T) {
 		t.Errorf("packages filter = %q, want %q", got, "lazygit")
 	}
 
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyLeft})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	if got := tm.(model).man.section; got != secPackages {
 		t.Errorf("arrow keys in the packages filter changed section to %v", got)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,10 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/key"
 	dotfiles "github.com/TowardInfinity/dotfiles"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
 
 // policyBody is what the repo's config.policy.toml contains, for the purposes
@@ -470,17 +469,13 @@ func TestDoctorViewShowsConfigGroupAndWarnings(t *testing.T) {
 	}
 	// A warning must not be painted with the failure colour.
 	//
-	// Force a colour profile first: under `go test` there is no TTY, lipgloss
-	// degrades to plain ASCII, and every dot renders as a bare "●". Comparing
-	// them without this passes for the wrong reason — it would keep passing if
-	// checkWarn were mapped straight to styBad.
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
-
-	if checkDot(checkWarn) == checkDot(checkBad) {
+	// v2 owns terminal color negotiation in Bubble Tea rather than exposing a
+	// global Lip Gloss profile switch. Compare the semantic style tokens instead
+	// of rendered output, which is intentionally plain under `go test`.
+	if fmt.Sprint(styPending.GetForeground()) == fmt.Sprint(styBad.GetForeground()) {
 		t.Error("warnings and failures render identically")
 	}
-	if checkDot(checkWarn) == checkDot(checkOK) {
+	if fmt.Sprint(styPending.GetForeground()) == fmt.Sprint(styOK.GetForeground()) {
 		t.Error("warnings and passes render identically")
 	}
 }

@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
-	"github.com/charmbracelet/bubbles/help"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 type tabID int
@@ -110,7 +110,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.hp.Width = m.w - 2
+		m.hp.SetWidth(m.w - 2)
 		w, h := m.contentSize()
 		m.docs = m.docs.resize(w, h)
 		m.doc = m.doc.resize(w, h)
@@ -146,7 +146,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sync = msg.state
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// The overlay owns the keyboard while it is up.
 		if m.act != nil {
 			a, cmd, closed := m.act.update(msg)
@@ -318,9 +318,9 @@ func fetchRepoState(repo string) tea.Cmd {
 	return func() tea.Msg { return repoStateMsg{state: readRepoState(repo)} }
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
 	if m.w == 0 {
-		return "starting…"
+		return tea.NewView("starting…")
 	}
 
 	var tabs []string
@@ -376,7 +376,7 @@ func (m model) View() string {
 	hintW := m.w - 2 - lipgloss.Width(badge)
 
 	hp := m.hp
-	hp.Width = hintW
+	hp.SetWidth(hintW)
 	hint := hp.ShortHelpView(append(append([]key.Binding{}, ks...), globalKeys...))
 	if m.err != "" {
 		hint = styBad.Render("error: " + m.err)
@@ -396,7 +396,10 @@ func (m model) View() string {
 		body = m.act.view(m.sp.View())
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, bar, body, status)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, bar, body, status))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 // ── shared helpers ───────────────────────────────────────────
@@ -408,7 +411,7 @@ func pane(w, h int, s string) string {
 }
 
 func newViewport(w, h int) viewport.Model {
-	v := viewport.New(w, h)
+	v := viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	v.YPosition = 0
 	return v
 }

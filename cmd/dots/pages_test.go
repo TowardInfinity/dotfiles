@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // sizes worth caring about: a wide monitor, a normal split, a narrow SSH
@@ -51,8 +51,8 @@ func TestEveryDocPageRenders(t *testing.T) {
 			if cur == nil {
 				t.Fatalf("%dx%d: no current page at index %d", w, h, i)
 			}
-			checkFrame(t, cur.Name+" @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+			checkFrame(t, cur.Name+" @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: 'j', Text: string('j')})
 		}
 	}
 }
@@ -66,14 +66,14 @@ func TestEveryPaneRenders(t *testing.T) {
 		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 		// Doctor: loading, then loaded.
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
-		checkFrame(t, "doctor-loading @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: '2', Text: string('2')})
+		checkFrame(t, "doctor-loading @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
 		tm, _ = tm.Update(runDoctorChecks())
-		checkFrame(t, "doctor-loaded @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		checkFrame(t, "doctor-loaded @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
 
 		// Manage: loading, then every section with real discovered data.
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-		checkFrame(t, "manage-loading @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
+		checkFrame(t, "manage-loading @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
 		tm, _ = tm.Update(discoverServices()())
 		tm, _ = tm.Update(fetchProjectsInfo()())
 		tm, _ = tm.Update(fetchMachinesInfo()())
@@ -102,8 +102,8 @@ func TestEveryPaneRenders(t *testing.T) {
 		})
 
 		for _, name := range sectionNames {
-			checkFrame(t, "manage-"+name+" @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}})
+			checkFrame(t, "manage-"+name+" @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')})
 		}
 	}
 }
@@ -118,34 +118,34 @@ func TestInteractiveStatesRender(t *testing.T) {
 		tm, _ = tm.Update(discoverServices()())
 
 		// Docs filter: matching, then matching nothing.
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 		for _, r := range "tmux" {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
-		checkFrame(t, "docs-filter-hit @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
+		checkFrame(t, "docs-filter-hit @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
 		for _, r := range "zzzzz" {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
-		checkFrame(t, "docs-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		checkFrame(t, "docs-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Services filter.
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 		for _, r := range "zzz" {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 		}
-		checkFrame(t, "svc-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		checkFrame(t, "svc-filter-miss @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
 
 		// Action overlay, awaiting confirmation.
 		plan := testCommandPlan("Probe", "echo", "x")
 		plan.Confirm = "Run the probe?"
 		tm, _ = tm.Update(runActionMsg{plan: plan})
-		checkFrame(t, "overlay-confirm @"+itoa(w)+"x"+itoa(h), tm.View(), w, h)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+		checkFrame(t, "overlay-confirm @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'n', Text: string('n')})
 	}
 }
 

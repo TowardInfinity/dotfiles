@@ -1,8 +1,8 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"strings"
 	"testing"
 )
@@ -25,7 +25,7 @@ func TestLayoutBreakpoints(t *testing.T) {
 		if got := d.contentWidth(); got > maxMeasure {
 			t.Errorf("w=%d measure %d exceeds cap %d", tc.w, got, maxMeasure)
 		}
-		v := tm.(model).View()
+		v := tm.(model).View().Content
 		for _, line := range strings.Split(v, "\n") {
 			if lipgloss.Width(line) > tc.w {
 				t.Errorf("w=%d overflow: %d", tc.w, lipgloss.Width(line))

@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // The action overlay. Panes dispatch a typed request through operations.go;
@@ -147,7 +147,7 @@ func (a actionModel) resize(w, h int) actionModel {
 // update returns done=true when the overlay should close.
 func (a actionModel) update(msg tea.Msg) (actionModel, tea.Cmd, bool) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "y", "Y", "enter":
 			if a.confirm {
@@ -196,10 +196,10 @@ func (a actionModel) update(msg tea.Msg) (actionModel, tea.Cmd, bool) {
 			return a, nil, true
 
 		case "j", "down":
-			a.vp.LineDown(1)
+			a.vp.ScrollDown(1)
 			return a, nil, false
 		case "k", "up":
-			a.vp.LineUp(1)
+			a.vp.ScrollUp(1)
 			return a, nil, false
 		}
 		return a, nil, false

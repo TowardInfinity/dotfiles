@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 	"github.com/TowardInfinity/dotfiles/internal/dots/providers"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 const (

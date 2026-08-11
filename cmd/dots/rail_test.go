@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Every rail row must occupy exactly one line.
@@ -22,7 +22,7 @@ func TestRailRowsDoNotWrap(t *testing.T) {
 
 		// Move onto a page with a long-ish title and long H2 headings.
 		for i := 0; i < 6; i++ {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: 'j', Text: string('j')})
 		}
 
 		mm := tm.(model)
@@ -70,7 +70,7 @@ func TestSelectedRowIsOneLine(t *testing.T) {
 	}
 	before := countRows()
 	for i := 0; i < 5; i++ {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'j', Text: string('j')})
 		if got := countRows(); got != before {
 			t.Fatalf("row count changed from %d to %d after moving the cursor —"+
 				" the selected row is wrapping", before, got)

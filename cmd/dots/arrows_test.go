@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // All four arrows have to do something wherever something can move, and none
@@ -26,14 +26,14 @@ func manageAt(t *testing.T, s manageSection) tea.Model {
 	t.Helper()
 	var tm tea.Model = newModel()
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 160, Height: 40})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
 
 	// Walk to the wanted section with right, which works in every section.
 	for i := 0; i < int(numSections); i++ {
 		if tm.(model).man.section == s {
 			return tm
 		}
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	}
 	t.Fatalf("never reached section %v", s)
 	return nil
@@ -44,13 +44,13 @@ func TestManageLeftRightAlwaysMovesRail(t *testing.T) {
 	for s := manageSection(0); s < numSections; s++ {
 		tm := manageAt(t, s)
 
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRight})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 		if got, want := tm.(model).man.section, (s+1)%numSections; got != want {
 			t.Errorf("right from %v landed on %v, want %v", s, got, want)
 		}
 
 		tm = manageAt(t, s)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyLeft})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 		if got, want := tm.(model).man.section, (s+numSections-1)%numSections; got != want {
 			t.Errorf("left from %v landed on %v, want %v", s, got, want)
 		}
@@ -64,13 +64,13 @@ func TestManageLeftRightAlwaysMovesRail(t *testing.T) {
 func TestManageUpDownNeverMovesRail(t *testing.T) {
 	for s := manageSection(0); s < numSections; s++ {
 		tm := manageAt(t, s)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		if got := tm.(model).man.section; got != s {
 			t.Errorf("down from %v landed on %v, want no change", s, got)
 		}
 
 		tm = manageAt(t, s)
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyUp})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyUp})
 		if got := tm.(model).man.section; got != s {
 			t.Errorf("up from %v landed on %v, want no change", s, got)
 		}
@@ -88,21 +88,21 @@ func TestDocsAllFourArrowsMoveTheSidebar(t *testing.T) {
 
 	base := start().(model).docs.cur
 
-	for _, k := range []tea.KeyType{tea.KeyDown, tea.KeyRight} {
+	for _, k := range []rune{tea.KeyDown, tea.KeyRight} {
 		tm := start()
-		tm, _ = tm.Update(tea.KeyMsg{Type: k})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: k})
 		if got := tm.(model).docs.cur; got <= base {
 			t.Errorf("%v did not move the sidebar forward: %d -> %d", k, base, got)
 		}
 	}
 
 	// Move off the first entry so back has somewhere to go.
-	for _, k := range []tea.KeyType{tea.KeyUp, tea.KeyLeft} {
+	for _, k := range []rune{tea.KeyUp, tea.KeyLeft} {
 		tm := start()
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyDown})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 		mid := tm.(model).docs.cur
-		tm, _ = tm.Update(tea.KeyMsg{Type: k})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: k})
 		if got := tm.(model).docs.cur; got >= mid {
 			t.Errorf("%v did not move the sidebar back: %d -> %d", k, mid, got)
 		}

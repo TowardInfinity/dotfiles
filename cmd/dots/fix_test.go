@@ -1,7 +1,7 @@
 package main
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"strings"
 	"testing"
 )
@@ -38,14 +38,14 @@ func TestTmuxHintNotTruncated(t *testing.T) {
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 118, Height: 30})
 	tm, _ = tm.Update(fetchProjectsInfo()())
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Dotfiles
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Services
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Packages
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'l'}}) // Projects
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Packages
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Projects
 
 	var cmd tea.Cmd
-	tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	tm, cmd = tm.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
 		if msg := cmd(); msg != nil {
 			tm, _ = tm.Update(msg)
@@ -62,7 +62,7 @@ func TestTmuxHintNotTruncated(t *testing.T) {
 	// Check the hint's own lines, not the whole screen — an ellipsis elsewhere
 	// (a "… N more" row, a clipped column) is unrelated.
 	var hintLines []string
-	for _, ln := range strings.Split(tm.View(), "\n") {
+	for _, ln := range strings.Split(tm.View().Content, "\n") {
 		if strings.Contains(ln, "tmux new-session") || strings.Contains(ln, "Codes/") {
 			hintLines = append(hintLines, ln)
 		}

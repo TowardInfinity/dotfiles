@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // sidebar rows are a group label, a page, or a blank spacer between groups.
@@ -47,13 +47,23 @@ type docsModel struct {
 	lastDoc  string
 }
 
+func (m docsModel) yOffset() int {
+	vp := m.vp
+	return vp.YOffset()
+}
+
 func newDocsModel(all []doc) docsModel {
 	ti := textinput.New()
 	ti.Prompt = "/"
 	ti.Placeholder = "filter"
-	ti.PromptStyle = styFilter
-	ti.TextStyle = styValue
-	ti.PlaceholderStyle = styMuted
+	styles := textinput.DefaultDarkStyles()
+	styles.Focused.Prompt = styFilter
+	styles.Focused.Text = styValue
+	styles.Focused.Placeholder = styMuted
+	styles.Blurred.Prompt = styFilter
+	styles.Blurred.Text = styValue
+	styles.Blurred.Placeholder = styMuted
+	ti.SetStyles(styles)
 	ti.CharLimit = 40
 
 	m := docsModel{all: all, sidebar: navWidth, showNav: true, ti: ti}
@@ -205,7 +215,7 @@ func (m docsModel) update(msg tea.Msg) (docsModel, tea.Cmd) {
 
 func (m docsModel) updateInner(msg tea.Msg) (docsModel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.filtering {
 			switch msg.String() {
 			case "esc":
@@ -268,22 +278,22 @@ func (m docsModel) updateInner(msg tea.Msg) (docsModel, tea.Cmd) {
 			m.vp.HalfPageUp()
 			return m, nil
 		case "ctrl+f":
-			m.vp.ViewDown()
+			m.vp.PageDown()
 			return m, nil
 		case "ctrl+b":
-			m.vp.ViewUp()
+			m.vp.PageUp()
 			return m, nil
 		}
 
-	case tea.MouseMsg:
+	case tea.MouseWheelMsg:
 		// Three lines per notch is what most terminals send and what reads as
 		// "a scroll" rather than a jump.
 		switch msg.Button {
-		case tea.MouseButtonWheelDown:
-			m.vp.LineDown(3)
+		case tea.MouseWheelDown:
+			m.vp.ScrollDown(3)
 			return m, nil
-		case tea.MouseButtonWheelUp:
-			m.vp.LineUp(3)
+		case tea.MouseWheelUp:
+			m.vp.ScrollUp(3)
 			return m, nil
 		}
 		return m, nil
@@ -338,7 +348,7 @@ func (m docsModel) viewNav() string {
 	// The filter lives at the top of the nav so it reads as "narrowing this
 	// list", which is what it does.
 	if m.filtering || m.filter != "" {
-		m.ti.Width = inner - 2
+		m.ti.SetWidth(inner - 2)
 		b.WriteString(" " + truncate(m.ti.View(), inner) + "\n")
 	} else {
 		b.WriteString(" " + styMuted.Render(padRight(
@@ -476,7 +486,7 @@ func (m docsModel) viewOutline() string {
 	// Scroll position. A bare percentage is easy to miss — say plainly when
 	// there is more below, since "is that the whole page?" is the question.
 	pct := 100
-	if m.vp.Height > 0 {
+	if m.vp.Height() > 0 {
 		pct = int(m.vp.ScrollPercent() * 100)
 	}
 	b.WriteString("\n" + styMuted.Render(fmt.Sprintf(" %d%%", pct)))

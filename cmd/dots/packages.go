@@ -23,8 +23,8 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ── data shapes ───────────────────────────────────────────────

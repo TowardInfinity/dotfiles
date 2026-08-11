@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/glamour/ansi"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/glamour/v2"
+	"charm.land/glamour/v2/ansi"
+	"charm.land/lipgloss/v2"
 )
 
 // Tokyo Night. Not chosen for this program — lifted from the configs it

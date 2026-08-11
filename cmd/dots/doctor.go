@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // checkState is where a single tool check currently stands.
@@ -211,7 +211,7 @@ func (m doctorModel) update(msg tea.Msg) (doctorModel, tea.Cmd) {
 		m.loading = false
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "r":
 			m.loading = true

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // ── brew ──────────────────────────────────────────────────────
@@ -426,7 +426,7 @@ func TestPackagesManagerCycleKey(t *testing.T) {
 	want := []pkgManager{pmPnpm, pmNpm, pmUvTool, pmPip, pmGo, pmInstaller, pmBrew, pkgManagerAll}
 	for i, w := range want {
 		var cmd tea.Cmd
-		m, cmd = m.updatePackagesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+		m, cmd = m.updatePackagesKey(tea.KeyPressMsg{Code: 'm', Text: string('m')})
 		if cmd != nil {
 			t.Errorf("press %d: expected no cmd, got one", i)
 		}
@@ -447,7 +447,7 @@ func TestFilterCapturesManagerCycleKey(t *testing.T) {
 	m := newManageModel("")
 	m.pkgFiltering = true
 	m.pkgTI.Focus()
-	m, _ = m.updatePackagesKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}})
+	m, _ = m.updatePackagesKey(tea.KeyPressMsg{Code: 'm', Text: string('m')})
 	if m.pkgMgrFilter != pkgManagerAll {
 		t.Errorf("filter = %v, want pkgManagerAll (unchanged)", m.pkgMgrFilter)
 	}

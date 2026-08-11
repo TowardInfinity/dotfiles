@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // Renders every tab at several sizes and asserts nothing panics and nothing
@@ -21,8 +21,8 @@ func TestTabsRenderWithinWidth(t *testing.T) {
 		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
 
 		for tab := 0; tab < int(numTabs); tab++ {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune('1' + tab)}})
-			out := tm.View()
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: rune('1' + tab), Text: string(rune('1' + tab))})
+			out := tm.View().Content
 			if strings.TrimSpace(out) == "" {
 				t.Fatalf("tab %d empty at %dx%d", tab, w, h)
 			}
@@ -43,14 +43,14 @@ func TestDocsNavigation(t *testing.T) {
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 
 	for i := 0; i < 60; i++ {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'j', Text: string('j')})
 		mm := tm.(model)
 		if d := mm.docs.current(); d == nil {
 			t.Fatalf("cursor landed on no document after %d downs", i+1)
 		}
 	}
 	for i := 0; i < 60; i++ {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'k', Text: string('k')})
 		mm := tm.(model)
 		if d := mm.docs.current(); d == nil {
 			t.Fatalf("cursor landed on no document after %d ups", i+1)
@@ -63,11 +63,11 @@ func TestDocsFilterNoMatches(t *testing.T) {
 	m := newModel()
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})
 	for _, r := range "zzzznope" {
-		tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		tm, _ = tm.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	if strings.TrimSpace(tm.View()) == "" {
+	if strings.TrimSpace(tm.View().Content) == "" {
 		t.Fatal("empty view for a filter with no matches")
 	}
 }
@@ -109,16 +109,16 @@ func TestActionOverlayCapturesKeys(t *testing.T) {
 	}
 
 	before := tm.(model).tab
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyTab})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	if tm.(model).tab != before {
 		t.Error("tab switched panes while the overlay was up")
 	}
-	if strings.TrimSpace(tm.View()) == "" {
+	if strings.TrimSpace(tm.View().Content) == "" {
 		t.Error("overlay rendered empty")
 	}
 
 	// Declining must close it without running anything.
-	tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'n', Text: string('n')})
 	if tm.(model).act != nil {
 		t.Error("declining did not close the overlay")
 	}
@@ -197,7 +197,7 @@ func TestCancelDoesNotWedge(t *testing.T) {
 	a := newAction(testCommandPlan("Sleep", "sleep", "30"), 80, 20)
 	a, cmd := a.start()
 
-	a, cmd, _ = a.update(tea.KeyMsg{Type: tea.KeyEsc})
+	a, cmd, _ = a.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("cancel returned no command — the done message can never arrive")
 	}
@@ -269,8 +269,8 @@ func TestTabsFitHeight(t *testing.T) {
 		var tm tea.Model = m
 		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
 		for tab := 0; tab < int(numTabs); tab++ {
-			tm, _ = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{rune('1' + tab)}})
-			got := len(strings.Split(tm.View(), "\n"))
+			tm, _ = tm.Update(tea.KeyPressMsg{Code: rune('1' + tab), Text: string(rune('1' + tab))})
+			got := len(strings.Split(tm.View().Content, "\n"))
 			if got > h {
 				t.Errorf("tab %d at %dx%d renders %d lines, %d too many",
 					tab, w, h, got, got-h)
@@ -290,7 +290,7 @@ func TestKeysDoNotLeakAcrossTabs(t *testing.T) {
 		t.Fatal("expected Docs")
 	}
 	var cmd tea.Cmd
-	tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	tm, cmd = tm.Update(tea.KeyPressMsg{Code: 'u', Text: string('u')})
 	// Bubble Tea runs whatever a pane returns; not running it here is what
 	// made the first version of this test pass against a real leak.
 	if cmd != nil {
@@ -305,7 +305,7 @@ func TestKeysDoNotLeakAcrossTabs(t *testing.T) {
 
 	// And 'i' in Docs must not trigger Doctor's installer.
 	tm, _ = tm.Update(runDoctorChecks())
-	tm, cmd = tm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	tm, cmd = tm.Update(tea.KeyPressMsg{Code: 'i', Text: string('i')})
 	if cmd != nil {
 		if msg := cmd(); msg != nil {
 			tm, _ = tm.Update(msg)

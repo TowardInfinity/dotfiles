@@ -4,7 +4,7 @@ set -eu
 # Keep the analyzer version explicit: Staticcheck's checks and Go-version
 # support move together. CI installs this exact release before invoking us.
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # shellcheck disable=SC1091
 . "$SCRIPT_DIR/../tools/go-tools.env"
 required="$STATICCHECK_VERSION"

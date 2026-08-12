@@ -435,6 +435,8 @@ install_sdkman() {
   # prompt when there is no one to answer it.
   say "Installing a default JDK"
   # shellcheck disable=SC1091
+  # shellcheck disable=SC1090
+  # SDKMAN's init path is intentionally user-local.
   ( . "$sdk_init" && sdk install java </dev/null ) \
     || warn "JDK install failed — run: sdk install java"
 }

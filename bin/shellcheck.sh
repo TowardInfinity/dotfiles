@@ -6,17 +6,18 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 	exit 1
 fi
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-# The repository's shell tests intentionally use compact &&/|| assertions and
-# a few dynamic-source patterns. Keep CI focused on ShellCheck's error class;
-# style/info warnings are reviewed separately without making every test line a
-# false red release gate.
-exec shellcheck --severity=error \
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+# Discover the scripts rather than maintaining a second hand-written list.
+# The three top-level entry points are explicit because they live outside
+# bin/; every future bin/*.sh is picked up automatically.
+set -- \
 	"$SCRIPT_DIR/../bootstrap.sh" \
 	"$SCRIPT_DIR/../install.sh" \
-	"$SCRIPT_DIR/../dots.sh" \
-	"$SCRIPT_DIR/dots-resolve.sh" \
-	"$SCRIPT_DIR/install-go-tools.sh" \
-	"$SCRIPT_DIR/lint.sh" \
-	"$SCRIPT_DIR/selftest.sh" \
-	"$SCRIPT_DIR/sign-release.sh"
+	"$SCRIPT_DIR/../dots.sh"
+for script in "$SCRIPT_DIR"/*.sh; do
+	set -- "$@" "$script"
+done
+
+# Warning-level findings catch word-splitting and command-resolution mistakes,
+# not just syntax errors. Intentional patterns are narrowly marked in place.
+exec shellcheck --severity=warning "$@"

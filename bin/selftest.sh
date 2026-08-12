@@ -1599,7 +1599,11 @@ for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
          bin/install-go-tools.sh bin/lint.sh bin/shellcheck.sh \
          common/tmux/model.sh common/tmux/pane-theme.sh common/claude/statusline.sh \
          common/claude/session-start.sh; do
-  if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi
+  if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then
+    sh_bin='bash'
+  else
+    sh_bin='sh'
+  fi
   $sh_bin -n "$REPO/$f" 2>/dev/null && ok "$f parses" || bad "$f parses"
 done
 for f in merge-toml-block.py claude-usage.py; do

@@ -53,8 +53,14 @@ esac
 # want the repo hanging around (containers, throwaway boxes). The trade is
 # real: edits are no longer tracked, and updating means re-running this — a
 # symlinked install just needs `git pull`.
-VERB=linked;   $COPY && VERB=copied
-ACTION=link;   $COPY && ACTION=copy
+VERB='linked'
+if $COPY; then
+  VERB='copied'
+fi
+ACTION='link'
+if $COPY; then
+  ACTION='copy'
+fi
 
 MISSING=0
 
@@ -129,10 +135,14 @@ merge_toml() {
   fi
 
   local out status
-  out="$(python3 "$REPO/bin/merge-toml-block.py" \
-           --src "$src" --dst "$dst" \
-           --begin "$MERGE_BEGIN" --end "$MERGE_END" \
-           $($DRY && echo --dry) 2>&1)" && status=0 || status=$?
+  local -a merge_args=(
+    --src "$src" --dst "$dst"
+    --begin "$MERGE_BEGIN" --end "$MERGE_END"
+  )
+  if $DRY; then
+    merge_args+=(--dry)
+  fi
+  out="$(python3 "$REPO/bin/merge-toml-block.py" "${merge_args[@]}" 2>&1)" && status=0 || status=$?
 
   if [[ $status -ne 0 ]]; then
     printf '  \033[31mfailed\033[0m   %s\n%s\n' "${dst/#$HOME/$TILDE}" "$out"

@@ -1156,9 +1156,11 @@ func (m *shellModel) renderRoute(w, h int) string {
 	case routeFleet:
 		body := m.renderFleet(w, h)
 		for i := range m.fleet.Hosts {
-			// Fleet has an instruction row plus the shared table header before
-			// its first selectable host.
-			m.registerRowHit(routeFleet, i, shellBodyTop+3+2+i, w)
+			// Fleet has an instruction row, then dataTable's header row and the
+			// rule beneath it, before its first selectable host. Counting the
+			// header but not its rule shifted every row hit up by one, so a
+			// click on one machine selected the machine below it.
+			m.registerRowHit(routeFleet, i, shellBodyTop+3+3+i, w)
 		}
 		return contentColumn(w, h, paneHeader("Fleet", "Machines", m.fleetSummary(), measureFor(w)), body)
 	case routeServices:

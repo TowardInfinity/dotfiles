@@ -252,11 +252,19 @@ func TestShellActionHitMatchesVisibleConfirmButton(t *testing.T) {
 	if button.h == 0 {
 		t.Fatal("confirm button was not registered")
 	}
-	overlay := m.act.view(m.sp.View())
-	_, h := lipgloss.Width(overlay), lipgloss.Height(overlay)
-	wantY := (m.h-h)/2 + h - 2
-	if button.y != wantY {
-		t.Fatalf("button y=%d, want visible overlay row %d", button.y, wantY)
+	frame := strings.Split(stripANSI(m.View().Content), "\n")
+	visibleButtonY := -1
+	for y, line := range frame {
+		if strings.Contains(line, "y run") {
+			visibleButtonY = y
+			break
+		}
+	}
+	if visibleButtonY < 0 {
+		t.Fatal("visible confirm button was not rendered")
+	}
+	if button.y != visibleButtonY {
+		t.Fatalf("button y=%d, want rendered button row %d", button.y, visibleButtonY)
 	}
 	// A click in the header/blank area must not run the action.
 	updated, _ = m.Update(tea.MouseClickMsg{X: 1, Y: 1, Button: tea.MouseLeft})
@@ -308,6 +316,45 @@ func TestShellFleetSelectionUsesCacheRows(t *testing.T) {
 		t.Fatalf("fleet cursor = %d, want 1", m.fleetCursor)
 	}
 	assertShellFits(t, m, 100, 30)
+}
+
+// Row hit rectangles are computed from a hand-counted offset while the rows
+// themselves come from dataTable, so the two drift apart silently whenever the
+// table's chrome changes. Assert against the rendered frame, not against the
+// same arithmetic the production code uses, and do it at every breakpoint
+// because column collapsing changes the body without changing the offset.
+func TestShellFleetRowHitsMatchRenderedRows(t *testing.T) {
+	for _, size := range [][2]int{{120, 32}, {100, 30}, {76, 24}, {60, 20}, {44, 14}} {
+		width, height := size[0], size[1]
+		m := shellAt(t, width, height)
+		m.route = routeFleet
+		m.focus = shellFocusContent
+		m.fleet = fleetSnapshot{Schema: fleetCacheSchema, Hosts: []fleetSnapshotHost{
+			{Alias: "a1", Outcome: "ok", ConfigOK: true, Version: "v1.2.3", Revision: "abcdef1234"},
+			{Alias: "v1", Outcome: "unhealthy", Version: "v1.2.2", Revision: "bbcdef1234"},
+			{Alias: "v2", Outcome: "unreachable"},
+		}}
+		rendered := strings.Split(stripANSI(m.View().Content), "\n")
+		for i, host := range m.fleet.Hosts {
+			var row shellHit
+			for _, hit := range m.hits {
+				if hit.kind == shellHitRow && hit.route == routeFleet && hit.index == i {
+					row = hit
+					break
+				}
+			}
+			if row.h == 0 {
+				t.Fatalf("%dx%d: host %s has no row hit target", width, height, host.Alias)
+			}
+			line := ""
+			if row.y >= 0 && row.y < len(rendered) {
+				line = rendered[row.y]
+			}
+			if !strings.Contains(line, host.Alias) {
+				t.Errorf("%dx%d: row hit for %s points at %q", width, height, host.Alias, strings.TrimSpace(line))
+			}
+		}
+	}
 }
 
 func TestShellMouseSelectsRows(t *testing.T) {

@@ -355,18 +355,10 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.help = true
 		return m, nil
 	case "tab":
-		if m.focus == shellFocusSidebar {
-			m.focus = shellFocusContent
-		} else {
-			m.focus = shellFocusSidebar
-		}
+		m.cycleFocus(false)
 		return m, nil
 	case "shift+tab":
-		if m.focus == shellFocusSidebar {
-			m.focus = shellFocusContent
-		} else {
-			m.focus = shellFocusSidebar
-		}
+		m.cycleFocus(true)
 		return m, nil
 	case "esc":
 		if m.focus == shellFocusContent {
@@ -423,6 +415,25 @@ func (m *shellModel) updateKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.dispatchRouteKey(msg)
+}
+
+// cycleFocus keeps forward and reverse traversal explicit even though the
+// current shell has only two focus regions. With two regions both directions
+// necessarily toggle; making that a named cycle prevents Shift-Tab from
+// looking accidentally duplicated and leaves one place to extend when a
+// footer/inspector becomes a third region.
+func (m *shellModel) cycleFocus(reverse bool) {
+	regions := [...]shellFocus{shellFocusSidebar, shellFocusContent}
+	index := 0
+	if m.focus == shellFocusContent {
+		index = 1
+	}
+	if reverse {
+		index = (index + len(regions) - 1) % len(regions)
+	} else {
+		index = (index + 1) % len(regions)
+	}
+	m.focus = regions[index]
 }
 
 func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -735,7 +746,12 @@ func (m *shellModel) updateWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *shellModel) updateClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
-	for _, hit := range m.hits {
+	// Hit rectangles are derived from the current frame, not a mutable side
+	// effect of View. Bubble Tea may deliver a mouse event after state changes
+	// but before the next paint; rebuilding here keeps the input map tied to
+	// the same state the click is about to act on.
+	_, hits := m.renderFrame()
+	for _, hit := range hits {
 		if msg.X < hit.x || msg.X >= hit.x+hit.w || msg.Y < hit.y || msg.Y >= hit.y+hit.h {
 			continue
 		}
@@ -956,16 +972,27 @@ func (p *shellPalette) filtered() []paletteItem {
 }
 
 func (m *shellModel) View() tea.View {
+	view, _ := m.renderFrame()
+	return view
+}
+
+// renderFrame builds a complete frame and its hit map on a value copy. View is
+// intentionally observational: rendering must not mutate the live model or
+// leave input geometry cached from a previous state. updateClick consumes the
+// returned hit map directly, while tests can inspect it through renderedHits.
+func (m shellModel) renderFrame() (tea.View, []shellHit) {
+	// The copy may share the backing array of a previously cached hit slice;
+	// detach it before the render helpers append so the caller remains pure.
+	m.hits = nil
 	if m.w < 44 || m.h < 14 {
 		v := tea.NewView(fmt.Sprintf("dots · %s\n\nTerminal too small — need at least 44×14 (current %d×%d).", routeLabel(m.route), m.w, m.h))
 		v.AltScreen = true
 		v.MouseMode = tea.MouseModeCellMotion
-		return v
+		return v, nil
 	}
 
 	bodyW, bodyH := m.contentSize()
 	rows := shellNavRows()
-	m.hits = m.hits[:0]
 	sidebar := ""
 	if m.hasSidebar() {
 		sidebar = m.renderSidebar(rows, bodyH)
@@ -1018,7 +1045,7 @@ func (m *shellModel) View() tea.View {
 	v := tea.NewView(view)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	return v
+	return v, m.hits
 }
 
 func stripANSI(s string) string {
@@ -1576,7 +1603,7 @@ func (m *shellModel) renderHelp(base string) string {
 	_ = base
 	body := styTitle.Render("Keyboard and mouse") + "\n\n" +
 		"↑↓ / j k   move in the focused region\n" +
-		"Tab        move focus between sidebar and content\n" +
+		"Tab / Shift-Tab move focus between sidebar and content\n" +
 		"Enter      inspect or choose\n" +
 		"a          actions for this route\n" +
 		"Ctrl-P :   command palette\n" + "Esc        back / close one layer\n" + "q          quit at the base layer\n\n" +

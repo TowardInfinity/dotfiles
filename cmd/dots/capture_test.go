@@ -12,7 +12,10 @@ func TestFilterCapturesGlobalKeys(t *testing.T) {
 	m := newModel()
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
-	tm, _ = tm.Update(discoverServices()())
+	tm, _ = tm.Update(servicesFoundMsg{
+		services: []service{{ID: "api", Name: "api", Source: srcLaunchd, Running: true}},
+		sources:  []string{"launchd"},
+	})
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services
@@ -69,7 +72,10 @@ func TestFilterCapturesSectionKeys(t *testing.T) {
 	m := newModel()
 	var tm tea.Model = m
 	tm, _ = tm.Update(tea.WindowSizeMsg{Width: 120, Height: 34})
-	tm, _ = tm.Update(discoverServices()())
+	tm, _ = tm.Update(servicesFoundMsg{
+		services: []service{{ID: "api", Name: "api", Source: srcLaunchd, Running: true}},
+		sources:  []string{"launchd"},
+	})
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Dotfiles
 	tm, _ = tm.Update(tea.KeyPressMsg{Code: 'l', Text: string('l')}) // Services

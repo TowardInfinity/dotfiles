@@ -35,7 +35,7 @@ form because it is shorter, but the arrows are always aliases for it:
 |---|---|---|
 | Vertical | `↑` `↓` or `j` `k` | Move in the focused list or scroll the focused document. |
 | Horizontal | `←` `→` or `h` `l` | Move focus between the sidebar and content, or back/forward in detail. |
-| Focus | `Tab` / `Shift-Tab` | Move between interactive regions; never changes route. |
+| Focus | `Tab` / `Shift-Tab` | Move between interactive regions; with two regions both toggle sidebar/content; never changes route. |
 | Selection | `Enter` / `Space` | Inspect the focused row / toggle selection where supported. |
 | Back | `Esc` | Close a modal, clear input, close detail, or return to the route. |
 

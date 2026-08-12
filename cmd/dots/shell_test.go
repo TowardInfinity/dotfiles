@@ -17,6 +17,11 @@ func shellAt(t *testing.T, width, height int) *shellModel {
 	return updated.(*shellModel)
 }
 
+func renderedHits(m *shellModel) []shellHit {
+	_, hits := m.renderFrame()
+	return hits
+}
+
 func assertShellFits(t *testing.T, m *shellModel, width, height int) {
 	t.Helper()
 	v := m.View()
@@ -53,6 +58,39 @@ func TestShellRoutesUseOneNavigationModel(t *testing.T) {
 	m = updated.(*shellModel)
 	if m.focus != shellFocusSidebar {
 		t.Fatal("left did not move focus back to the sidebar")
+	}
+}
+
+func TestShellTabAndShiftTabToggleTheTwoFocusRegions(t *testing.T) {
+	keys := []struct {
+		name string
+		msg  tea.KeyPressMsg
+	}{
+		{name: "tab", msg: tea.KeyPressMsg{Code: tea.KeyTab}},
+		{name: "shift+tab", msg: tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}},
+	}
+	for _, key := range keys {
+		m := shellAt(t, 100, 30)
+		updated, _ := m.Update(key.msg)
+		m = updated.(*shellModel)
+		if m.focus != shellFocusContent {
+			t.Fatalf("%s from sidebar = %d, want content", key.name, m.focus)
+		}
+		updated, _ = m.Update(key.msg)
+		m = updated.(*shellModel)
+		if m.focus != shellFocusSidebar {
+			t.Fatalf("%s from content = %d, want sidebar", key.name, m.focus)
+		}
+	}
+}
+
+func TestShellViewDoesNotMutateHitCache(t *testing.T) {
+	m := shellAt(t, 100, 30)
+	m.hits = []shellHit{{x: 7, y: 8, w: 9, h: 1, kind: shellHitRoute, route: routeDocs}}
+	before := m.hits[0]
+	_ = m.View()
+	if len(m.hits) != 1 || m.hits[0] != before {
+		t.Fatalf("View mutated the live hit cache: before=%+v after=%+v", before, m.hits)
 	}
 }
 
@@ -135,9 +173,9 @@ func TestShellEveryRouteFitsSupportedSizes(t *testing.T) {
 
 func TestShellMouseHitMapNavigatesRoutes(t *testing.T) {
 	m := shellAt(t, 100, 30)
-	_ = m.View() // hit rectangles are built during rendering
-	if len(m.hits) < len(shellNavRows()) {
-		t.Fatalf("hit map has %d entries, want at least %d", len(m.hits), len(shellNavRows()))
+	hits := renderedHits(m)
+	if len(hits) < len(shellNavRows()) {
+		t.Fatalf("hit map has %d entries, want at least %d", len(hits), len(shellNavRows()))
 	}
 	// Overview is the first row after its group heading, so y=2 in the shell.
 	updated, _ := m.Update(tea.MouseClickMsg{X: 4, Y: 6, Button: tea.MouseLeft})
@@ -158,9 +196,9 @@ func TestShellKeyboardAndMouseSelectTheSameRoute(t *testing.T) {
 	keyboard = updated.(*shellModel)
 
 	mouse := shellAt(t, 100, 30)
-	_ = mouse.View()
+	hits := renderedHits(mouse)
 	var changes shellHit
-	for _, hit := range mouse.hits {
+	for _, hit := range hits {
 		if hit.kind == shellHitRoute && hit.route == routeChanges {
 			changes = hit
 			break
@@ -243,7 +281,7 @@ func TestShellActionHitMatchesVisibleConfirmButton(t *testing.T) {
 		t.Fatal("confirm overlay did not open")
 	}
 	var button shellHit
-	for _, hit := range m.hits {
+	for _, hit := range renderedHits(m) {
 		if hit.kind == shellHitAction && hit.index == 0 {
 			button = hit
 			break
@@ -335,9 +373,10 @@ func TestShellFleetRowHitsMatchRenderedRows(t *testing.T) {
 			{Alias: "v2", Outcome: "unreachable"},
 		}}
 		rendered := strings.Split(stripANSI(m.View().Content), "\n")
+		hits := renderedHits(m)
 		for i, host := range m.fleet.Hosts {
 			var row shellHit
-			for _, hit := range m.hits {
+			for _, hit := range hits {
 				if hit.kind == shellHitRow && hit.route == routeFleet && hit.index == i {
 					row = hit
 					break
@@ -362,9 +401,9 @@ func TestShellMouseSelectsRows(t *testing.T) {
 	m.route = routeFleet
 	m.focus = shellFocusContent
 	m.fleet.Hosts = []fleetSnapshotHost{{Alias: "a1", Outcome: "ok", ConfigOK: true}}
-	_ = m.View()
+	hits := renderedHits(m)
 	var row shellHit
-	for _, hit := range m.hits {
+	for _, hit := range hits {
 		if hit.kind == shellHitRow && hit.route == routeFleet && hit.index == 0 {
 			row = hit
 			break
@@ -425,7 +464,6 @@ func TestShellQUnwindsContentBeforeQuitting(t *testing.T) {
 
 func TestShellFooterClickOpensPalette(t *testing.T) {
 	m := shellAt(t, 100, 30)
-	_ = m.View()
 	updated, _ := m.Update(tea.MouseClickMsg{X: 10, Y: 28, Button: tea.MouseLeft})
 	m = updated.(*shellModel)
 	if m.palette == nil {
@@ -436,13 +474,13 @@ func TestShellFooterClickOpensPalette(t *testing.T) {
 func TestShellPaletteRowsAreClickable(t *testing.T) {
 	m := shellAt(t, 100, 30)
 	m.openPalette(false)
-	_ = m.View()
+	hits := renderedHits(m)
 	// Changes is the second route item; the palette is centered and each item
 	// occupies one registered row in the hit map.
 	var hit *shellHit
-	for i := range m.hits {
-		if m.hits[i].kind == shellHitPalette && m.hits[i].index == 1 {
-			hit = &m.hits[i]
+	for i := range hits {
+		if hits[i].kind == shellHitPalette && hits[i].index == 1 {
+			hit = &hits[i]
 			break
 		}
 	}
@@ -462,9 +500,9 @@ func TestShellActionModalMouseCancelIsSafe(t *testing.T) {
 	plan.Confirm = "Run the probe?"
 	updated, _ := m.Update(runActionMsg{plan: plan})
 	m = updated.(*shellModel)
-	_ = m.View()
+	hits := renderedHits(m)
 	var cancel shellHit
-	for _, hit := range m.hits {
+	for _, hit := range hits {
 		if hit.kind == shellHitAction && hit.index == 1 {
 			cancel = hit
 			break

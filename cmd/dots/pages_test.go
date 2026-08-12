@@ -59,6 +59,44 @@ func TestEveryDocPageRenders(t *testing.T) {
 
 // Doctor in both states, and Manage's four sections, at every size.
 func TestEveryPaneRenders(t *testing.T) {
+	// These messages are layout fixtures, not integration probes. Running SSH,
+	// service discovery, and a git walk for every breakpoint made this test
+	// measure the machine rather than the renderer (and made an offline test
+	// suite wait on connection timeouts). Keep enough rows to exercise the
+	// crowded states while making the data deterministic.
+	checks := make([]checkResult, 0, len(checkNames())+5)
+	for _, name := range checkNames() {
+		checks = append(checks, checkResult{name: name, state: checkOK, path: "/usr/local/bin/" + name})
+	}
+	checks = append(checks,
+		checkResult{name: "codex config", state: checkOK, path: "~/.codex/config.toml"},
+		checkResult{name: "codex mode", state: checkOK, path: "0600"},
+		checkResult{name: "managed block", state: checkOK, path: "matches policy"},
+		checkResult{name: "dots binary", state: checkOK, path: "v0.1.16"},
+		checkResult{name: "release", state: checkOK, path: "v0.1.16 (current)"},
+	)
+	doctorResult := doctorMsg{results: checks}
+	servicesResult := servicesFoundMsg{
+		services: []service{
+			{ID: "api", Name: "api", Source: srcLaunchd, Running: true, Pid: 101, Port: 8080, Probed: true, Healthy: true},
+			{ID: "worker", Name: "worker", Source: srcLaunchd, Running: true, Pid: 102, Port: 8081, Probed: true},
+			{ID: "old", Name: "old worker", Source: srcLaunchd, Detail: "exited (0)"},
+		},
+		sources: []string{"launchd"},
+	}
+	projectsResult := projectsInfoMsg{projects: []projectInfo{
+		{name: "dotfiles", path: "/workspace/dotfiles", branch: "main", dirtyKnown: true, ahead: 2},
+		{name: "terminal", path: "/workspace/terminal", branch: "main", dirtyKnown: true, dirty: true, ahead: 0},
+	}}
+	machinesResult := machinesInfoMsg{machines: []machineInfo{
+		{alias: "a1", hostname: "a1.example", checked: true, reachable: true},
+		{alias: "v1", hostname: "v1.example", checked: true, reachable: true},
+		{alias: "v2", hostname: "v2.example", checked: true},
+	}}
+	dotfilesResult := dotfilesInfoMsg{info: dotfilesInfo{
+		sha: "abcdef1", branch: "main", dirtyKnown: true, dirty: true, behind: 3,
+	}}
+
 	for _, sz := range testSizes {
 		w, h := sz[0], sz[1]
 		m := newModel()
@@ -68,16 +106,16 @@ func TestEveryPaneRenders(t *testing.T) {
 		// Doctor: loading, then loaded.
 		tm, _ = tm.Update(tea.KeyPressMsg{Code: '2', Text: string('2')})
 		checkFrame(t, "doctor-loading @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
-		tm, _ = tm.Update(runDoctorChecks())
+		tm, _ = tm.Update(doctorResult)
 		checkFrame(t, "doctor-loaded @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
 
-		// Manage: loading, then every section with real discovered data.
+		// Manage: loading, then every section with representative data.
 		tm, _ = tm.Update(tea.KeyPressMsg{Code: '3', Text: string('3')})
 		checkFrame(t, "manage-loading @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
-		tm, _ = tm.Update(discoverServices()())
-		tm, _ = tm.Update(fetchProjectsInfo()())
-		tm, _ = tm.Update(fetchMachinesInfo()())
-		tm, _ = tm.Update(fetchDotfilesInfo(findRepo())())
+		tm, _ = tm.Update(servicesResult)
+		tm, _ = tm.Update(projectsResult)
+		tm, _ = tm.Update(machinesResult)
+		tm, _ = tm.Update(dotfilesResult)
 		// Synthetic rather than a real discoverPackages() — that shells out to
 		// brew's network-hitting `outdated` on every one of the six sizes this
 		// loop runs at. Deliberately pins the worst case rather than whatever
@@ -110,12 +148,16 @@ func TestEveryPaneRenders(t *testing.T) {
 
 // Filters, the action overlay, and the empty-result states.
 func TestInteractiveStatesRender(t *testing.T) {
+	servicesResult := servicesFoundMsg{
+		services: []service{{ID: "api", Name: "api", Source: srcLaunchd, Running: true}},
+		sources:  []string{"launchd"},
+	}
 	for _, sz := range testSizes {
 		w, h := sz[0], sz[1]
 		m := newModel()
 		var tm tea.Model = m
 		tm, _ = tm.Update(tea.WindowSizeMsg{Width: w, Height: h})
-		tm, _ = tm.Update(discoverServices()())
+		tm, _ = tm.Update(servicesResult)
 
 		// Docs filter: matching, then matching nothing.
 		tm, _ = tm.Update(tea.KeyPressMsg{Code: '/', Text: string('/')})

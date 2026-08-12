@@ -30,7 +30,7 @@ func TestParseChangeFilesKeepsStatusAndRenameTarget(t *testing.T) {
 }
 
 func TestChangesSelectionBuildsTypedPublishRequest(t *testing.T) {
-	m := changesModel{repo: findRepo(), files: []changeFile{{Path: "a.txt", Status: " M"}}, selected: map[string]bool{}}
+	m := changesModel{repo: newTestRepo(t), files: []changeFile{{Path: "a.txt", Status: " M"}}, selected: map[string]bool{}}
 	var cmd tea.Cmd
 	m, _ = m.update(tea.KeyPressMsg{Code: tea.KeySpace})
 	if !m.selected["a.txt"] {
@@ -47,7 +47,7 @@ func TestChangesSelectionBuildsTypedPublishRequest(t *testing.T) {
 }
 
 func TestChangesCommitMessageCanBeEditedBeforePublish(t *testing.T) {
-	m := newChangesModel(findRepo())
+	m := newChangesModel(newTestRepo(t))
 	m.loading = false
 	m.files = []changeFile{{Path: "a.txt", Status: " M"}}
 	m, _ = m.update(tea.KeyPressMsg{Code: tea.KeySpace})

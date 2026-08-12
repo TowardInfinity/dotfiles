@@ -542,20 +542,6 @@ func loadServiceOverrides() map[string]serviceOverride {
 	return overrides
 }
 
-// ── small string helpers ──────────────────────────────────────
-
-// lastSegment returns the part of s after the last occurrence of sep, or
-// all of s if sep does not appear (or is empty).
-func lastSegment(s, sep string) string {
-	if sep == "" {
-		return s
-	}
-	if i := strings.LastIndex(s, sep); i >= 0 {
-		return s[i+len(sep):]
-	}
-	return s
-}
-
 // prettifyIdentifier turns a launchd label's last segment or a systemd unit
 // name into a display-friendly title, e.g. "open-webui" -> "Open Webui".
 func prettifyIdentifier(id string) string {

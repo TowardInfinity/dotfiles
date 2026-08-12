@@ -63,7 +63,7 @@ func loadDocs(repo string) ([]doc, string) {
 	}
 
 	var out []doc
-	_ = fs.WalkDir(dotfiles.DocsFS, "docs", func(p string, d fs.DirEntry, err error) error {
+	if err := fs.WalkDir(dotfiles.DocsFS, "docs", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
 			return nil
 		}
@@ -73,7 +73,9 @@ func loadDocs(repo string) ([]doc, string) {
 		}
 		out = append(out, parseDoc(strings.TrimSuffix(filepath.Base(p), ".md"), string(b)))
 		return nil
-	})
+	}); err != nil {
+		return out, "(embedded)"
+	}
 	sortDocs(out)
 	return out, "(embedded)"
 }

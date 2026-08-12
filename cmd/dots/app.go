@@ -408,14 +408,6 @@ func (m model) View() tea.View {
 	return v
 }
 
-// ── shared helpers ───────────────────────────────────────────
-
-// pane wraps content to an exact box, so panes cannot push the layout around
-// when their content is taller or wider than expected.
-func pane(w, h int, s string) string {
-	return lipgloss.NewStyle().Width(w).Height(h).MaxWidth(w).MaxHeight(h).Render(s)
-}
-
 func newViewport(w, h int) viewport.Model {
 	v := viewport.New(viewport.WithWidth(w), viewport.WithHeight(h))
 	v.YPosition = 0

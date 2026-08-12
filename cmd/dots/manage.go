@@ -631,8 +631,7 @@ func (m manageModel) openProjectTmux(p projectInfo) tea.Cmd {
 		}
 	}
 
-	name, path := p.name, p.path
-	_ = path
+	name := p.name
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -711,17 +710,6 @@ func fetchDotfilesInfo(repo string) tea.Cmd {
 		}
 		return dotfilesInfoMsg{info: info}
 	}
-}
-
-func firstLine(out string, err error) string {
-	out = strings.TrimSpace(out)
-	if out == "" {
-		return err.Error()
-	}
-	if i := strings.IndexByte(out, '\n'); i >= 0 {
-		out = out[:i]
-	}
-	return out
 }
 
 // ── commands: services ────────────────────────────────────────

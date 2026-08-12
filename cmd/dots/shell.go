@@ -69,15 +69,6 @@ func routeLabel(r routeID) string {
 	return string(r)
 }
 
-func routeGroup(r routeID) string {
-	for _, row := range shellNavRows() {
-		if row.route == r {
-			return row.group
-		}
-	}
-	return "dots"
-}
-
 type shellHitKind uint8
 
 const (
@@ -180,8 +171,11 @@ func newShellModel() *shellModel {
 
 func (m *shellModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{fetchOverviewInfo(), m.changes.Init(), m.sp.Tick}
-	if len(m.fleet.Hosts) == 0 {
-		m.loaded[routeFleet] = true
+	if m.loaded == nil {
+		m.loaded = map[routeID]bool{}
+	}
+	m.loaded[routeFleet] = true
+	if fleetSnapshotNeedsRefresh(m.fleet, time.Now()) {
 		cmds = append(cmds, fetchFleetSnapshot())
 	}
 	return tea.Batch(cmds...)
@@ -192,7 +186,7 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 		m.loaded = map[routeID]bool{}
 	}
 	if m.loaded[m.route] {
-		if m.route == routeFleet && !m.fleet.fresh(time.Now()) {
+		if m.route == routeFleet && fleetSnapshotNeedsRefresh(m.fleet, time.Now()) {
 			return fetchFleetSnapshot()
 		}
 		return nil
@@ -214,6 +208,7 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 }
 
 func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
@@ -272,15 +267,14 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.projectHint = msg.hint
 		return m, nil
 	case servicesFoundMsg:
-		var cmd tea.Cmd
 		m.servicesView, cmd = m.servicesView.update(msg)
 		return m, cmd
 	case servicesProbedMsg:
-		m.servicesView, _ = m.servicesView.update(msg)
-		return m, nil
+		m.servicesView, cmd = m.servicesView.update(msg)
+		return m, cmd
 	case packagesFoundMsg:
-		m.packagesView, _ = m.packagesView.update(msg)
-		return m, nil
+		m.packagesView, cmd = m.packagesView.update(msg)
+		return m, cmd
 	case tea.KeyPressMsg:
 		return m.updateKey(msg)
 	case tea.MouseWheelMsg:
@@ -288,8 +282,8 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		return m.updateClick(msg)
 	case spinner.TickMsg:
-		m.sp, _ = m.sp.Update(msg)
-		return m, nil
+		m.sp, cmd = m.sp.Update(msg)
+		return m, cmd
 	}
 
 	// Async data is broadcast to the child that owns it even when its route is
@@ -621,15 +615,6 @@ func (m *shellModel) updateProjectsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd)
 		m.projectDetail = ""
 	}
 	return m, nil
-}
-
-func indexOfProject(projects []projectInfo, name string) int {
-	for i, project := range projects {
-		if project.name == name {
-			return i
-		}
-	}
-	return 0
 }
 
 // openProjectTmux is a handoff rather than an action-runner operation: tmux
@@ -1218,27 +1203,6 @@ func (m *shellModel) renderRoute(w, h int) string {
 	default:
 		return ""
 	}
-}
-
-func (m *shellModel) healthSummary() string {
-	if m.doc.loading {
-		return "checking tools, frameworks, and config"
-	}
-	ok, bad, warn := 0, 0, 0
-	for _, check := range m.doc.checks {
-		switch check.state {
-		case checkOK:
-			ok++
-		case checkBad:
-			bad++
-		case checkWarn:
-			warn++
-		}
-	}
-	if bad > 0 || warn > 0 {
-		return fmt.Sprintf("%d healthy · %d failed · %d warnings", ok, bad, warn)
-	}
-	return fmt.Sprintf("%d checks healthy", ok)
 }
 
 func (m *shellModel) renderHealth(w, h int, spin string) string {

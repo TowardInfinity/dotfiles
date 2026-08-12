@@ -14,15 +14,6 @@ import (
 // truncation was a workaround for a layout bug caused by the same string.
 // bubbles/help renders to a width by design, so the whole problem disappears.
 
-type keyMap struct {
-	bindings []key.Binding
-}
-
-func (k keyMap) ShortHelp() []key.Binding { return k.bindings }
-func (k keyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{k.bindings}
-}
-
 func bind(keys, desc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
 }

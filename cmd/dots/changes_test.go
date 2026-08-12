@@ -101,3 +101,19 @@ func TestFleetSnapshotRoundTripIsPrivateAndAtomic(t *testing.T) {
 		t.Fatalf("cache mode = %o, want 600", info.Mode().Perm())
 	}
 }
+
+func TestFreshFleetSnapshotDoesNotNeedRefresh(t *testing.T) {
+	now := time.Now()
+	fresh := fleetSnapshot{Checked: now.Add(-time.Hour), Hosts: []fleetSnapshotHost{{Alias: "a1"}}}
+	if fleetSnapshotNeedsRefresh(fresh, now) {
+		t.Fatal("fresh fleet cache scheduled an unnecessary probe")
+	}
+	if !fleetSnapshotNeedsRefresh(fleetSnapshot{Checked: now, Hosts: nil}, now) {
+		t.Fatal("empty fleet cache did not request its initial probe")
+	}
+	stale := fresh
+	stale.Checked = now.Add(-13 * time.Hour)
+	if !fleetSnapshotNeedsRefresh(stale, now) {
+		t.Fatal("stale fleet cache did not request a refresh")
+	}
+}

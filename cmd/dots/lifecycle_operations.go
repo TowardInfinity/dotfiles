@@ -346,7 +346,7 @@ func validatePublishPaths(ctx context.Context, repo string, paths []string, stre
 			return fmt.Errorf("gofmt: %w", err)
 		}
 		if strings.TrimSpace(string(out)) != "" {
-			return fmt.Errorf("Go files need gofmt: %s", strings.Join(nonemptyLines(string(out)), ", "))
+			return fmt.Errorf("go files need gofmt: %s", strings.Join(nonemptyLines(string(out)), ", "))
 		}
 		for _, argv := range [][]string{{"go", "build", "./..."}, {"go", "vet", "./..."}, {"go", "test", "./..."}} {
 			if err := providers.Command(repo, argv...).Run(ctx, streams); err != nil {

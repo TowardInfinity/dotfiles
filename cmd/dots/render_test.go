@@ -195,8 +195,9 @@ func TestAsyncResultReachesInactiveTab(t *testing.T) {
 // the keyboard, so a stuck one takes the whole program with it.
 func TestCancelDoesNotWedge(t *testing.T) {
 	a := newAction(testCommandPlan("Sleep", "sleep", "30"), 80, 20)
-	a, cmd := a.start()
+	a, _ = a.start()
 
+	var cmd tea.Cmd
 	a, cmd, _ = a.update(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if cmd == nil {
 		t.Fatal("cancel returned no command — the done message can never arrive")

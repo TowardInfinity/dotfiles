@@ -159,7 +159,9 @@ func statRow(key, value string, keyW int) string {
 func selectableLine(line string, width int, selected bool) string {
 	width = max(1, width)
 	if !selected {
-		return styItem.Render(truncate(line, width))
+		// Reserve the same marker column as the selected branch. Without this
+		// prefix every row's content shifted two columns when the cursor moved.
+		return styItem.Render(truncate("  "+line, width))
 	}
 	if width == 1 {
 		return styItemCursor.Render("▌")

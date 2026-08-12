@@ -75,8 +75,6 @@ var (
 			BorderRight(true).
 			BorderForeground(cLine)
 
-	styPane = lipgloss.NewStyle().Padding(0, 2)
-
 	styTitle = lipgloss.NewStyle().Foreground(cMac).Bold(true)
 
 	styHint = lipgloss.NewStyle().Foreground(cFaint)
@@ -98,11 +96,6 @@ var (
 	styMuted   = lipgloss.NewStyle().Foreground(cFaint)
 	styKey     = lipgloss.NewStyle().Foreground(cViolet)
 	styValue   = lipgloss.NewStyle().Foreground(cInk)
-
-	// OS tags carry the same colour meaning as the tmux status bars.
-	styOSMac   = lipgloss.NewStyle().Foreground(cMac)
-	styOSLinux = lipgloss.NewStyle().Foreground(cLinux)
-	styOSBoth  = lipgloss.NewStyle().Foreground(cFaint)
 )
 
 // glamourStyle renders markdown in the same palette as everything else.

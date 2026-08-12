@@ -155,3 +155,7 @@ func fetchFleetSnapshot() tea.Cmd {
 		return fleetSnapshotMsg{snapshot: snapshot}
 	}
 }
+
+func fleetSnapshotNeedsRefresh(snapshot fleetSnapshot, now time.Time) bool {
+	return len(snapshot.Hosts) == 0 || !snapshot.fresh(now)
+}

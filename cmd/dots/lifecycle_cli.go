@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 type statusReport struct {
@@ -141,29 +144,40 @@ func collectStatus(repo string, online bool) statusReport {
 }
 
 func collectFleetStatus(hosts []string) []fleetStatusReport {
-	results := make([]fleetStatusReport, 0, len(hosts))
-	for _, host := range hosts {
-		ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, remoteDots("status", "--json"))
-		out, err := cmd.CombinedOutput()
-		cancel()
-		item := fleetStatusReport{Host: host}
-		if err != nil {
-			item.Error = strings.TrimSpace(string(out))
-			if item.Error == "" {
-				item.Error = err.Error()
-			}
-		} else {
-			var remote statusReport
-			if err := json.Unmarshal(out, &remote); err != nil {
-				item.Error = "invalid status response: " + err.Error()
-			} else {
-				item.Revision, item.Version, item.BinarySource, item.KeyMarker, item.ConfigOK = remote.Revision, remote.Version, remote.BinarySource, remote.KeyMarker, remote.ConfigOK
-			}
-		}
-		results = append(results, item)
+	results := make([]fleetStatusReport, len(hosts))
+	group, ctx := errgroup.WithContext(context.Background())
+	group.SetLimit(4)
+	for i := range hosts {
+		i := i
+		group.Go(func() error {
+			results[i] = collectFleetHost(ctx, hosts[i])
+			return nil
+		})
 	}
+	_ = group.Wait()
 	return results
+}
+
+func collectFleetHost(parent context.Context, host string) fleetStatusReport {
+	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, remoteDots("status", "--json"))
+	out, err := cmd.CombinedOutput()
+	item := fleetStatusReport{Host: host}
+	if err != nil {
+		item.Error = strings.TrimSpace(string(out))
+		if item.Error == "" {
+			item.Error = err.Error()
+		}
+	} else {
+		var remote statusReport
+		if err := json.Unmarshal(out, &remote); err != nil {
+			item.Error = "invalid status response: " + err.Error()
+		} else {
+			item.Revision, item.Version, item.BinarySource, item.KeyMarker, item.ConfigOK = remote.Revision, remote.Version, remote.BinarySource, remote.KeyMarker, remote.ConfigOK
+		}
+	}
+	return item
 }
 
 func printStatus(report statusReport) {
@@ -327,7 +341,12 @@ roll out. Use --all deliberately to select every changed path.
 			return 2
 		}
 		fmt.Fprint(os.Stderr, "Commit message: ")
-		request.Message, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		message, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if err != nil && err != io.EOF {
+			fmt.Fprintf(os.Stderr, "dots publish: read commit message: %v\n", err)
+			return 1
+		}
+		request.Message = message
 		request.Message = strings.TrimSpace(request.Message)
 	}
 	plan, err := buildOperation(request)

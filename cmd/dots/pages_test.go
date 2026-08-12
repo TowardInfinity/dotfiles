@@ -187,7 +187,7 @@ func TestInteractiveStatesRender(t *testing.T) {
 		plan.Confirm = "Run the probe?"
 		tm, _ = tm.Update(runActionMsg{plan: plan})
 		checkFrame(t, "overlay-confirm @"+itoa(w)+"x"+itoa(h), tm.View().Content, w, h)
-		tm, _ = tm.Update(tea.KeyPressMsg{Code: 'n', Text: string('n')})
+		_, _ = tm.Update(tea.KeyPressMsg{Code: 'n', Text: string('n')})
 	}
 }
 

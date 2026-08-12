@@ -103,3 +103,16 @@ func TestServicesSelectedRowHasVisibleCursor(t *testing.T) {
 		t.Fatal("selected service row has no visible cursor stripe")
 	}
 }
+
+func TestSelectableLineKeepsColumnsAligned(t *testing.T) {
+	plain := stripANSI(selectableLine("● api          launchd  running", 40, false))
+	selected := stripANSI(selectableLine("● api          launchd  running", 40, true))
+	plainAPI := strings.Index(plain, "api")
+	selectedAPI := strings.Index(selected, "api")
+	if plainAPI < 0 || selectedAPI < 0 {
+		t.Fatal("test row lost its api label")
+	}
+	if lipgloss.Width(plain[:plainAPI]) != lipgloss.Width(selected[:selectedAPI]) {
+		t.Fatalf("content shifted: unselected api at column %d, selected at %d", lipgloss.Width(plain[:plainAPI]), lipgloss.Width(selected[:selectedAPI]))
+	}
+}

@@ -145,12 +145,11 @@ func collectStatus(repo string, online bool) statusReport {
 
 func collectFleetStatus(hosts []string) []fleetStatusReport {
 	results := make([]fleetStatusReport, len(hosts))
-	group, ctx := errgroup.WithContext(context.Background())
+	var group errgroup.Group
 	group.SetLimit(4)
 	for i := range hosts {
-		i := i
 		group.Go(func() error {
-			results[i] = collectFleetHost(ctx, hosts[i])
+			results[i] = collectFleetHost(hosts[i])
 			return nil
 		})
 	}
@@ -158,8 +157,8 @@ func collectFleetStatus(hosts []string) []fleetStatusReport {
 	return results
 }
 
-func collectFleetHost(parent context.Context, host string) fleetStatusReport {
-	ctx, cancel := context.WithTimeout(parent, 12*time.Second)
+func collectFleetHost(host string) fleetStatusReport {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=4", host, remoteDots("status", "--json"))
 	out, err := cmd.CombinedOutput()

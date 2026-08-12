@@ -688,6 +688,18 @@ fi
 $DRY || [ -x "$DEST/install.sh" ] \
   || die "$DEST/install.sh not found — the clone or update did not leave a usable repo"
 
+# The Go analyzer is a repository development tool rather than a shell
+# dependency. Install it only for the full profile, after the checkout exists
+# so the version pin has one tracked source shared with CI and bin/lint.sh.
+# A package/tool failure must not prevent config linking.
+if $DEPS && ! $DRY; then
+  if [ -x "$DEST/bin/install-go-tools.sh" ]; then
+    "$DEST/bin/install-go-tools.sh" || warn "Staticcheck installation failed — run ./bin/install-go-tools.sh"
+  else
+    warn "repository Go-tool installer is missing — skipping Staticcheck"
+  fi
+fi
+
 # ── Link ──────────────────────────────────────────────────────
 say "Linking configs"
 if $DRY; then

@@ -137,6 +137,7 @@ type shellModel struct {
 	projectCursor    int
 	projectDetail    string
 	loaded           map[routeID]bool
+	fleetRefreshing  bool
 	// hitScratch is used only by renderFrame's value copy and its render
 	// helpers. Input handlers consume the returned hit slice, never this field
 	// on the live model.
@@ -176,7 +177,7 @@ func (m *shellModel) Init() tea.Cmd {
 	}
 	m.loaded[routeFleet] = true
 	if fleetSnapshotNeedsRefresh(m.fleet, time.Now()) {
-		cmds = append(cmds, fetchFleetSnapshot())
+		cmds = append(cmds, m.refreshFleet())
 	}
 	return tea.Batch(cmds...)
 }
@@ -187,7 +188,7 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 	}
 	if m.loaded[m.route] {
 		if m.route == routeFleet && fleetSnapshotNeedsRefresh(m.fleet, time.Now()) {
-			return fetchFleetSnapshot()
+			return m.refreshFleet()
 		}
 		return nil
 	}
@@ -202,9 +203,21 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 	case routeProjects:
 		return fetchProjectsInfo()
 	case routeFleet:
-		return fetchFleetSnapshot()
+		return m.refreshFleet()
 	}
 	return nil
+}
+
+// refreshFleet coalesces startup, navigation, and explicit refresh requests.
+// Without the in-flight bit, a cold Init followed immediately by opening the
+// Fleet route starts the same four SSH probes twice before the first result can
+// update the cache.
+func (m *shellModel) refreshFleet() tea.Cmd {
+	if m.fleetRefreshing {
+		return nil
+	}
+	m.fleetRefreshing = true
+	return fetchFleetSnapshot()
 }
 
 func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -234,6 +247,7 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case fleetSnapshotMsg:
 		m.fleet = msg.snapshot
+		m.fleetRefreshing = false
 		if m.fleetCursor >= len(m.fleet.Hosts) {
 			m.fleetCursor = max(0, len(m.fleet.Hosts)-1)
 		}
@@ -444,7 +458,7 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		return m.updateHealthKey(msg)
 	case routeOverview:
 		if msg.String() == "r" {
-			return m, tea.Batch(fetchOverviewInfo(), fetchRepoState(m.repo), fetchFleetSnapshot())
+			return m, tea.Batch(fetchOverviewInfo(), fetchRepoState(m.repo), m.refreshFleet())
 		}
 	case routeFleet:
 		return m.updateFleetKey(msg)
@@ -535,7 +549,7 @@ func (m *shellModel) visibleHealthChecks() []checkResult {
 func (m *shellModel) updateFleetKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "r":
-		return m, fetchFleetSnapshot()
+		return m, m.refreshFleet()
 	case "j", "down":
 		if m.fleetCursor < len(m.fleet.Hosts)-1 {
 			m.fleetCursor++
@@ -937,7 +951,7 @@ func (m *shellModel) choosePalette(index int) (tea.Model, tea.Cmd) {
 		return m, fetchProjectsInfo()
 	case "fleet-refresh":
 		m.route = routeFleet
-		return m, fetchFleetSnapshot()
+		return m, m.refreshFleet()
 	case "rollout":
 		m.route = routeFleet
 		return m, m.prepareFleetRollout()
@@ -1604,7 +1618,7 @@ func (m *shellModel) refreshAffected(resources []ops.ResourceID) tea.Cmd {
 		case resourcePackages:
 			cmds = append(cmds, discoverPackages())
 		case resourceMachines:
-			cmds = append(cmds, fetchMachinesInfo(), fetchFleetSnapshot())
+			cmds = append(cmds, fetchMachinesInfo(), m.refreshFleet())
 		}
 	}
 	return tea.Batch(cmds...)

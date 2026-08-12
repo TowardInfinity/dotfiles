@@ -117,3 +117,25 @@ func TestFreshFleetSnapshotDoesNotNeedRefresh(t *testing.T) {
 		t.Fatal("stale fleet cache did not request a refresh")
 	}
 }
+
+func TestFleetRefreshCoalescesInFlightProbe(t *testing.T) {
+	m := &shellModel{}
+	if cmd := m.refreshFleet(); cmd == nil {
+		t.Fatal("first fleet refresh returned no command")
+	}
+	if !m.fleetRefreshing {
+		t.Fatal("first fleet refresh did not mark the probe in flight")
+	}
+	if cmd := m.refreshFleet(); cmd != nil {
+		t.Fatal("second fleet refresh started a duplicate probe")
+	}
+
+	m.fleet = fleetSnapshot{Schema: fleetCacheSchema, Hosts: []fleetSnapshotHost{{Alias: "a1"}}}
+	updated, cmd := m.Update(fleetSnapshotMsg{snapshot: m.fleet})
+	if cmd != nil {
+		t.Fatalf("fleet result returned unexpected command: %v", cmd)
+	}
+	if updated.(*shellModel).fleetRefreshing {
+		t.Fatal("fleet result left the probe marked in flight")
+	}
+}

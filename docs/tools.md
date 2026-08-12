@@ -60,3 +60,10 @@ sh -c "$(curl -fsSL https://toin.in/install)" -- --ai
 | `opencode` | the official installer, lands in `~/.opencode/bin` |
 
 Each is skipped if already present, so the flag is safe to re-run.
+
+## Repository checks
+
+`--deps` also provisions the repository's pinned Go analyzer, Staticcheck, for
+`./bin/lint.sh`. Its version is shared by CI and the local installer through
+`tools/go-tools.env`; it is a development check, not a shell runtime
+dependency. The light profile deliberately does not install it.

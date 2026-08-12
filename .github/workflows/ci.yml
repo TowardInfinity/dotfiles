@@ -31,7 +31,8 @@ jobs:
 
       - name: Staticcheck
         run: |
-          go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
+          . ./tools/go-tools.env
+          go install "$STATICCHECK_MODULE@$STATICCHECK_VERSION"
           PATH="$(go env GOPATH)/bin:$PATH" ./bin/lint.sh
 
       - name: Test

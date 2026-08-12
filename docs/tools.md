@@ -66,4 +66,5 @@ Each is skipped if already present, so the flag is safe to re-run.
 `--deps` also provisions the repository's pinned Go analyzer, Staticcheck, for
 `./bin/lint.sh`. Its version is shared by CI and the local installer through
 `tools/go-tools.env`; it is a development check, not a shell runtime
-dependency. The light profile deliberately does not install it.
+dependency. The same full profile installs ShellCheck for `./bin/shellcheck.sh`.
+The light profile deliberately installs neither check.

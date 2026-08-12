@@ -1596,6 +1596,7 @@ grep -Fq "printf '# tag=%s commit=%s\\n' \"\$VERSION\" \"\$GITHUB_SHA\"" \
 # ── syntax ────────────────────────────────────────────────────
 group "syntax"
 for f in bootstrap.sh install.sh dots.sh bin/dots bin/dots-resolve.sh \
+         bin/install-go-tools.sh bin/lint.sh bin/shellcheck.sh \
          common/tmux/model.sh common/tmux/pane-theme.sh common/claude/statusline.sh \
          common/claude/session-start.sh; do
   if [ "$f" = "install.sh" ] || [ "$f" = "bin/dots" ]; then sh_bin=bash; else sh_bin=sh; fi

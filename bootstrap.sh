@@ -222,7 +222,7 @@ install_macos_pkgs() {
   #   gh                          -> convenience only; this installer no longer
   #                                  needs it, the configs repo is public
   if $DRY; then
-    echo "    would: brew install neovim tmux git curl gh jq ripgrep fd fzf zoxide eza bat lazygit btop glow uv pnpm fnm go"
+    echo "    would: brew install neovim tmux git curl gh jq ripgrep fd fzf zoxide eza bat lazygit btop glow uv pnpm fnm go shellcheck"
     echo "    would: brew install --cask ghostty font-jetbrains-mono-nerd-font"
   else
     say "Installing packages (brew)"
@@ -232,7 +232,7 @@ install_macos_pkgs() {
     # at the end reports what actually ended up missing, which is the thing
     # worth knowing anyway.
     brew install neovim tmux git curl gh jq ripgrep fd fzf zoxide eza bat \
-      lazygit btop glow uv pnpm fnm go \
+      lazygit btop glow uv pnpm fnm go shellcheck \
       || warn "some formulae failed — see brew's output above"
     brew install --cask ghostty font-jetbrains-mono-nerd-font \
       || warn "some casks failed (already installed by hand?)"
@@ -241,7 +241,7 @@ install_macos_pkgs() {
 
 install_linux_pkgs() {
   if $DRY; then
-    echo "    would: apt-get install tmux zsh git curl unzip build-essential python3-venv jq ripgrep"
+    echo "    would: apt-get install tmux zsh git curl unzip build-essential python3-venv jq ripgrep shellcheck"
     echo "    would: install Neovim, uv, fnm, pnpm, Go, glow, gh (apt's are missing or too old)"
     return 0
   fi
@@ -255,7 +255,7 @@ install_linux_pkgs() {
   sudo apt-get update -qq || warn "apt-get update failed — package installs may fail"
   # python3-venv matters: without it Mason cannot install ruff.
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    tmux zsh git curl unzip build-essential python3-venv jq ripgrep \
+    tmux zsh git curl unzip build-essential python3-venv jq ripgrep shellcheck \
     || warn "some apt packages failed — see above"
 
   [ -n "$NVIM_ARCH" ] \

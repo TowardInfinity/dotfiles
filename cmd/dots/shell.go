@@ -1278,6 +1278,9 @@ func (m *shellModel) changesSummary() string {
 
 func (m *shellModel) fleetSummary() string {
 	if len(m.fleet.Hosts) == 0 {
+		if m.fleetRefreshing {
+			return "checking configured SSH hosts"
+		}
 		return "unknown · press r to check"
 	}
 	return m.fleet.summary() + " · " + formatAgeOrUnknown(m.fleet)
@@ -1297,6 +1300,9 @@ func formatAgeOrUnknown(snapshot fleetSnapshot) string {
 
 func (m *shellModel) renderFleet(w, h int) string {
 	if len(m.fleet.Hosts) == 0 {
+		if m.fleetRefreshing {
+			return styPending.Render("  " + m.sp.View() + " checking configured SSH hosts")
+		}
 		return styMuted.Render("unknown · press r to check configured SSH hosts")
 	}
 	rows := []string{styMuted.Render("SPACE select · ENTER inspect · r refresh · a actions")}
@@ -1476,7 +1482,11 @@ func (m *shellModel) renderOverview(w, h int) string {
 
 	rows = append(rows, "", styMuted.Render("FLEET"))
 	if len(m.fleet.Hosts) == 0 {
-		rows = append(rows, styMuted.Render("  unknown · press r to check"))
+		if m.fleetRefreshing {
+			rows = append(rows, styPending.Render("  "+m.sp.View()+" checking configured SSH hosts"))
+		} else {
+			rows = append(rows, styMuted.Render("  unknown · press r to check"))
+		}
 	} else {
 		line := "  " + m.fleet.summary()
 		if age, ok := fleetSnapshotAge(m.fleet); ok {

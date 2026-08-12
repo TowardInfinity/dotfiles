@@ -139,3 +139,19 @@ func TestFleetRefreshCoalescesInFlightProbe(t *testing.T) {
 		t.Fatal("fleet result left the probe marked in flight")
 	}
 }
+
+func TestFleetLoadingStateDoesNotInviteDuplicateRefresh(t *testing.T) {
+	m := shellAt(t, 80, 24)
+	m.route = routeFleet
+	m.fleet = fleetSnapshot{Schema: fleetCacheSchema}
+	m.fleetRefreshing = true
+
+	summary := m.fleetSummary()
+	if !strings.Contains(summary, "checking") || strings.Contains(summary, "press r") {
+		t.Fatalf("loading fleet summary = %q, want an in-flight message without a refresh prompt", summary)
+	}
+	body := stripANSI(m.renderFleet(80, 24))
+	if !strings.Contains(body, "checking configured SSH hosts") || strings.Contains(body, "press r") {
+		t.Fatalf("loading fleet body = %q, want an in-flight message without a refresh prompt", body)
+	}
+}

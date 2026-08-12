@@ -35,6 +35,18 @@ jobs:
           go install "$STATICCHECK_MODULE@$STATICCHECK_VERSION"
           PATH="$(go env GOPATH)/bin:$PATH" ./bin/lint.sh
 
+      - name: Shellcheck
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            if command -v brew >/dev/null 2>&1; then
+              brew install shellcheck
+            else
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq shellcheck
+            fi
+          fi
+          ./bin/shellcheck.sh
+
       - name: Test
         run: go test ./...
 

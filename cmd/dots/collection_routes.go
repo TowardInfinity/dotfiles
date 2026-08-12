@@ -222,13 +222,7 @@ func (m servicesRouteModel) view(w, h int, spin string) string {
 			port = ":" + strconv.Itoa(item.Port)
 		}
 		line := fmt.Sprintf("%s %-24s %-12s %-9s %-7s %s", mark, item.Name, svcSourceName(item.Source), state, port, item.Detail)
-		line = truncate(line, measure)
-		if i == m.cursor {
-			line = styItemOn.Render(padRight(line, measure))
-		} else {
-			line = styItem.Render(line)
-		}
-		lines = append(lines, line)
+		lines = append(lines, selectableLine(line, measure, i == m.cursor))
 	}
 	if len(items) > rows {
 		lines = append(lines, styMuted.Render(fmt.Sprintf("… %d more · j/k to move", len(items)-rows)))
@@ -464,13 +458,7 @@ func (m packagesRouteModel) view(w, h int, spin string) string {
 			mark = styPending.Render("↑")
 		}
 		line := fmt.Sprintf("%s %-12s %-24s %-12s %s", mark, group, item.Name, item.Version, latest)
-		line = truncate(line, measure)
-		if i == m.cursor {
-			line = styItemOn.Render(padRight(line, measure))
-		} else {
-			line = styItem.Render(line)
-		}
-		lines = append(lines, line)
+		lines = append(lines, selectableLine(line, measure, i == m.cursor))
 	}
 	if len(items) > rows {
 		lines = append(lines, styMuted.Render(fmt.Sprintf("… %d more · j/k to move", len(items)-rows)))

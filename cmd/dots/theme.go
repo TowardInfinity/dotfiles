@@ -12,8 +12,11 @@ import (
 // tmux status bars use to say which machine you are looking at, and the same
 // meaning carries through every OS tag and machine row here.
 var (
-	cBg      = lipgloss.Color("#1a1b26")
-	cSurface = lipgloss.Color("#1f2130")
+	cBg = lipgloss.Color("#1a1b26")
+	// Selection needs to survive real terminal contrast and screenshots. The
+	// old surface (#1f2130) was only a few RGB steps above the background, so
+	// list cursors looked absent unless the terminal was viewed at high zoom.
+	cSurface = lipgloss.Color("#26304a")
 	cLine    = lipgloss.Color("#292e42")
 	cInk     = lipgloss.Color("#c0caf5")
 	cInkDim  = lipgloss.Color("#9aa5ce")

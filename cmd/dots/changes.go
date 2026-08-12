@@ -305,12 +305,7 @@ func (m changesModel) view(w, h int) string {
 				status = "staged " + status
 			}
 			line := fmt.Sprintf("%s %-8s %s", mark, status, file.Path)
-			if i == m.cursor {
-				line = styItemOn.Render(padRight(truncate(line, max(1, w-4)), max(1, w-4)))
-			} else {
-				line = styItem.Render(truncate(line, max(1, w-4)))
-			}
-			rows = append(rows, line)
+			rows = append(rows, selectableLine(line, max(1, w-4), i == m.cursor))
 		}
 	}
 	rows = append(rows, "", styMuted.Render("INCOMING FROM ORIGIN"))

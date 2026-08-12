@@ -1270,10 +1270,7 @@ func (m *shellModel) renderHealth(w, h int, spin string) string {
 		if where != "" {
 			line += "  " + styMuted.Render(where)
 		}
-		if i == m.healthCursor {
-			line = styItemOn.Render(padRight(truncate(line, max(1, w-4)), max(1, w-4)))
-		}
-		rows = append(rows, line)
+		rows = append(rows, selectableLine(line, max(1, w-4), i == m.healthCursor))
 		localY := 3 + len(rows) - 1
 		m.registerRowHit(routeHealth, i, shellBodyTop+localY, w)
 	}

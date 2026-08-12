@@ -94,3 +94,12 @@ func TestNativeCollectionRoutesRenderWithinBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestServicesSelectedRowHasVisibleCursor(t *testing.T) {
+	m := newServicesRouteModel()
+	m, _ = m.update(servicesFoundMsg{services: []service{{Name: "api", Source: srcLaunchd, Running: true}}})
+	plain := stripANSI(m.view(80, 24, "·"))
+	if !strings.Contains(plain, "▌") {
+		t.Fatal("selected service row has no visible cursor stripe")
+	}
+}

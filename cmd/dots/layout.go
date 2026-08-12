@@ -152,6 +152,23 @@ func statRow(key, value string, keyW int) string {
 	return styKey.Render(padRight(key, keyW)) + value
 }
 
+// selectableLine gives every focused content row the same two signals: a
+// blue cursor stripe and a contrasting selection surface. Keeping the marker
+// outside the padded style preserves the caller's exact content width while
+// making selection legible without relying on colour alone.
+func selectableLine(line string, width int, selected bool) string {
+	width = max(1, width)
+	if !selected {
+		return styItem.Render(truncate(line, width))
+	}
+	if width == 1 {
+		return styItemCursor.Render("▌")
+	}
+	contentWidth := width - 1
+	content := truncate(" "+line, contentWidth)
+	return styItemCursor.Render("▌") + styItemOn.Render(padRight(content, contentWidth))
+}
+
 // stateDot encodes state in shape as well as colour, so it still reads on a
 // terminal with a limited palette or for anyone who cannot separate the hues.
 // checkDot renders a doctor row's marker for all four states. stateDot below

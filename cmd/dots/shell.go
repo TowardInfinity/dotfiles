@@ -146,7 +146,10 @@ type shellModel struct {
 	projectCursor    int
 	projectDetail    string
 	loaded           map[routeID]bool
-	hits             []shellHit
+	// hitScratch is used only by renderFrame's value copy and its render
+	// helpers. Input handlers consume the returned hit slice, never this field
+	// on the live model.
+	hitScratch []shellHit
 }
 
 func newShellModel() *shellModel {
@@ -983,7 +986,7 @@ func (m *shellModel) View() tea.View {
 func (m shellModel) renderFrame() (tea.View, []shellHit) {
 	// The copy may share the backing array of a previously cached hit slice;
 	// detach it before the render helpers append so the caller remains pure.
-	m.hits = nil
+	m.hitScratch = nil
 	if m.w < 44 || m.h < 14 {
 		v := tea.NewView(fmt.Sprintf("dots · %s\n\nTerminal too small — need at least 44×14 (current %d×%d).", routeLabel(m.route), m.w, m.h))
 		v.AltScreen = true
@@ -1012,27 +1015,27 @@ func (m shellModel) renderFrame() (tea.View, []shellHit) {
 	}
 	view := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 	if m.palette != nil {
-		m.hits = m.hits[:0] // modal input blocks routes and footer behind it
+		m.hitScratch = m.hitScratch[:0] // modal input blocks routes and footer behind it
 		view = lipgloss.Place(m.w, m.h, lipgloss.Left, lipgloss.Top, view)
 		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, m.renderPalette(view))
 	}
 	if m.help {
-		m.hits = m.hits[:0]
+		m.hitScratch = m.hitScratch[:0]
 		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, m.renderHelp(view))
 	}
 	if m.act != nil {
-		m.hits = m.hits[:0] // modal input blocks every route behind it
+		m.hitScratch = m.hitScratch[:0] // modal input blocks every route behind it
 		overlay := m.act.view(m.sp.View())
 		boxW, boxH := lipgloss.Width(overlay), lipgloss.Height(overlay)
 		left := max(0, (m.w-boxW)/2)
 		top := max(0, (m.h-boxH)/2)
 		if m.act.confirm {
 			half := max(1, boxW/2)
-			m.hits = append(m.hits,
+			m.hitScratch = append(m.hitScratch,
 				shellHit{x: left, y: top + boxH - 2, w: half, h: 2, kind: shellHitAction, index: 0},
 				shellHit{x: left + half, y: top + boxH - 2, w: boxW - half, h: 2, kind: shellHitAction, index: 1})
 		} else {
-			m.hits = append(m.hits, shellHit{x: left, y: top + boxH - 2, w: boxW, h: 2, kind: shellHitAction, index: 0})
+			m.hitScratch = append(m.hitScratch, shellHit{x: left, y: top + boxH - 2, w: boxW, h: 2, kind: shellHitAction, index: 0})
 		}
 		view = lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, overlay)
 	}
@@ -1045,7 +1048,7 @@ func (m shellModel) renderFrame() (tea.View, []shellHit) {
 	v := tea.NewView(view)
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	return v, m.hits
+	return v, m.hitScratch
 }
 
 func stripANSI(s string) string {
@@ -1135,7 +1138,7 @@ func (m *shellModel) renderSidebar(rows []shellNavRow, h int) string {
 			b.WriteString(styItem.Render(label))
 		}
 		b.WriteByte('\n')
-		m.hits = append(m.hits, shellHit{x: 0, y: shellBodyTop + line, w: shellSidebarWidth, h: 1, kind: shellHitRoute, route: row.route})
+		m.hitScratch = append(m.hitScratch, shellHit{x: 0, y: shellBodyTop + line, w: shellSidebarWidth, h: 1, kind: shellHitRoute, route: row.route})
 		line++
 	}
 	for line <= h {
@@ -1153,7 +1156,7 @@ func (m *shellModel) registerRowHit(route routeID, index, y, width int) {
 	if width < 1 {
 		return
 	}
-	m.hits = append(m.hits, shellHit{x: x, y: y, w: width, h: 1, kind: shellHitRow, route: route, index: index})
+	m.hitScratch = append(m.hitScratch, shellHit{x: x, y: y, w: width, h: 1, kind: shellHitRow, route: route, index: index})
 }
 
 func (m *shellModel) renderRoute(w, h int) string {
@@ -1565,7 +1568,7 @@ func (m *shellModel) renderFooter() string {
 	// this keeps the mouse path discoverable without trying to duplicate the
 	// variable-width key labels as separate coordinate math.
 	if m.h >= 2 {
-		m.hits = append(m.hits, shellHit{x: 0, y: m.h - 2, w: m.w, h: 2, kind: shellHitPalette})
+		m.hitScratch = append(m.hitScratch, shellHit{x: 0, y: m.h - 2, w: m.w, h: 2, kind: shellHitPalette})
 	}
 	return styStatus.Width(m.w).Render(truncate(left, m.w-2))
 }
@@ -1594,7 +1597,7 @@ func (m *shellModel) renderPalette(base string) string {
 	top := max(0, (m.h-boxH)/2)
 	itemTop := top + 7 // border, padding, title, hint, spacer, filter, spacer
 	for i := range items {
-		m.hits = append(m.hits, shellHit{x: left, y: itemTop + i, w: boxW, h: 1, kind: shellHitPalette, index: i})
+		m.hitScratch = append(m.hitScratch, shellHit{x: left, y: itemTop + i, w: boxW, h: 1, kind: shellHitPalette, index: i})
 	}
 	return out
 }

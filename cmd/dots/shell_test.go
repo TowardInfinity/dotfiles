@@ -84,13 +84,13 @@ func TestShellTabAndShiftTabToggleTheTwoFocusRegions(t *testing.T) {
 	}
 }
 
-func TestShellViewDoesNotMutateHitCache(t *testing.T) {
+func TestShellViewDoesNotMutateHitScratch(t *testing.T) {
 	m := shellAt(t, 100, 30)
-	m.hits = []shellHit{{x: 7, y: 8, w: 9, h: 1, kind: shellHitRoute, route: routeDocs}}
-	before := m.hits[0]
+	m.hitScratch = []shellHit{{x: 7, y: 8, w: 9, h: 1, kind: shellHitRoute, route: routeDocs}}
+	before := m.hitScratch[0]
 	_ = m.View()
-	if len(m.hits) != 1 || m.hits[0] != before {
-		t.Fatalf("View mutated the live hit cache: before=%+v after=%+v", before, m.hits)
+	if len(m.hitScratch) != 1 || m.hitScratch[0] != before {
+		t.Fatalf("View mutated the live hit scratch: before=%+v after=%+v", before, m.hitScratch)
 	}
 }
 

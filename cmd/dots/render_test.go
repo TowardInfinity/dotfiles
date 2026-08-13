@@ -224,6 +224,25 @@ func TestCancelDoesNotWedge(t *testing.T) {
 	}
 }
 
+func TestActionShowsStoppingWhileCancellationCompletes(t *testing.T) {
+	a := newAction(testCommandPlan("Sleep", "sleep", "30"), 80, 20)
+	a, _ = a.start()
+	var cmd tea.Cmd
+	a, cmd, _ = a.update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	if !strings.Contains(stripANSI(a.view("")), "stopping command") {
+		t.Fatalf("cancelling action does not explain its state:\n%s", stripANSI(a.view("")))
+	}
+	deadline := time.After(10 * time.Second)
+	for !a.done {
+		select {
+		case <-deadline:
+			t.Fatal("cancelled action did not finish")
+		default:
+		}
+		a, cmd, _ = a.update(cmd())
+	}
+}
+
 // A second action must not replace a running one, orphaning its process.
 func TestOneActionAtATime(t *testing.T) {
 	m := newModel()

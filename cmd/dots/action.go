@@ -73,7 +73,6 @@ func (a actionModel) start() (actionModel, tea.Cmd) {
 	ch := a.ch
 
 	go func() {
-		defer close(ch)
 		writer := &actionWriter{send: func(line string) { ch <- actLineMsg(line) }}
 		result := operationRunner.Run(ctx, plan, ops.IO{
 			Stdout: writer,
@@ -272,8 +271,12 @@ func (a actionModel) view(spin string) string {
 	} else {
 		body = a.vp.View()
 		switch {
+		case a.running && a.cancelled:
+			foot = styPending.Render("  stopping command…") + styHint.Render("  ·  waiting for it to exit")
 		case a.running:
 			foot = styHint.Render("  esc stop  ·  j/k scroll")
+		case a.cancelled:
+			foot = styPending.Render("  stopped") + styHint.Render("  ·  enter close  ·  j/k scroll")
 		case a.err != nil && a.code != 0:
 			foot = styBad.Render(fmt.Sprintf("  exit %d", a.code)) +
 				styHint.Render("  ·  enter close  ·  j/k scroll")

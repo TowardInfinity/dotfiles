@@ -33,6 +33,7 @@ dots search copy  # find which page mentions it
 | `dots <topic>` | print one page |
 | `dots search <term>` | search every page |
 | `dots topics` | list every page with its summary |
+| `dots memory` | shared memory across your AI tools; see `dots memory help` |
 | `dots doctor` | check the tools these configs call, and the configuration itself |
 | `dots doctor --online` | also check the installed `dots` against the latest release |
 | `dots status [--online] [--fleet] [--json]` | report state; never repair |

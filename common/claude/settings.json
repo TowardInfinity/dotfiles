@@ -29,7 +29,10 @@
       "mcp__kite__cancel_order",
       "mcp__kite__place_gtt_order",
       "mcp__kite__modify_gtt_order",
-      "mcp__kite__delete_gtt_order"
+      "mcp__kite__delete_gtt_order",
+      "mcp__swiggy-food__*",
+      "mcp__swiggy-instamart__*",
+      "mcp__swiggy-dineout__*"
     ]
   },
   "model": "sonnet",
@@ -58,7 +61,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=\"$HOME/.claude/hooks/save_to_obsidian.py\"; [ -f \"$f\" ] || exit 0; exec python3 \"$f\"",
+            "command": "command -v dots >/dev/null 2>&1 || exit 0; exec dots memory capture",
             "timeout": 360,
             "async": true
           }

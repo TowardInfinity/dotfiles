@@ -1318,12 +1318,24 @@ HOOK_SH="$REPO/common/claude/session-start.sh"
 HCFG="$WORK/hookcfg"; mkdir -p "$HCFG"
 HT="$WORK/hook-transcript.jsonl"
 
+# $WORK/hookbin is deliberately empty here (populated with a `dots` stub only
+# in the memory-digest group below). PATH is a fixed, minimal list rather than
+# the inherited one: this machine has a real `dots` on ~/.local/bin, and once
+# the hook calls `dots memory recall`, an inherited PATH would run the real
+# binary against the real ~/.cache index — nondeterministic, and on a machine
+# whose installed `dots` predates the `memory` subcommand, silently wrong (an
+# unrecognized subcommand falls through to `dots <doc-topic>`, so `dots
+# memory` there would print the entire docs/memory.md page into the hook's
+# output — reproduced once while developing this).
+mkdir -p "$WORK/hookbin"
 hpolicy() { printf '{"model":"%s","effortLevel":"%s"}\n' "$1" "$2" > "$HCFG/settings.json"; }
 hturn()   { printf '{"type":"assistant","effort":"%s","message":{"model":"%s","role":"assistant"}}\n' \
                    "$2" "$1" > "$HT"; }
-hrun()    { printf '{"source":"%s","transcript_path":"%s","hook_event_name":"SessionStart"}' \
-                   "${1:-resume}" "$HT" \
-              | env CLAUDE_CONFIG_DIR="$HCFG" sh "$HOOK_SH" 2>/dev/null; }
+hrun()    { printf '{"source":"%s","transcript_path":"%s","cwd":"%s","hook_event_name":"SessionStart"}' \
+                   "${1:-resume}" "$HT" "${2:-$WORK}" \
+              | env CLAUDE_CONFIG_DIR="$HCFG" XDG_CACHE_HOME="$WORK/cache" \
+                    PATH="$WORK/hookbin:/usr/bin:/bin" \
+                    sh "$HOOK_SH" 2>/dev/null; }
 
 hpolicy sonnet high
 
@@ -1374,8 +1386,15 @@ esac
 
 # A hook that errors breaks starting Claude at all, which is far worse than a
 # missed warning. Every path has to exit 0 and print nothing rather than junk.
+#
+# Same isolated PATH/XDG_CACHE_HOME as hrun(): without it this reaches the
+# real installed `dots` on this machine, and once that predates the `memory`
+# subcommand its default fallback prints the entire docs/memory.md page here
+# instead of staying silent.
 for bad_in in 'not json' '' '{"source":"resume","transcript_path":"/nonexistent"}'; do
-  out=$(printf '%s' "$bad_in" | env CLAUDE_CONFIG_DIR="$HCFG" sh "$HOOK_SH" 2>/dev/null)
+  out=$(printf '%s' "$bad_in" \
+          | env CLAUDE_CONFIG_DIR="$HCFG" XDG_CACHE_HOME="$WORK/cache" \
+                PATH="$WORK/hookbin:/usr/bin:/bin" sh "$HOOK_SH" 2>/dev/null)
   rc=$?
   [ "$rc" = 0 ] && [ -z "$out" ] \
     && ok "malformed input [${bad_in:-<empty>}] is survived silently" \
@@ -1402,6 +1421,108 @@ fi
 grep -q 'link common/claude/session-start.sh' "$REPO/install.sh" \
   && ok "install.sh links the SessionStart hook" \
   || bad "install.sh links the SessionStart hook"
+
+group "claude: memory digest injection"
+
+# The four output shapes the hook must produce: policy only, memory only,
+# both, neither. A `dots` stub stands in for the real binary — the Go side of
+# `memory recall` (project resolution, the byte budget, the deadline) is
+# already covered by `go test ./internal/dots/memory/...`; what is untested
+# anywhere else is the shell script's own logic for combining msg/ctx from two
+# independent sources without one early exit swallowing the other, which is
+# exactly the bug this restructuring fixed (the old script exited before ever
+# reaching a fresh, on-policy session — the common case).
+dots_stub() {
+  cat > "$WORK/hookbin/dots" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "memory" ] && [ "\$2" = "recall" ]; then
+  printf '%s' "$1"
+  exit 0
+fi
+exit 1
+STUB
+  chmod +x "$WORK/hookbin/dots"
+}
+dots_absent() { rm -f "$WORK/hookbin/dots"; }
+
+DIGEST='Recent AI sessions in test-project:
+· 2026-08-16 [claude] Debugged the flaky auth test
+Ask for detail with the dots-memory MCP tools.'
+
+# Shape: neither. Fresh, on-policy, no digest — must stay completely silent,
+# exactly as it did before memory digest injection existed.
+hpolicy sonnet high
+hturn claude-sonnet-5 high
+dots_stub ""
+[ -z "$(hrun startup)" ] \
+  && ok "shape 1/4: on-policy fresh start with no digest is silent" \
+  || bad "shape 1/4: on-policy fresh start with no digest is silent" "$(hrun startup)"
+
+# Shape: policy only. Resumed off-policy, no digest — systemMessage present,
+# additionalContext carries the policy note and nothing else.
+hturn claude-opus-5 high
+out=$(hrun resume)
+case "$(printf '%s' "$out" | jq -r '.systemMessage // ""' 2>/dev/null)" in
+  *opus*sonnet*) ok "shape 2/4: policy drift alone sets systemMessage" ;;
+  *) bad "shape 2/4: policy drift alone sets systemMessage" "$out" ;;
+esac
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+  *"Recent AI sessions"*) bad "shape 2/4: no digest means none is injected" "$out" ;;
+  *) ok "shape 2/4: no digest means none is injected" ;;
+esac
+
+# Shape: memory only. Fresh, on-policy, a digest exists — no systemMessage,
+# additionalContext is the digest alone. This is the shape the old
+# `[ "$source_of" = "resume" ] || exit 0` made unreachable: a fresh session
+# with something to recall got nothing, every time.
+hturn claude-sonnet-5 high
+dots_stub "$DIGEST"
+out=$(hrun startup)
+if printf '%s' "$out" | jq -e '.systemMessage' >/dev/null 2>&1; then
+  bad "shape 3/4: fresh on-policy start carries no systemMessage" "$out"
+else
+  ok "shape 3/4: fresh on-policy start carries no systemMessage"
+fi
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)" in
+  *"Recent AI sessions"*"flaky auth test"*) ok "shape 3/4: the digest reaches the session" ;;
+  *) bad "shape 3/4: the digest reaches the session" "$out" ;;
+esac
+
+# Shape: both. Resumed off-policy, a digest exists — systemMessage carries the
+# policy note; additionalContext carries both, policy note first.
+hturn claude-opus-5 high
+out=$(hrun resume)
+printf '%s' "$out" | jq empty 2>/dev/null \
+  && ok "shape 4/4: combined output is valid JSON" \
+  || bad "shape 4/4: combined output is valid JSON" "$out"
+ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext // ""' 2>/dev/null)
+case "$ctx" in
+  *"Resumed on model"*"Recent AI sessions"*) ok "shape 4/4: additionalContext carries both, policy first" ;;
+  *) bad "shape 4/4: additionalContext carries both, policy first" "$ctx" ;;
+esac
+printf '%s' "$out" | jq -e '.systemMessage | contains("opus")' >/dev/null 2>&1 \
+  && ok "shape 4/4: systemMessage is still policy-only" \
+  || bad "shape 4/4: systemMessage is still policy-only" "$out"
+
+# Hook safety must hold with the memory section wired in too.
+dots_absent
+[ -z "$(hrun startup)" ] \
+  && ok "no dots on PATH: memory section degrades to silence" \
+  || bad "no dots on PATH: memory section degrades to silence" "$(hrun startup)"
+
+# A `dots` that exits non-zero (crash, panic, corrupt install) must not leak
+# anything into the session — capture's own contract is "never fails loud",
+# and recall must hold to the same rule from the hook's side.
+cat > "$WORK/hookbin/dots" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$WORK/hookbin/dots"
+hturn claude-sonnet-5 high
+[ -z "$(hrun startup)" ] \
+  && ok "a failing dots binary degrades to silence" \
+  || bad "a failing dots binary degrades to silence" "$(hrun startup)"
+dots_absent
 
 group "tmux: model indicator (cont.)"
 for c in macos linux; do

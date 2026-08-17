@@ -81,6 +81,8 @@ func main() {
 		os.Exit(runUpdateCLI(args[1:]))
 	case "sync":
 		os.Exit(runSyncCLI(args[1:]))
+	case "memory":
+		os.Exit(runMemoryCLI(args[1:]))
 	case "docs":
 		os.Exit(runDocsCLI(args[1:]))
 	case "edit":
@@ -123,6 +125,7 @@ func usage() {
   dots install         compatibility alias for apply; --deps routes to deps
   dots update          deprecated alias for inbound sync
   dots sync            safely fetch, fast-forward, and apply this machine
+  dots memory          shared memory across your AI tools; see dots memory help
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

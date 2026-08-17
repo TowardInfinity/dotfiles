@@ -40,3 +40,12 @@ max_concurrent_threads_per_session = 1
 default_subagent_model = "gpt-5.6-terra"
 default_subagent_reasoning_effort = "low"
 interrupt_message = true
+
+# One memory across every AI tool on the machine — see docs/memory.md. `dots`
+# is already on PATH everywhere this file lands, so this is a plain command,
+# not an absolute path: the same mistake install.sh:336 warns about for the
+# vault itself. Shape matches what `codex mcp add dots-memory -- dots memory
+# mcp` writes, verified against a scratch CODEX_HOME rather than guessed.
+[mcp_servers.dots-memory]
+command = "dots"
+args = ["memory", "mcp"]

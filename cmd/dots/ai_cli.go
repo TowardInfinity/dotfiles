@@ -15,16 +15,20 @@ import (
 // the native resume operations, not another session index. The later console
 // phase adds cross-tool selection without changing this direct launch path.
 func runAIResumeCLI(tool string, args []string) int {
-	cwd, err := os.Getwd()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "dots %s: current directory: %v\n", tool, err)
-		return 1
-	}
-	project, gitRoot, _ := memory.ResolveProject(cwd)
-	if tool == "cursor" && gitRoot != "" {
-		// Cursor otherwise uses the invocation subdirectory as its workspace.
-		// The project root is the stable identity memory resolved above.
-		args = append([]string{"--workspace", filepath.Clean(gitRoot)}, args...)
+	project := memory.Unscoped
+	if tool == "cursor" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "dots %s: current directory: %v\n", tool, err)
+			return 1
+		}
+		var gitRoot string
+		project, gitRoot, _ = memory.ResolveProject(cwd)
+		if gitRoot != "" {
+			// Cursor otherwise uses the invocation subdirectory as its workspace.
+			// The project root is the stable identity memory resolved above.
+			args = append([]string{"--workspace", filepath.Clean(gitRoot)}, args...)
+		}
 	}
 
 	argv, err := ai.ResolveLaunch(tool, project, args)

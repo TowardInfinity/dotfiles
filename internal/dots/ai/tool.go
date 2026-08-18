@@ -6,6 +6,8 @@
 // must remain useful without an index, capture pass, or local model.
 package ai
 
+import "time"
+
 // Tool describes one supported CLI. The differences are argv shape, not
 // behaviour, so a small static table is clearer than five implementations of
 // an interface with one method each.
@@ -25,6 +27,15 @@ var tools = []Tool{
 	{Name: "codex", Alias: "codex", Binary: "codex"},
 	{Name: "grok", Alias: "grok", Binary: "grok"},
 	{Name: "cursor", Alias: "cursor", Binary: "cursor-agent"},
+}
+
+// SessionRef is the minimum local record needed to resume or display a
+// session. It intentionally does not carry transcript text or summaries:
+// choosing a tool must remain independent of the memory index and Ollama.
+type SessionRef struct {
+	Tool    string
+	ID      string
+	Updated time.Time
 }
 
 func toolForAlias(alias string) (Tool, bool) {

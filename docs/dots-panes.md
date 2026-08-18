@@ -16,6 +16,7 @@ Overview and keeps the same focus model everywhere:
 |---|---|---|
 | — | **Overview** | Attention first: workspace, fleet freshness, and local facts. |
 | — | **Changes** | Review local edits and incoming commits; sync, apply, or publish through plans. |
+| — | **AI** | Read local cross-tool session metadata; `dots agent` performs the terminal handoff. |
 | — | **Fleet** | Inspect cached machine results, select hosts, and prepare exact-revision rollout. |
 | — | **Health** | Tools, frameworks, config, and package checks with repair actions. |
 | — | **Services / Packages / Projects** | Local inventories and their scoped actions. |

@@ -16,6 +16,9 @@ dots claude              # claude --continue
 dots codex               # codex resume --last
 dots grok                # grok --continue
 dots cursor              # cursor-agent --workspace <project-root> resume
+dots agent               # resume the tool most recently used in this project
+dots ai                  # show recent local sessions across every tool
+dots ai usage            # local activity for the last 5 hours and 7 days
 ```
 
 The commands replace the current process with the selected CLI, so its normal
@@ -34,4 +37,24 @@ the current directory. Phase 1 uses the tools' own cwd-scoped resume behaviour;
 the later cross-tool console will use the same identity to select a session
 without relying on an index or local model.
 
-`ChatGPT` is intentionally absent: its desktop app has no CLI resume surface.
+ChatGPT has no CLI resume surface. On macOS, `dots ai chatgpt` can only open
+the desktop app; it cannot select or resume a particular chat.
+
+## Agent and local activity
+
+`dots agent` does not wait for `dots memory`, its index, a capture pass, or
+Ollama. It makes a small metadata pass over each tool's own session files and
+resumes the most recently touched session for this project. If the project has
+no local session yet, it starts a fresh Claude session instead.
+
+`dots ai` lists those same locally discovered sessions. It enriches a row with
+the title from the memory index when available, but an absent or stale index
+simply displays `(untitled)`.
+
+`dots ai usage` reports local transcript activity. Claude records per-turn
+token components, while Codex writes cumulative snapshots and is counted as
+deltas between snapshots. Grok and Cursor expose only local message counts.
+None of these numbers is a subscription allowance or a bill:
+
+> Local activity only — excludes claude.ai / chatgpt.com web usage on the same
+> account, which shares this plan's rate limit.

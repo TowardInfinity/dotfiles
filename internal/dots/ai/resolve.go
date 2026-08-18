@@ -41,3 +41,44 @@ func ResolveLaunch(tool string, _ memory.ProjectKey, args []string) ([]string, e
 
 	return append(prefix, args...), nil
 }
+
+// ResolveSessionLaunch decides the argv for a known session id. Unlike
+// ResolveLaunch's native fast path, this is used by dots agent after its
+// independent metadata scan has selected a specific tool and session.
+func ResolveSessionLaunch(tool string, project memory.ProjectKey, sessionID string, args []string) ([]string, error) {
+	if sessionID == "" {
+		return ResolveLaunch(tool, project, args)
+	}
+	t, ok := toolForAlias(tool)
+	if !ok {
+		return nil, fmt.Errorf("unknown AI tool %q", tool)
+	}
+
+	var prefix []string
+	switch t.Alias {
+	case "claude", "grok":
+		prefix = []string{t.Binary, "--resume", sessionID}
+	case "codex":
+		prefix = []string{t.Binary, "resume", sessionID}
+	case "cursor":
+		// Cursor's explicit id is an option on its top-level command, not an
+		// argument to its resume subcommand.
+		if len(args) >= 2 && args[0] == "--workspace" {
+			prefix = []string{t.Binary, "--workspace", args[1], "--resume", sessionID}
+			args = args[2:]
+		} else {
+			prefix = []string{t.Binary, "--resume", sessionID}
+		}
+	}
+	return append(prefix, args...), nil
+}
+
+// ResolveFreshLaunch returns an unadorned tool invocation. It is used only
+// when dots agent is asked to help in a project with no local session yet.
+func ResolveFreshLaunch(tool string, args []string) ([]string, error) {
+	t, ok := toolForAlias(tool)
+	if !ok {
+		return nil, fmt.Errorf("unknown AI tool %q", tool)
+	}
+	return append([]string{t.Binary}, args...), nil
+}

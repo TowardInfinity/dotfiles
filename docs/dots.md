@@ -38,6 +38,9 @@ dots search copy  # find which page mentions it
 | `dots codex [args…]` | resume Codex's latest session in this project |
 | `dots grok [args…]` | resume Grok's latest session in this project |
 | `dots cursor [args…]` | resume Cursor's latest session in this project |
+| `dots agent [args…]` | resume the AI tool most recently used in this project |
+| `dots ai` | show recent local sessions across every AI tool |
+| `dots ai usage [--since duration]` | show local activity; never a claimed quota |
 | `dots doctor` | check the tools these configs call, and the configuration itself |
 | `dots doctor --online` | also check the installed `dots` against the latest release |
 | `dots status [--online] [--fleet] [--json]` | report state; never repair |

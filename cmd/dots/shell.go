@@ -15,6 +15,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/TowardInfinity/dotfiles/internal/dots/ai"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 )
 
@@ -28,6 +29,7 @@ const (
 	routeServices routeID = "services"
 	routePackages routeID = "packages"
 	routeProjects routeID = "projects"
+	routeAI       routeID = "ai"
 	routeDocs     routeID = "docs"
 )
 
@@ -51,6 +53,7 @@ func shellNavRows() []shellNavRow {
 	return []shellNavRow{
 		{group: "Overview", label: "Overview", route: routeOverview},
 		{group: "Workspace", label: "Changes", route: routeChanges},
+		{group: "Workspace", label: "AI", route: routeAI},
 		{group: "Fleet", label: "Machines", route: routeFleet},
 		{group: "This machine", label: "Health", route: routeHealth},
 		{group: "This machine", label: "Services", route: routeServices},
@@ -119,6 +122,9 @@ type shellModel struct {
 	projects        []projectInfo
 	projectsLoading bool
 	projectHint     string
+	aiSessions      []ai.SessionRef
+	aiProject       string
+	aiLoading       bool
 
 	act              *actionModel
 	palette          *shellPalette
@@ -202,6 +208,9 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 		return discoverPackages()
 	case routeProjects:
 		return fetchProjectsInfo()
+	case routeAI:
+		m.aiLoading = true
+		return fetchAISessions(m.repo)
 	case routeFleet:
 		return m.refreshFleet()
 	}
@@ -251,6 +260,11 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fleetCursor >= len(m.fleet.Hosts) {
 			m.fleetCursor = max(0, len(m.fleet.Hosts)-1)
 		}
+		return m, nil
+	case aiSessionsMsg:
+		m.aiProject = string(msg.project)
+		m.aiSessions = msg.sessions
+		m.aiLoading = false
 		return m, nil
 	case doctorMsg:
 		m.doc, _ = m.doc.update(msg)
@@ -468,6 +482,11 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 		m.packagesView, cmd = m.packagesView.updateKey(msg)
 	case routeProjects:
 		return m.updateProjectsKey(msg)
+	case routeAI:
+		if msg.String() == "r" {
+			m.aiLoading = true
+			return m, fetchAISessions(m.repo)
+		}
 	}
 	return m, cmd
 }
@@ -821,6 +840,7 @@ func shellPaletteItems(current routeID, actionsOnly bool) []paletteItem {
 			{label: "Go to Services", detail: "route", route: routeServices},
 			{label: "Go to Packages", detail: "route", route: routePackages},
 			{label: "Go to Projects", detail: "route", route: routeProjects},
+			{label: "Go to AI", detail: "route", route: routeAI},
 			{label: "Go to Docs", detail: "route", route: routeDocs},
 		}
 	}
@@ -843,6 +863,8 @@ func shellPaletteItems(current routeID, actionsOnly bool) []paletteItem {
 		items = append(items, paletteItem{label: "Rescan packages", detail: "LOCAL · read-only", action: "packages-refresh"})
 	case routeProjects:
 		items = append(items, paletteItem{label: "Rescan projects", detail: "LOCAL · read-only", action: "projects-refresh"})
+	case routeAI:
+		items = append(items, paletteItem{label: "Refresh local AI sessions", detail: "LOCAL · read-only", action: "ai-refresh"})
 	case routeFleet:
 		items = append(items,
 			paletteItem{label: "Refresh fleet", detail: "FLEET · SSH read-only", action: "fleet-refresh"},
@@ -949,6 +971,10 @@ func (m *shellModel) choosePalette(index int) (tea.Model, tea.Cmd) {
 	case "projects-refresh":
 		m.route = routeProjects
 		return m, fetchProjectsInfo()
+	case "ai-refresh":
+		m.route = routeAI
+		m.aiLoading = true
+		return m, fetchAISessions(m.repo)
 	case "fleet-refresh":
 		m.route = routeFleet
 		return m, m.refreshFleet()
@@ -1214,9 +1240,56 @@ func (m *shellModel) renderRoute(w, h int) string {
 			m.registerRowHit(routeProjects, i, shellBodyTop+3+row+i, w)
 		}
 		return contentColumn(w, h, paneHeader("This machine", "Projects", fmt.Sprintf("%d repositories under ~/Codes", len(m.projects)), measureFor(w)), body)
+	case routeAI:
+		return contentColumn(w, h, paneHeader("Workspace", "AI", m.aiSummary(), measureFor(w)), m.renderAI(w, h, spin))
 	default:
 		return ""
 	}
+}
+
+func (m *shellModel) aiSummary() string {
+	if m.aiLoading {
+		return "reading local session metadata"
+	}
+	if len(m.aiSessions) == 0 {
+		return "no local sessions"
+	}
+	return plural(len(m.aiSessions), "local session", "local sessions")
+}
+
+func (m *shellModel) renderAI(w, h int, spin string) string {
+	if m.aiLoading {
+		return styPending.Render("  " + spin + " reading local AI session metadata")
+	}
+	if len(m.aiSessions) == 0 {
+		return styMuted.Render("no local AI sessions for this project · dots agent starts a fresh Claude session")
+	}
+	measure := measureFor(w)
+	showID := measure >= 76
+	headers := []string{"TOOL", "UPDATED"}
+	if showID {
+		headers = append(headers, "SESSION")
+	}
+	rows := make([][]string, 0, len(m.aiSessions))
+	for _, ref := range m.aiSessions {
+		row := []string{ref.Tool, ref.Updated.Local().Format("2006-01-02 15:04")}
+		if showID {
+			row = append(row, shortSessionID(ref.ID))
+		}
+		rows = append(rows, row)
+	}
+	lines := []string{styMuted.Render("Local metadata only · r refresh · dots agent resumes the newest session"), dataTable(headers, rows, -1, measure)}
+	if m.aiProject != "" {
+		lines = append(lines, "", styMuted.Render("project: "+truncate(m.aiProject, measure)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func shortSessionID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12] + "…"
 }
 
 func (m *shellModel) renderHealth(w, h int, spin string) string {
@@ -1539,6 +1612,8 @@ func (m *shellModel) renderFooter() string {
 		left = "↑↓ move  / filter  u upgrade  s sort  m manager  a actions"
 	case routeProjects:
 		left = "↑↓ move  enter open  a actions  ? help"
+	case routeAI:
+		left = "r refresh  a actions  ? help"
 	case routeDocs:
 		left = "↑↓ topic  / filter  d/u scroll  a actions  ? help"
 	}

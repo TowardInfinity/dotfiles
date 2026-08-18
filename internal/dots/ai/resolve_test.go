@@ -94,3 +94,48 @@ func TestResolveLaunchDoesNotChangeWithProjectKey(t *testing.T) {
 		t.Fatalf("phase-1 native argv changed with project: %#v vs %#v", first, second)
 	}
 }
+
+func TestResolveSessionLaunch(t *testing.T) {
+	project := memory.ProjectKey("github.com/towardinfinity/almanac")
+	tests := []struct {
+		tool string
+		want []string
+	}{
+		{"claude", []string{"claude", "--resume", "c-1", "continue"}},
+		{"codex", []string{"codex", "resume", "c-1", "continue"}},
+		{"grok", []string{"grok", "--resume", "c-1", "continue"}},
+		{"cursor", []string{"cursor-agent", "--resume", "c-1", "continue"}},
+	}
+	for _, test := range tests {
+		t.Run(test.tool, func(t *testing.T) {
+			got, err := ResolveSessionLaunch(test.tool, project, "c-1", []string{"continue"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("argv = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveSessionLaunchCursorKeepsWorkspaceBeforeResume(t *testing.T) {
+	got, err := ResolveSessionLaunch("cursor", memory.Unscoped, "c-1", []string{"--workspace", "/work/almanac", "continue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"cursor-agent", "--workspace", "/work/almanac", "--resume", "c-1", "continue"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestResolveFreshLaunch(t *testing.T) {
+	got, err := ResolveFreshLaunch("claude", []string{"start a plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"claude", "start a plan"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv = %#v, want %#v", got, want)
+	}
+}

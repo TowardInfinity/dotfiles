@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/TowardInfinity/dotfiles/internal/dots/ai"
 	"github.com/TowardInfinity/dotfiles/internal/dots/ops"
 )
 
@@ -160,13 +162,27 @@ func TestShellResponsiveGeometry(t *testing.T) {
 }
 
 func TestShellEveryRouteFitsSupportedSizes(t *testing.T) {
-	routes := []routeID{routeOverview, routeChanges, routeFleet, routeHealth, routeServices, routePackages, routeProjects, routeDocs}
+	routes := []routeID{routeOverview, routeChanges, routeFleet, routeHealth, routeServices, routePackages, routeProjects, routeAI, routeDocs}
 	for _, size := range [][2]int{{60, 18}, {76, 22}, {100, 30}, {120, 32}, {160, 45}} {
 		for _, route := range routes {
 			m := shellAt(t, size[0], size[1])
 			m.route = route
 			m.focus = shellFocusContent
 			assertShellFits(t, m, size[0], size[1])
+		}
+	}
+}
+
+func TestShellAIRouteRendersLocalSessionMetadata(t *testing.T) {
+	m := shellAt(t, 160, 45)
+	m.route = routeAI
+	m.focus = shellFocusContent
+	m.aiSessions = []ai.SessionRef{{Tool: "codex", ID: "0123456789abcdef", Updated: time.Date(2026, time.August, 18, 12, 0, 0, 0, time.UTC)}}
+	m.aiProject = "github.com/TowardInfinity/dotfiles"
+	view := stripANSI(m.View().Content)
+	for _, want := range []string{"WORKSPACE", "AI", "codex", "0123456789ab…", "github.com/TowardInfinity/dotfiles"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("AI route missing %q:\n%s", want, view)
 		}
 	}
 }
@@ -216,7 +232,7 @@ func TestShellKeyboardAndMouseSelectTheSameRoute(t *testing.T) {
 
 func TestSidebarWheelOnlyBrowsesRoutes(t *testing.T) {
 	m := shellAt(t, 100, 30)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		updated, cmd := m.Update(tea.MouseWheelMsg{X: 4, Y: 8, Button: tea.MouseWheelDown})
 		m = updated.(*shellModel)
 		if cmd != nil {

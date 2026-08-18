@@ -85,6 +85,10 @@ func main() {
 		os.Exit(runMemoryCLI(args[1:]))
 	case "claude", "codex", "grok", "cursor":
 		os.Exit(runAIResumeCLI(args[0], args[1:]))
+	case "agent":
+		os.Exit(runAIAgentCLI(args[1:]))
+	case "ai":
+		os.Exit(runAIConsoleCLI(args[1:]))
 	case "docs":
 		os.Exit(runDocsCLI(args[1:]))
 	case "edit":
@@ -132,6 +136,8 @@ func usage() {
   dots codex           resume Codex's latest session in this project
   dots grok            resume Grok's latest session in this project
   dots cursor          resume Cursor's latest session in this project
+  dots agent           resume the AI tool last used in this project
+  dots ai              list local AI sessions; see dots ai help
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

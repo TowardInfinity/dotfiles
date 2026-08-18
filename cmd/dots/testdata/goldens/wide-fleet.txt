@@ -4,16 +4,16 @@ OVERVIEW           │  FLEET › Machines
   Overview         │  2 healthy hosts, 1 needs attention · never checked
 WORKSPACE          │  ────────────────────────────────────────────────────────────────────────────────────────────
   Changes          │  SPACE select · ENTER inspect · r refresh · a actions
-FLEET              │   HOST                   STATE                  VERSION                REVISION
-▌ Machines         │  ────────────────────────────────────────────────────────────────────────────────────────────
-THIS MACHINE       │   ● a1                   healthy                v0.1.16                111111111111
-  Health           │   ○ v1                   healthy                v0.1.16                222222222222
-  Services         │   ○ v2                   unreachable            —                      —
-  Packages         │  ────────────────────────────────────────────────────────────────────────────────────────────
+  AI               │   HOST                   STATE                  VERSION                REVISION
+FLEET              │  ────────────────────────────────────────────────────────────────────────────────────────────
+▌ Machines         │   ● a1                   healthy                v0.1.16                111111111111
+THIS MACHINE       │   ○ v1                   healthy                v0.1.16                222222222222
+  Health           │   ○ v2                   unreachable            —                      —
+  Services         │  ────────────────────────────────────────────────────────────────────────────────────────────
+  Packages         │
   Projects         │
 REFERENCE          │
   Docs             │
-                   │
                    │
                    │
                    │

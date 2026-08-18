@@ -53,7 +53,9 @@ simply displays `(untitled)`.
 
 `dots ai usage` reports local transcript activity. Claude records per-turn
 token components, while Codex writes cumulative snapshots and is counted as
-deltas between snapshots. Grok and Cursor expose only local message counts.
+deltas between snapshots. Grok and Cursor record only a session-level update
+time alongside lifetime message totals, not a time for each message, so they
+are omitted from bounded windows rather than overstating recent activity.
 None of these numbers is a subscription allowance or a bill:
 
 > Local activity only — excludes claude.ai / chatgpt.com web usage on the same

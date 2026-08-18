@@ -37,13 +37,14 @@ func (u TokenUsage) Tokens() int64 {
 }
 
 // UsageReport contains local activity by tool for a time window. Grok and
-// Cursor expose message counts only; their zero token totals are intentional.
+// Cursor record session timestamps but not timestamps for individual messages,
+// so their message counts are intentionally omitted from bounded windows.
 type UsageReport struct {
-	Since  time.Time
-	Claude TokenUsage
-	Codex  TokenUsage
-	Grok   TokenUsage
-	Cursor TokenUsage
+	Since                           time.Time
+	Claude                          TokenUsage
+	Codex                           TokenUsage
+	GrokSessionsWithoutTimestamps   int
+	CursorSessionsWithoutTimestamps int
 }
 
 func (r UsageReport) Tool(name string) TokenUsage {
@@ -52,10 +53,6 @@ func (r UsageReport) Tool(name string) TokenUsage {
 		return r.Claude
 	case "codex":
 		return r.Codex
-	case "grok":
-		return r.Grok
-	case "cursor":
-		return r.Cursor
 	default:
 		return TokenUsage{}
 	}
@@ -64,32 +61,39 @@ func (r UsageReport) Tool(name string) TokenUsage {
 // UsageSince reads local component activity after since. It does not read the
 // memory index, which is derived data and may be unavailable during capture.
 func UsageSince(project memory.ProjectKey, since time.Time) UsageReport {
-	return UsageReport{
-		Since:  since,
-		Claude: claudeUsage(project, since),
-		Codex:  codexUsage(project, since),
-		Grok:   grokUsage(project, since),
-		Cursor: cursorUsage(project, since),
-	}
+	return UsageForWindows(project, []time.Time{since})[0]
 }
 
-func claudeUsage(project memory.ProjectKey, since time.Time) TokenUsage {
+// UsageForWindows scans every local transcript once and computes a report for
+// each cutoff. It avoids doubling the filesystem walk for the normal 5h + 7d
+// display while keeping each report's time boundary explicit.
+func UsageForWindows(project memory.ProjectKey, cutoffs []time.Time) []UsageReport {
+	reports := make([]UsageReport, len(cutoffs))
+	for i, since := range cutoffs {
+		reports[i].Since = since
+	}
+	claudeUsage(project, reports)
+	codexUsage(project, reports)
+	markGrokSessionsWithoutMessageTimestamps(project, reports)
+	markCursorSessionsWithoutMessageTimestamps(project, reports)
+	return reports
+}
+
+func claudeUsage(project memory.ProjectKey, reports []UsageReport) {
 	root := filepath.Join(lookupHome(), ".claude", "projects")
-	var total TokenUsage
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
-		total.add(readClaudeUsage(path, project, since))
+		readClaudeUsage(path, project, reports)
 		return nil
 	})
-	return total
 }
 
-func readClaudeUsage(path string, project memory.ProjectKey, since time.Time) TokenUsage {
+func readClaudeUsage(path string, project memory.ProjectKey, reports []UsageReport) {
 	f, err := os.Open(path)
 	if err != nil {
-		return TokenUsage{}
+		return
 	}
 	defer func() { _ = f.Close() }()
 	type usage struct {
@@ -134,35 +138,33 @@ func readClaudeUsage(path string, project memory.ProjectKey, since time.Time) To
 		}
 	}
 	if !matchesProject(cwd, "", project) {
-		return TokenUsage{}
+		return
 	}
-	var total TokenUsage
 	for _, event := range events {
-		if event.at.Before(since) {
-			continue
+		for i := range reports {
+			if event.at.Before(reports[i].Since) {
+				continue
+			}
+			reports[i].Claude.add(TokenUsage{Input: event.u.Input, CacheCreate: event.u.CacheCreate, CacheRead: event.u.CacheRead, Output: event.u.Output, Thinking: event.u.Details.Thinking, Messages: 1})
 		}
-		total.add(TokenUsage{Input: event.u.Input, CacheCreate: event.u.CacheCreate, CacheRead: event.u.CacheRead, Output: event.u.Output, Thinking: event.u.Details.Thinking, Messages: 1})
 	}
-	return total
 }
 
-func codexUsage(project memory.ProjectKey, since time.Time) TokenUsage {
+func codexUsage(project memory.ProjectKey, reports []UsageReport) {
 	root := filepath.Join(lookupHome(), ".codex", "sessions")
-	var total TokenUsage
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasPrefix(d.Name(), "rollout-") || !strings.HasSuffix(d.Name(), ".jsonl") {
 			return nil
 		}
-		total.add(readCodexUsage(path, project, since))
+		readCodexUsage(path, project, reports)
 		return nil
 	})
-	return total
 }
 
-func readCodexUsage(path string, project memory.ProjectKey, since time.Time) TokenUsage {
+func readCodexUsage(path string, project memory.ProjectKey, reports []UsageReport) {
 	f, err := os.Open(path)
 	if err != nil {
-		return TokenUsage{}
+		return
 	}
 	defer func() { _ = f.Close() }()
 	type totals struct {
@@ -176,7 +178,8 @@ func readCodexUsage(path string, project memory.ProjectKey, since time.Time) Tok
 		at time.Time
 		u  totals
 	}
-	var cwd string
+	var id, cwd string
+	var messages int
 	var snapshots []snapshot
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
@@ -185,8 +188,13 @@ func readCodexUsage(path string, project memory.ProjectKey, since time.Time) Tok
 			Type      string `json:"type"`
 			Timestamp string `json:"timestamp"`
 			Payload   struct {
-				CWD  string `json:"cwd"`
-				Info struct {
+				ID           string `json:"id"`
+				SessionID    string `json:"session_id"`
+				CWD          string `json:"cwd"`
+				ThreadSource string `json:"thread_source"`
+				PayloadType  string `json:"type"`
+				Role         string `json:"role"`
+				Info         struct {
 					Total *totals `json:"total_token_usage"`
 				} `json:"info"`
 			} `json:"payload"`
@@ -194,8 +202,20 @@ func readCodexUsage(path string, project memory.ProjectKey, since time.Time) Tok
 		if json.Unmarshal(sc.Bytes(), &line) != nil {
 			continue
 		}
-		if line.Type == "session_meta" && cwd == "" {
+		if line.Type == "session_meta" {
+			// Do not let a guardian/subagent rollout affect the user's usage or
+			// cross-tool resume choice. See the matching metadata lookup guard.
+			if line.Payload.ThreadSource == "subagent" {
+				return
+			}
+			id = line.Payload.ID
+			if id == "" {
+				id = line.Payload.SessionID
+			}
 			cwd = line.Payload.CWD
+		}
+		if line.Type == "response_item" && line.Payload.PayloadType == "message" && (line.Payload.Role == "user" || line.Payload.Role == "assistant") {
+			messages++
 		}
 		if line.Type != "event_msg" || line.Payload.Info.Total == nil {
 			continue
@@ -205,25 +225,25 @@ func readCodexUsage(path string, project memory.ProjectKey, since time.Time) Tok
 			snapshots = append(snapshots, snapshot{at, *line.Payload.Info.Total})
 		}
 	}
-	if !matchesProject(cwd, "", project) {
-		return TokenUsage{}
+	if id == "" || messages == 0 || !matchesProject(cwd, "", project) {
+		return
 	}
-	var total TokenUsage
 	for i := 1; i < len(snapshots); i++ {
 		current, previous := snapshots[i], snapshots[i-1]
-		if current.at.Before(since) {
-			continue
+		for j := range reports {
+			if current.at.Before(reports[j].Since) {
+				continue
+			}
+			reports[j].Codex.add(TokenUsage{
+				Input:       positiveDelta(current.u.Input, previous.u.Input),
+				CacheRead:   positiveDelta(current.u.CacheRead, previous.u.CacheRead),
+				CacheCreate: positiveDelta(current.u.CacheWrite, previous.u.CacheWrite),
+				Output:      positiveDelta(current.u.Output, previous.u.Output),
+				Thinking:    positiveDelta(current.u.Thinking, previous.u.Thinking),
+				Messages:    1,
+			})
 		}
-		total.add(TokenUsage{
-			Input:       positiveDelta(current.u.Input, previous.u.Input),
-			CacheRead:   positiveDelta(current.u.CacheRead, previous.u.CacheRead),
-			CacheCreate: positiveDelta(current.u.CacheWrite, previous.u.CacheWrite),
-			Output:      positiveDelta(current.u.Output, previous.u.Output),
-			Thinking:    positiveDelta(current.u.Thinking, previous.u.Thinking),
-			Messages:    1,
-		})
 	}
-	return total
 }
 
 func positiveDelta(now, before int64) int64 {
@@ -233,19 +253,8 @@ func positiveDelta(now, before int64) int64 {
 	return now - before
 }
 
-func grokUsage(project memory.ProjectKey, since time.Time) TokenUsage {
-	var total TokenUsage
-	for _, ref := range grokUsageSessions(project, since) {
-		total.Messages += ref.Messages
-	}
-	return total
-}
-
-type messageSession struct{ Messages int }
-
-func grokUsageSessions(project memory.ProjectKey, since time.Time) []messageSession {
+func markGrokSessionsWithoutMessageTimestamps(project memory.ProjectKey, reports []UsageReport) {
 	root := filepath.Join(lookupHome(), ".grok", "sessions")
-	var out []messageSession
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || d.Name() != "summary.json" {
 			return nil
@@ -258,13 +267,19 @@ func grokUsageSessions(project memory.ProjectKey, since time.Time) []messageSess
 			Info struct {
 				CWD string `json:"cwd"`
 			} `json:"info"`
-			UpdatedAt       time.Time `json:"updated_at"`
-			NumChatMessages int       `json:"num_chat_messages"`
-			NumMessages     int       `json:"num_messages"`
-			GitRemotes      []string  `json:"git_remotes"`
+			UpdatedAt  time.Time `json:"updated_at"`
+			GitRemotes []string  `json:"git_remotes"`
 		}
-		if json.Unmarshal(b, &summary) != nil || summary.UpdatedAt.Before(since) {
+		if json.Unmarshal(b, &summary) != nil {
 			return nil
+		}
+		updated := summary.UpdatedAt
+		if updated.IsZero() {
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			updated = info.ModTime()
 		}
 		remote := ""
 		if len(summary.GitRemotes) > 0 {
@@ -273,19 +288,17 @@ func grokUsageSessions(project memory.ProjectKey, since time.Time) []messageSess
 		if !matchesProject(summary.Info.CWD, remote, project) {
 			return nil
 		}
-		messages := summary.NumChatMessages
-		if messages == 0 {
-			messages = summary.NumMessages
+		for i := range reports {
+			if !updated.Before(reports[i].Since) {
+				reports[i].GrokSessionsWithoutTimestamps++
+			}
 		}
-		out = append(out, messageSession{messages})
 		return nil
 	})
-	return out
 }
 
-func cursorUsage(project memory.ProjectKey, since time.Time) TokenUsage {
+func markCursorSessionsWithoutMessageTimestamps(project memory.ProjectKey, reports []UsageReport) {
 	root := filepath.Join(lookupHome(), ".cursor", "chats")
-	var total TokenUsage
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || d.Name() != "meta.json" {
 			return nil
@@ -298,18 +311,22 @@ func cursorUsage(project memory.ProjectKey, since time.Time) TokenUsage {
 			CWD         string `json:"cwd"`
 			UpdatedAtMs int64  `json:"updatedAtMs"`
 		}
-		if json.Unmarshal(b, &meta) != nil || time.UnixMilli(meta.UpdatedAtMs).Before(since) || !matchesProject(meta.CWD, "", project) {
+		if json.Unmarshal(b, &meta) != nil || !matchesProject(meta.CWD, "", project) {
 			return nil
 		}
-		prompts, err := os.ReadFile(filepath.Join(filepath.Dir(path), "prompt_history.json"))
-		if err != nil {
-			return nil
+		updated := time.UnixMilli(meta.UpdatedAtMs)
+		if meta.UpdatedAtMs == 0 {
+			info, err := d.Info()
+			if err != nil {
+				return nil
+			}
+			updated = info.ModTime()
 		}
-		var entries []string
-		if json.Unmarshal(prompts, &entries) == nil {
-			total.Messages += len(entries)
+		for i := range reports {
+			if !updated.Before(reports[i].Since) {
+				reports[i].CursorSessionsWithoutTimestamps++
+			}
 		}
 		return nil
 	})
-	return total
 }

@@ -1286,10 +1286,7 @@ func (m *shellModel) renderAI(w, h int, spin string) string {
 }
 
 func shortSessionID(id string) string {
-	if len(id) <= 12 {
-		return id
-	}
-	return id[:12] + "…"
+	return truncate(id, 13)
 }
 
 func (m *shellModel) renderHealth(w, h int, spin string) string {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -184,6 +185,16 @@ func TestShellAIRouteRendersLocalSessionMetadata(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("AI route missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestShortSessionIDPreservesUTF8(t *testing.T) {
+	got := shortSessionID("cursor-会話-session-id")
+	if !utf8.ValidString(got) {
+		t.Fatalf("shortSessionID returned invalid UTF-8: %q", got)
+	}
+	if got != "cursor-会話-…" {
+		t.Fatalf("shortSessionID = %q, want width-aware truncation", got)
 	}
 }
 

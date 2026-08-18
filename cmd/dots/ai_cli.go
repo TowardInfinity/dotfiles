@@ -209,11 +209,17 @@ func runAIUsage(args []string) int {
 	if *since > 0 {
 		windows = []time.Duration{*since}
 	}
+	cutoffs := make([]time.Time, len(windows))
+	now := time.Now()
+	for i, window := range windows {
+		cutoffs[i] = now.Add(-window)
+	}
+	reports := ai.UsageForWindows(project, cutoffs)
 	for i, window := range windows {
 		if i > 0 {
 			fmt.Println()
 		}
-		printAIUsageReport(ai.UsageSince(project, time.Now().Add(-window)), window)
+		printAIUsageReport(reports[i], window)
 	}
 	return 0
 }
@@ -223,11 +229,23 @@ func printAIUsageReport(report ai.UsageReport, window time.Duration) {
 	fmt.Println("Local activity only — excludes claude.ai / chatgpt.com web usage on the same account, which shares this plan's rate limit.")
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "TOOL\tINPUT\tCACHE WRITE\tCACHE READ\tOUTPUT\tTHINKING\tMESSAGES")
-	for _, tool := range []string{"claude", "codex", "grok", "cursor"} {
+	for _, tool := range []string{"claude", "codex"} {
 		u := report.Tool(tool)
 		fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%d\t%d\t%d\n", tool, u.Input, u.CacheCreate, u.CacheRead, u.Output, u.Thinking, u.Messages)
 	}
 	_ = w.Flush()
+	omitted := make([]string, 0, 2)
+	if report.GrokSessionsWithoutTimestamps > 0 {
+		omitted = append(omitted, fmt.Sprintf("Grok: %d recent session(s)", report.GrokSessionsWithoutTimestamps))
+	}
+	if report.CursorSessionsWithoutTimestamps > 0 {
+		omitted = append(omitted, fmt.Sprintf("Cursor: %d recent session(s)", report.CursorSessionsWithoutTimestamps))
+	}
+	note := "Grok and Cursor sessions are omitted from this bounded table: their local formats have no per-message timestamps."
+	if len(omitted) > 0 {
+		note += " " + strings.Join(omitted, "; ") + "."
+	}
+	fmt.Println(note)
 }
 
 // launchAI is replaceable only so the CLI test can inspect the exact exec

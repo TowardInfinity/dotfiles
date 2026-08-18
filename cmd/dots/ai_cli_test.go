@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -80,6 +81,16 @@ func TestAIResumeReportsMissingBinaryWithoutExec(t *testing.T) {
 }
 
 func TestAIResumeCursorUsesResolvedGitRoot(t *testing.T) {
+	repo := t.TempDir()
+	if err := exec.Command("git", "init", "-q", repo).Run(); err != nil {
+		t.Fatal(err)
+	}
+	gitRoot, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(repo)
+
 	binDir := t.TempDir()
 	stub := filepath.Join(binDir, "cursor-agent")
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\n"), 0o755); err != nil {
@@ -98,11 +109,7 @@ func TestAIResumeCursorUsesResolvedGitRoot(t *testing.T) {
 	if code := runAIResumeCLI("cursor", nil); code != 0 {
 		t.Fatalf("runAIResumeCLI exit = %d, want 0", code)
 	}
-	repo := findRepo()
-	if repo == "" {
-		t.Fatal("test needs the repository checkout")
-	}
-	if want := []string{"cursor-agent", "--workspace", repo, "resume"}; !reflect.DeepEqual(gotArgv, want) {
+	if want := []string{"cursor-agent", "--workspace", gitRoot, "resume"}; !reflect.DeepEqual(gotArgv, want) {
 		t.Errorf("exec argv = %#v, want %#v", gotArgv, want)
 	}
 }

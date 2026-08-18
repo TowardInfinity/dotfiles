@@ -63,11 +63,16 @@ func (p Process) Run(ctx context.Context, streams ops.IO) error {
 	}
 	copiesDone := startOutputCopies(pipes)
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	go func() {
+		// Wait closes StdoutPipe and StderrPipe. Let their readers drain first,
+		// otherwise a short-lived command can lose its final output in the race
+		// between Wait closing the pipe and io.Copy reading it.
+		<-copiesDone
+		done <- cmd.Wait()
+	}()
 
 	select {
 	case err := <-done:
-		<-copiesDone
 		return err
 	case <-ctx.Done():
 		// Process completion and context cancellation can race. Never signal a
@@ -75,7 +80,6 @@ func (p Process) Run(ctx context.Context, streams ops.IO) error {
 		// eventually refer to an unrelated process group.
 		select {
 		case err := <-done:
-			<-copiesDone
 			return err
 		default:
 		}
@@ -86,12 +90,10 @@ func (p Process) Run(ctx context.Context, streams ops.IO) error {
 		terminateProcess(cmd, grouped, false)
 		select {
 		case <-done:
-			<-copiesDone
 		case <-time.After(2 * time.Second):
 			terminateProcess(cmd, grouped, true)
 			select {
 			case <-done:
-				<-copiesDone
 			case <-time.After(2 * time.Second):
 				// Cmd.Wait normally returns once the parent is reaped. If an escaped
 				// descendant has kept an output pipe open, close our read end and

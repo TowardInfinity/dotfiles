@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -103,5 +104,24 @@ func TestAIResumeCursorUsesResolvedGitRoot(t *testing.T) {
 	}
 	if want := []string{"cursor-agent", "--workspace", repo, "resume"}; !reflect.DeepEqual(gotArgv, want) {
 		t.Errorf("exec argv = %#v, want %#v", gotArgv, want)
+	}
+}
+
+func TestAIChatGPTOpensDesktopOnMac(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the desktop integration is intentionally macOS-only")
+	}
+	original := openChatGPT
+	t.Cleanup(func() { openChatGPT = original })
+	called := false
+	openChatGPT = func() error {
+		called = true
+		return nil
+	}
+	if code := runAIChatGPT(nil); code != 0 {
+		t.Fatalf("runAIChatGPT exit = %d, want 0", code)
+	}
+	if !called {
+		t.Fatal("runAIChatGPT did not invoke the desktop launcher")
 	}
 }

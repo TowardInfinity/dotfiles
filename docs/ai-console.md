@@ -60,3 +60,7 @@ None of these numbers is a subscription allowance or a bill:
 
 > Local activity only — excludes claude.ai / chatgpt.com web usage on the same
 > account, which shares this plan's rate limit.
+
+The TUI's AI route shows the same five-hour local counts as relative bars and
+an hourly sparkline. Bar length compares only the tools in that pane; it is
+not a percentage or a measure of an allowance.

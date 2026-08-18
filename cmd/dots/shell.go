@@ -125,6 +125,9 @@ type shellModel struct {
 	aiSessions      []ai.SessionRef
 	aiProject       string
 	aiLoading       bool
+	aiUsage         ai.UsageReport
+	aiTrend         []int64
+	aiUsageLoading  bool
 
 	act              *actionModel
 	palette          *shellPalette
@@ -210,7 +213,8 @@ func (m *shellModel) ensureRouteLoaded() tea.Cmd {
 		return fetchProjectsInfo()
 	case routeAI:
 		m.aiLoading = true
-		return fetchAISessions(m.repo)
+		m.aiUsageLoading = true
+		return tea.Batch(fetchAISessions(m.repo), fetchAIUsage(m.repo))
 	case routeFleet:
 		return m.refreshFleet()
 	}
@@ -265,6 +269,12 @@ func (m *shellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aiProject = string(msg.project)
 		m.aiSessions = msg.sessions
 		m.aiLoading = false
+		return m, nil
+	case aiUsageMsg:
+		m.aiProject = string(msg.project)
+		m.aiUsage = msg.report
+		m.aiTrend = msg.trend
+		m.aiUsageLoading = false
 		return m, nil
 	case doctorMsg:
 		m.doc, _ = m.doc.update(msg)
@@ -485,7 +495,8 @@ func (m *shellModel) dispatchRouteKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) 
 	case routeAI:
 		if msg.String() == "r" {
 			m.aiLoading = true
-			return m, fetchAISessions(m.repo)
+			m.aiUsageLoading = true
+			return m, tea.Batch(fetchAISessions(m.repo), fetchAIUsage(m.repo))
 		}
 	}
 	return m, cmd
@@ -974,7 +985,8 @@ func (m *shellModel) choosePalette(index int) (tea.Model, tea.Cmd) {
 	case "ai-refresh":
 		m.route = routeAI
 		m.aiLoading = true
-		return m, fetchAISessions(m.repo)
+		m.aiUsageLoading = true
+		return m, tea.Batch(fetchAISessions(m.repo), fetchAIUsage(m.repo))
 	case "fleet-refresh":
 		m.route = routeFleet
 		return m, m.refreshFleet()
@@ -1248,8 +1260,8 @@ func (m *shellModel) renderRoute(w, h int) string {
 }
 
 func (m *shellModel) aiSummary() string {
-	if m.aiLoading {
-		return "reading local session metadata"
+	if m.aiLoading || m.aiUsageLoading {
+		return "reading local activity"
 	}
 	if len(m.aiSessions) == 0 {
 		return "no local sessions"
@@ -1258,27 +1270,39 @@ func (m *shellModel) aiSummary() string {
 }
 
 func (m *shellModel) renderAI(w, h int, spin string) string {
-	if m.aiLoading {
-		return styPending.Render("  " + spin + " reading local AI session metadata")
-	}
-	if len(m.aiSessions) == 0 {
-		return styMuted.Render("no local AI sessions for this project · dots agent starts a fresh Claude session")
-	}
 	measure := measureFor(w)
-	showID := measure >= 76
-	headers := []string{"TOOL", "UPDATED"}
-	if showID {
-		headers = append(headers, "SESSION")
-	}
-	rows := make([][]string, 0, len(m.aiSessions))
-	for _, ref := range m.aiSessions {
-		row := []string{ref.Tool, ref.Updated.Local().Format("2006-01-02 15:04")}
+	lines := []string{}
+	if m.aiLoading {
+		lines = append(lines, styPending.Render("  "+spin+" reading local AI session metadata"))
+	} else if len(m.aiSessions) == 0 {
+		lines = append(lines, styMuted.Render("no local AI sessions for this project · dots agent starts a fresh Claude session"))
+	} else {
+		showID := measure >= 76
+		headers := []string{"TOOL", "UPDATED"}
 		if showID {
-			row = append(row, shortSessionID(ref.ID))
+			headers = append(headers, "SESSION")
 		}
-		rows = append(rows, row)
+		rows := make([][]string, 0, len(m.aiSessions))
+		for _, ref := range m.aiSessions {
+			row := []string{ref.Tool, ref.Updated.Local().Format("2006-01-02 15:04")}
+			if showID {
+				row = append(row, shortSessionID(ref.ID))
+			}
+			rows = append(rows, row)
+		}
+		lines = append(lines, styMuted.Render("Local metadata only · r refresh · dots agent resumes the newest session"), dataTable(headers, rows, -1, measure))
 	}
-	lines := []string{styMuted.Render("Local metadata only · r refresh · dots agent resumes the newest session"), dataTable(headers, rows, -1, measure)}
+	activity := ""
+	if m.aiUsageLoading {
+		activity = styPending.Render("  " + spin + " reading local AI activity")
+	} else {
+		activity = localActivityPanel(m.aiUsage, m.aiTrend, measure)
+	}
+	if h < 22 {
+		lines = append([]string{activity, ""}, lines...)
+	} else {
+		lines = append(lines, "", activity)
+	}
 	if m.aiProject != "" {
 		lines = append(lines, "", styMuted.Render("project: "+truncate(m.aiProject, measure)))
 	}

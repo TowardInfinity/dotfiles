@@ -83,6 +83,8 @@ func main() {
 		os.Exit(runSyncCLI(args[1:]))
 	case "memory":
 		os.Exit(runMemoryCLI(args[1:]))
+	case "claude", "codex", "grok", "cursor":
+		os.Exit(runAIResumeCLI(args[0], args[1:]))
 	case "docs":
 		os.Exit(runDocsCLI(args[1:]))
 	case "edit":
@@ -126,6 +128,10 @@ func usage() {
   dots update          deprecated alias for inbound sync
   dots sync            safely fetch, fast-forward, and apply this machine
   dots memory          shared memory across your AI tools; see dots memory help
+  dots claude          resume Claude's latest session in this project
+  dots codex           resume Codex's latest session in this project
+  dots grok            resume Grok's latest session in this project
+  dots cursor          resume Cursor's latest session in this project
   dots topics          list every page
   dots edit [topic]    open a page in $EDITOR
   dots path            print the repo path

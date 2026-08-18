@@ -34,6 +34,10 @@ dots search copy  # find which page mentions it
 | `dots search <term>` | search every page |
 | `dots topics` | list every page with its summary |
 | `dots memory` | shared memory across your AI tools; see `dots memory help` |
+| `dots claude [args…]` | resume Claude's latest session in this project |
+| `dots codex [args…]` | resume Codex's latest session in this project |
+| `dots grok [args…]` | resume Grok's latest session in this project |
+| `dots cursor [args…]` | resume Cursor's latest session in this project |
 | `dots doctor` | check the tools these configs call, and the configuration itself |
 | `dots doctor --online` | also check the installed `dots` against the latest release |
 | `dots status [--online] [--fleet] [--json]` | report state; never repair |

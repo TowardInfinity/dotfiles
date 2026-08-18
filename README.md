@@ -37,6 +37,7 @@ dots rollout a1      # apply one published revision to one selected machine
 dots sync            # safely pull, resolve, and apply this machine
 dots doctor          # check the tools these configs actually call
 dots memory          # one memory across every AI tool, keyed by project
+dots codex           # resume this project's latest Codex session
 ```
 
 The Go TUI renders Markdown itself with Glamour and has no external UI

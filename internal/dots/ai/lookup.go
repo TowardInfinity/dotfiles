@@ -173,27 +173,46 @@ func codexSessionMeta(path string) (id, cwd string) {
 		return "", ""
 	}
 	defer func() { _ = f.Close() }()
+	var messages int
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	for sc.Scan() {
 		var line struct {
 			Type    string `json:"type"`
 			Payload struct {
-				ID        string `json:"id"`
-				SessionID string `json:"session_id"`
-				CWD       string `json:"cwd"`
+				ID           string `json:"id"`
+				SessionID    string `json:"session_id"`
+				CWD          string `json:"cwd"`
+				ThreadSource string `json:"thread_source"`
+				PayloadType  string `json:"type"`
+				Role         string `json:"role"`
 			} `json:"payload"`
 		}
-		if json.Unmarshal(sc.Bytes(), &line) != nil || line.Type != "session_meta" {
+		if json.Unmarshal(sc.Bytes(), &line) != nil {
 			continue
 		}
-		id = line.Payload.ID
-		if id == "" {
-			id = line.Payload.SessionID
+		switch line.Type {
+		case "session_meta":
+			// Guardian and subagent rollouts are machinery, not a session the
+			// person can sensibly resume. They can be newer than the user's work.
+			if line.Payload.ThreadSource == "subagent" {
+				return "", ""
+			}
+			id = line.Payload.ID
+			if id == "" {
+				id = line.Payload.SessionID
+			}
+			cwd = line.Payload.CWD
+		case "response_item":
+			if line.Payload.PayloadType == "message" && (line.Payload.Role == "user" || line.Payload.Role == "assistant") {
+				messages++
+			}
 		}
-		return id, line.Payload.CWD
 	}
-	return "", ""
+	if id == "" || messages == 0 {
+		return "", ""
+	}
+	return id, cwd
 }
 
 func grokSessions(project memory.ProjectKey) []SessionRef {

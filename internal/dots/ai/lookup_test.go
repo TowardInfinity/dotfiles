@@ -21,14 +21,20 @@ func TestRecentSessionsAndBestToolDoNotNeedMemoryIndex(t *testing.T) {
 	writeLookupFile(t, filepath.Join(home, ".claude", "projects", "y", "claude-1.jsonl"),
 		`{"sessionId":"claude-1","cwd":"/work/almanac"}`+"\n", now.Add(-4*time.Hour))
 	writeLookupFile(t, filepath.Join(home, ".codex", "sessions", "2026", "08", "18", "rollout-codex.jsonl"),
-		`{"type":"session_meta","payload":{"id":"codex-1","cwd":"/work/almanac"}}`+"\n", now.Add(-time.Hour))
+		`{"type":"session_meta","payload":{"id":"codex-1","cwd":"/work/almanac"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user"}}`+"\n", now.Add(-time.Hour))
+	// A newer subagent rollout must never win BestTool or be offered to resume.
+	writeLookupFile(t, filepath.Join(home, ".codex", "sessions", "2026", "08", "18", "rollout-subagent.jsonl"),
+		`{"type":"session_meta","payload":{"id":"subagent-newest","cwd":"/work/almanac","thread_source":"subagent"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"assistant"}}`+"\n", now)
 	writeLookupFile(t, filepath.Join(home, ".grok", "sessions", "x", "grok-1", "summary.json"),
 		`{"info":{"id":"grok-1","cwd":"/work/almanac"},"updated_at":"2026-08-18T10:00:00Z"}`+"\n", now.Add(-2*time.Hour))
 	writeLookupFile(t, filepath.Join(home, ".cursor", "chats", "x", "cursor-1", "meta.json"),
 		`{"cwd":"/work/almanac","updatedAtMs":1787040000000}`+"\n", now.Add(-4*time.Hour))
 	// A newer session for another project must never affect this project.
 	writeLookupFile(t, filepath.Join(home, ".codex", "sessions", "2026", "08", "18", "rollout-other.jsonl"),
-		`{"type":"session_meta","payload":{"id":"other","cwd":"/work/other"}}`+"\n", now)
+		`{"type":"session_meta","payload":{"id":"other","cwd":"/work/other"}}`+"\n"+
+			`{"type":"response_item","payload":{"type":"message","role":"user"}}`+"\n", now)
 
 	got := RecentSessions(project)
 	wantTools := []string{"codex", "grok", "claude", "cursor"}

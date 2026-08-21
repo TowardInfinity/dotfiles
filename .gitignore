@@ -39,3 +39,6 @@ bin/dots-bin
 # ignored-by-nobody .pyc gets offered up for commit on the next sync.
 __pycache__/
 *.py[cod]
+
+# Working planning notes — only the condensed versions in docs/ are tracked.
+/docs/plans/

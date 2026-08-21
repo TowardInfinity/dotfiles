@@ -1,0 +1,32 @@
+{
+  "defaultModel": "stealth/ox-alpha",
+  "defaultProvider": "openrouter",
+  "lastChangelogVersion": "0.84.2",
+  "theme": "dark",
+  "packages": [
+    "npm:@ollama/pi-web-search",
+    "npm:pi-theme-synthwave-84",
+    "npm:@spences10/pi-themes",
+    "npm:@javiportillo/pi-hackerman",
+    "npm:@narumitw/pi-statusline",
+    "npm:pi-subagents",
+    "npm:pi-mcp-adapter",
+    "npm:pi-lens",
+    "npm:pi-hermes-memory",
+    {
+      "source": "git:github.com/mitsuhiko/agent-stuff",
+      "extensions": [
+        "extensions/*.ts",
+        "!extensions/subagent.ts"
+      ]
+    },
+    "npm:pi-crew",
+    "npm:pi-chrome",
+    "npm:@aliou/pi-guardrails",
+    "npm:pi-background-tasks",
+    "npm:pi-context-prune",
+    "npm:@ravan08/pi-langfuse",
+    "npm:pi-system-theme"
+  ],
+  "defaultThinkingLevel": "high"
+}

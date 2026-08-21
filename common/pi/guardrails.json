@@ -1,0 +1,42 @@
+{
+  "$schema": "https://unpkg.com/@aliou/pi-guardrails@0.17.0/schema.json",
+  "applyBuiltinDefaults": true,
+  "version": "0.17.0",
+  "onboarding": {
+    "completed": true,
+    "completedAt": "2026-08-21T16:21:57.582Z",
+    "version": "0.17.0"
+  },
+  "features": {
+    "pathAccess": true
+  },
+  "pathAccess": {
+    "mode": "ask",
+    "allowedPaths": [
+      {
+        "kind": "file",
+        "path": "/dev/null"
+      },
+      {
+        "kind": "directory",
+        "path": "~/.pi/agent/npm/node_modules"
+      },
+      {
+        "kind": "directory",
+        "path": "~/.pi/agent/git"
+      },
+      {
+        "kind": "directory",
+        "path": "~/Library/pnpm/global"
+      },
+      {
+        "kind": "directory",
+        "path": "~/Library/pnpm/store"
+      },
+      {
+        "kind": "directory",
+        "path": "/opt/homebrew/lib/node_modules"
+      }
+    ]
+  }
+}

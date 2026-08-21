@@ -338,6 +338,21 @@ link common/claude/delegation.md "$HOME/.claude/delegation.md"
 link common/claude/statusline.sh "$HOME/.claude/statusline.sh"
 link common/claude/session-start.sh "$HOME/.claude/session-start.sh"
 
+# ── pi coding agent ───────────────────────────────────────────
+# Same arrangement as claude's settings.json: pi writes back through the link
+# (lastChangelogVersion, `pi install`/`remove` package changes), and those
+# writes land in the repo — commit them from whichever box made the change.
+# The `packages` list in settings.json is the source of truth: pi reconciles
+# missing packages into ~/.pi/agent/npm and ~/.pi/agent/git on startup, so
+# unlike TPM there is no fetch step here. Never tracked: auth.json (secrets),
+# trust.json (absolute per-machine paths), sessions/state/tmp, memory dirs,
+# npm/ + git/ (caches), themes/ (written by the pi-crew package).
+link common/pi/settings.json "$HOME/.pi/agent/settings.json"
+link common/pi/models.json "$HOME/.pi/agent/models.json"
+# Lives in extensions/ but is config, not code — the guardrails extension
+# reads it; only its own onboarding timestamp gets rewritten through the link.
+link common/pi/guardrails.json "$HOME/.pi/agent/extensions/guardrails.json"
+
 # ── Codex CLI ─────────────────────────────────────────────────
 # ~/.codex/config.toml cannot be a symlink: Codex writes machine-specific
 # [projects."/abs/path"] trust blocks and [plugins.*] entries into it, so sharing

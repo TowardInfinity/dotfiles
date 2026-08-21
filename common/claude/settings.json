@@ -6,6 +6,7 @@
     "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1"
   },
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Bash(npm run typecheck *)",
       "Bash(npm run test *)",

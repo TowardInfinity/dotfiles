@@ -266,3 +266,6 @@ autoload -Uz compinit && compinit -C
 
 # bun completions
 [ -s "/Users/towardinfinity/.bun/_bun" ] && source "/Users/towardinfinity/.bun/_bun"
+
+# Added by cua-driver-rs installer — see https://github.com/trycua/cua
+export PATH="/Users/towardinfinity/.local/bin:$PATH"

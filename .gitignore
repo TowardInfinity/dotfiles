@@ -42,3 +42,8 @@ __pycache__/
 
 # Working planning notes — only the condensed versions in docs/ are tracked.
 /docs/plans/
+
+# pi / pi-crew runtime state (tasks, teams, todos, goal state) — regenerated
+# per machine, nothing here belongs in version control.
+/.pi/
+/.crew/
